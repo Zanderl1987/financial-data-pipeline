@@ -4,29 +4,33 @@ import datetime
 import time
 import os
 import json
+import glob
+import zipfile
+import tempfile
 import argparse
+import pyarrow.parquet as pq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# SEC requires a User-Agent header identifying your app and contact email.
-# Set EDGAR_USER_AGENT in your .env, e.g. "MyApp you@example.com"
 USER_AGENT = os.environ.get("EDGAR_USER_AGENT", "FinancialDataPipeline zander.s.luke@gmail.com")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "")
 
 EDGAR_BASE = "https://data.sec.gov"
 COMPANY_TICKERS_URL = f"{EDGAR_BASE}/files/company_tickers.json"
+COMPANYFACTS_ZIP_URL = f"{EDGAR_BASE}/archives/edgar/daily-index/xbrl/companyfacts.zip"
 
 OUTPUT_DIR = os.path.join("storage", "raw", "fundamentals")
-CIK_CACHE_PATH = os.path.join("storage", "raw", "fundamentals", "cik_map.json")
+CIK_CACHE_PATH = os.path.join(OUTPUT_DIR, "cik_map.json")
 
-# Safe target: 8 req/sec (hard limit is 10 req/sec; violations trigger ~10min IP block)
+# Safe target: 8 req/sec (hard limit is 10 req/sec; violations trigger ~10 min IP block)
 REQUEST_INTERVAL = 0.125
-
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 30
 
-# Concepts to extract. Each entry is a list of candidate XBRL names tried in order —
-# companies use different concept names for the same metric.
+# Concepts to extract. Candidate XBRL names are tried in order —
+# companies use different names for the same metric.
 CONCEPTS = {
     "revenue": [
         "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -34,15 +38,15 @@ CONCEPTS = {
         "SalesRevenueNet",
         "SalesRevenueGoodsNet",
     ],
-    "net_income": ["NetIncomeLoss", "ProfitLoss"],
-    "eps_diluted": ["EarningsPerShareDiluted"],
-    "eps_basic": ["EarningsPerShareBasic"],
-    "gross_profit": ["GrossProfit"],
-    "operating_income": ["OperatingIncomeLoss"],
-    "total_assets": ["Assets"],
-    "total_liabilities": ["Liabilities"],
+    "net_income":          ["NetIncomeLoss", "ProfitLoss"],
+    "eps_diluted":         ["EarningsPerShareDiluted"],
+    "eps_basic":           ["EarningsPerShareBasic"],
+    "gross_profit":        ["GrossProfit"],
+    "operating_income":    ["OperatingIncomeLoss"],
+    "total_assets":        ["Assets"],
+    "total_liabilities":   ["Liabilities"],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities"],
-    "shares_outstanding": ["CommonStockSharesOutstanding", "CommonStockSharesIssued"],
+    "shares_outstanding":  ["CommonStockSharesOutstanding", "CommonStockSharesIssued"],
 }
 
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
@@ -52,10 +56,10 @@ HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
-def get_with_backoff(url):
+def get_with_backoff(url, stream=False, timeout=30):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            r = requests.get(url, headers=HEADERS, timeout=30)
+            r = requests.get(url, headers=HEADERS, stream=stream, timeout=timeout)
             if r.status_code == 200:
                 return r
             if r.status_code == 429:
@@ -73,11 +77,10 @@ def get_with_backoff(url):
 
 
 # ---------------------------------------------------------------------------
-# CIK mapping
+# CIK mapping + DJI symbol list (used in DJI mode)
 # ---------------------------------------------------------------------------
 
 def load_cik_map(force_refresh=False):
-    """Returns {ticker: cik_padded_10digits}. Caches to disk for reuse."""
     if not force_refresh and os.path.exists(CIK_CACHE_PATH):
         with open(CIK_CACHE_PATH) as f:
             cached = json.load(f)
@@ -90,10 +93,7 @@ def load_cik_map(force_refresh=False):
         raise RuntimeError("Failed to fetch company_tickers.json from EDGAR.")
 
     raw = r.json()
-    cik_map = {
-        v["ticker"].upper(): str(v["cik_str"]).zfill(10)
-        for v in raw.values()
-    }
+    cik_map = {v["ticker"].upper(): str(v["cik_str"]).zfill(10) for v in raw.values()}
     os.makedirs(os.path.dirname(CIK_CACHE_PATH), exist_ok=True)
     with open(CIK_CACHE_PATH, "w") as f:
         json.dump(cik_map, f)
@@ -120,19 +120,18 @@ def get_dji_symbols():
 
 
 # ---------------------------------------------------------------------------
-# XBRL extraction
+# XBRL extraction — shared between DJI and full-market modes
 # ---------------------------------------------------------------------------
 
 def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
     """
-    Try each candidate concept name in order; return a list of fact dicts
-    for the first one that has data. Returns [] if none found.
+    Try each candidate XBRL concept in order; return fact rows for the first
+    one that has data. Returns [] if none found.
     """
     for concept in candidate_concepts:
         node = facts_us_gaap.get(concept)
         if not node:
             continue
-        # Units can be USD, shares, USD/shares, etc. — take the first unit bucket.
         units = node.get("units", {})
         for unit_key, entries in units.items():
             if not entries:
@@ -140,90 +139,327 @@ def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
             rows = []
             for e in entries:
                 rows.append({
-                    "metric": metric_name,
-                    "concept": concept,
-                    "unit": unit_key,
-                    "value": e.get("val"),
-                    "period_end": e.get("end"),
-                    "fiscal_year": e.get("fy"),
+                    "metric":        metric_name,
+                    "concept":       concept,
+                    "unit":          unit_key,
+                    "value":         e.get("val"),
+                    "period_end":    e.get("end"),
+                    "fiscal_year":   e.get("fy"),
                     "fiscal_period": e.get("fp"),
-                    "form": e.get("form"),
-                    "filed": e.get("filed"),
-                    "frame": e.get("frame"),
+                    "form":          e.get("form"),
+                    "filed":         e.get("filed"),
+                    "frame":         e.get("frame"),
                 })
-            return rows  # Return first unit bucket with data
+            return rows
     return []
 
+
+def extract_company(data, symbol=""):
+    """
+    Extract all configured metrics from a companyfacts JSON dict.
+    Returns (annual_rows, quarterly_rows) as lists of dicts.
+    Works for both HTTP-fetched and ZIP-sourced data.
+    """
+    entity_name = data.get("entityName", symbol)
+    cik = str(data.get("cik", "")).zfill(10)
+    facts_us_gaap = data.get("facts", {}).get("us-gaap", {})
+    if not facts_us_gaap:
+        return [], []
+
+    fetch_ts = datetime.datetime.utcnow().isoformat()
+    annual, quarterly = [], []
+
+    for metric_name, candidates in CONCEPTS.items():
+        for row in extract_concept(facts_us_gaap, metric_name, candidates):
+            enriched = {
+                **row,
+                "symbol":      symbol,
+                "entity_name": entity_name,
+                "cik":         cik,
+                "fetched_at":  fetch_ts,
+            }
+            form = enriched.get("form", "")
+            if form == "10-K":
+                annual.append(enriched)
+            elif form == "10-Q":
+                quarterly.append(enriched)
+
+    return annual, quarterly
+
+
+# ---------------------------------------------------------------------------
+# DJI mode — per-company HTTP requests
+# ---------------------------------------------------------------------------
 
 def fetch_company_facts(cik_padded):
     url = f"{EDGAR_BASE}/api/xbrl/companyfacts/CIK{cik_padded}.json"
     r = get_with_backoff(url)
-    if not r:
-        return None
-    return r.json()
+    return r.json() if r else None
 
 
-def process_company(symbol, cik_padded, n_quarters=8):
-    """
-    Fetch all XBRL facts for a company and extract the configured metrics.
-    Returns (annual_rows, quarterly_rows).
-    """
+def process_company_dji(symbol, cik_padded, n_quarters=8):
     data = fetch_company_facts(cik_padded)
     if not data:
         return None, None
 
-    entity_name = data.get("entityName", symbol)
-    facts_us_gaap = data.get("facts", {}).get("us-gaap", {})
-
-    all_rows = []
-    for metric_name, candidates in CONCEPTS.items():
-        rows = extract_concept(facts_us_gaap, metric_name, candidates)
-        all_rows.extend(rows)
-
-    if not all_rows:
-        print(f"  No XBRL data found for {symbol}.")
+    annual_rows, quarterly_rows = extract_company(data, symbol=symbol)
+    if not annual_rows and not quarterly_rows:
+        print(f"  No XBRL data for {symbol}.")
         return None, None
 
-    df = pd.DataFrame(all_rows)
-    df["symbol"] = symbol
-    df["entity_name"] = entity_name
-    df["cik"] = cik_padded
-    df["fetched_at"] = datetime.datetime.utcnow().isoformat()
+    def to_df(rows):
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        return df
+
+    annual_df = to_df(annual_rows)
+    quarterly_df = to_df(quarterly_rows)
+
+    if quarterly_df is not None and n_quarters:
+        quarterly_df = (
+            quarterly_df.sort_values("period_end", ascending=False)
+            .groupby("metric")
+            .head(n_quarters)
+        )
+
+    return annual_df, quarterly_df
+
+
+# ---------------------------------------------------------------------------
+# Full-market mode — stream companyfacts.zip
+# ---------------------------------------------------------------------------
+
+def download_companyfacts_zip():
+    """Stream companyfacts.zip to a temp file. Returns path to temp file."""
+    print(f"Downloading companyfacts.zip from EDGAR (~7 GB)...")
+    print("  This may take 10–30 minutes depending on your connection speed.")
+
+    tmp_path = os.path.join(tempfile.gettempdir(), "companyfacts_edgar.zip")
+    r = get_with_backoff(COMPANYFACTS_ZIP_URL, stream=True, timeout=600)
+    if not r:
+        raise RuntimeError("Failed to initiate download of companyfacts.zip.")
+
+    total_bytes = int(r.headers.get("content-length", 0))
+    downloaded = 0
+    chunk_size = 4 * 1024 * 1024  # 4 MB chunks
+
+    with open(tmp_path, "wb") as f:
+        for chunk in r.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_bytes:
+                    pct = downloaded / total_bytes * 100
+                    mb = downloaded / 1024 / 1024
+                    total_mb = total_bytes / 1024 / 1024
+                    print(f"  {mb:,.0f} / {total_mb:,.0f} MB  ({pct:.1f}%)  ", end="\r")
+
+    print(f"\n  Download complete: {downloaded / 1024 / 1024:,.0f} MB → {tmp_path}")
+    return tmp_path
+
+
+def stream_zip_to_parquet(zip_path, annual_out, quarterly_out, batch_size=1000):
+    """
+    Stream all company JSON files from the ZIP, write in batches to keep
+    memory bounded (~batch_size companies in RAM at a time), then merge
+    batch parquets with pyarrow (one batch at a time — no full-load concat).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_annual, batch_quarterly = [], []
+        batch_num = 0
+        failed = 0
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            entries = sorted(n for n in zf.namelist() if n.endswith(".json"))
+            total = len(entries)
+            print(f"  {total:,} company files in ZIP")
+
+            for i, name in enumerate(entries, 1):
+                try:
+                    with zf.open(name) as f:
+                        data = json.load(f)
+                    a_rows, q_rows = extract_company(data)
+                    batch_annual.extend(a_rows)
+                    batch_quarterly.extend(q_rows)
+                except Exception:
+                    failed += 1
+
+                if i % batch_size == 0 or i == total:
+                    batch_num += 1
+                    _flush_batch(batch_annual, tmpdir, f"annual_{batch_num:05d}.parquet")
+                    _flush_batch(batch_quarterly, tmpdir, f"quarterly_{batch_num:05d}.parquet")
+                    batch_annual.clear()
+                    batch_quarterly.clear()
+                    print(f"  [{i:,}/{total:,}] {batch_num} batches written    ", end="\r")
+
+        print(f"\n  Processed {total - failed:,}/{total:,} companies. Failed: {failed:,}")
+        print("  Merging batch files...")
+
+        annual_parts = sorted(glob.glob(os.path.join(tmpdir, "annual_*.parquet")))
+        quarterly_parts = sorted(glob.glob(os.path.join(tmpdir, "quarterly_*.parquet")))
+
+        row_counts = {}
+        row_counts["annual"] = _merge_parquets(annual_parts, annual_out)
+        row_counts["quarterly"] = _merge_parquets(quarterly_parts, quarterly_out)
+
+    return row_counts
+
+
+def _flush_batch(rows, tmpdir, filename):
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
     df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df.to_parquet(os.path.join(tmpdir, filename), index=False)
 
-    # Annual: latest value per metric from 10-K filings
-    annual = (
-        df[df["form"] == "10-K"]
-        .sort_values("period_end", ascending=False)
-        .drop_duplicates(subset=["metric"])
-        .copy()
-    )
 
-    # Quarterly: last n_quarters per metric from 10-Q filings
-    quarterly = (
-        df[df["form"] == "10-Q"]
-        .sort_values("period_end", ascending=False)
-        .groupby("metric")
-        .head(n_quarters)
-        .copy()
-    )
+def _merge_parquets(parts, output_path):
+    """Merge sorted parquet part files into one file via pyarrow (streaming, not in-memory concat)."""
+    if not parts:
+        return 0
 
-    return annual, quarterly
+    first = pq.read_table(parts[0])
+    schema = first.schema
+    total_rows = 0
+
+    with pq.ParquetWriter(output_path, schema, compression="snappy") as writer:
+        writer.write_table(first)
+        total_rows += len(first)
+        del first
+
+        for path in parts[1:]:
+            table = pq.read_table(path)
+            writer.write_table(table.cast(schema))
+            total_rows += len(table)
+            del table
+
+    return total_rows
+
+
+# ---------------------------------------------------------------------------
+# Hugging Face Hub helpers
+# ---------------------------------------------------------------------------
+
+def hf_push(local_path, repo_id, filename_in_repo):
+    """Upload a parquet file to a Hugging Face dataset repo (creates repo if needed)."""
+    if not HF_TOKEN:
+        print("  HF_TOKEN not set — skipping upload. Add it to .env to enable.")
+        return
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        print("  huggingface_hub not installed. Run: pip install huggingface_hub")
+        return
+
+    api = HfApi()
+    try:
+        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
+        print(f"  Uploading {os.path.basename(local_path)} → {repo_id}/{filename_in_repo} ...")
+        api.upload_file(
+            path_or_fileobj=local_path,
+            path_in_repo=filename_in_repo,
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=HF_TOKEN,
+        )
+        print(f"  → https://huggingface.co/datasets/{repo_id}")
+    except Exception as e:
+        print(f"  HF upload failed: {e}")
+
+
+def hf_pull(repo_id, filename_in_repo, dest_dir):
+    """
+    Download a file from HF Hub into dest_dir. Returns local path or None.
+    Uses HF's built-in cache — won't re-download if the file hasn't changed.
+    """
+    if not HF_TOKEN or not repo_id:
+        return None
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename_in_repo,
+            repo_type="dataset",
+            token=HF_TOKEN,
+            local_dir=dest_dir,
+            local_dir_use_symlinks=False,
+        )
+        return path
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main(n_quarters=8, refresh_cik=False):
+def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_hf_cache=True):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    today = datetime.datetime.utcnow().strftime("%Y%m%d")
+    repo_id = hf_repo or HF_DATASET_REPO
 
+    # ------------------------------------------------------------------ #
+    # FULL-MARKET MODE                                                     #
+    # ------------------------------------------------------------------ #
+    if full_market:
+        print("=== FULL MARKET MODE (EDGAR companyfacts.zip — ~13,000 companies) ===")
+
+        annual_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_annual_{today}.parquet")
+        quarterly_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_quarterly_{today}.parquet")
+
+        # Check HF Hub first — skip the 7 GB download if fresh data is already there
+        if use_hf_cache and repo_id:
+            print(f"Checking HF Hub for cached data ({repo_id})...")
+            a_path = hf_pull(repo_id, "fundamentals_annual_latest.parquet", OUTPUT_DIR)
+            q_path = hf_pull(repo_id, "fundamentals_quarterly_latest.parquet", OUTPUT_DIR)
+            if a_path and q_path:
+                a_rows = pq.read_metadata(a_path).num_rows
+                q_rows = pq.read_metadata(q_path).num_rows
+                print(f"  Cache hit — using HF Hub data.")
+                print(f"  Annual:    {a_path} ({a_rows:,} rows)")
+                print(f"  Quarterly: {q_path} ({q_rows:,} rows)")
+                print("  Run with --no-cache to force a fresh download and reprocess.")
+                return
+
+        # Download and stream-process the ZIP
+        zip_path = None
+        try:
+            zip_path = download_companyfacts_zip()
+            print("\nStreaming ZIP → parquet (batched)...")
+            counts = stream_zip_to_parquet(zip_path, annual_out, quarterly_out)
+        finally:
+            if zip_path and os.path.exists(zip_path):
+                os.unlink(zip_path)
+                print("Cleaned up temp ZIP.")
+
+        if os.path.exists(annual_out):
+            print(f"\nAnnual    → {annual_out} ({counts['annual']:,} rows)")
+        if os.path.exists(quarterly_out):
+            print(f"Quarterly → {quarterly_out} ({counts['quarterly']:,} rows)")
+
+        # Push to Hugging Face Hub
+        if repo_id:
+            print("\nUploading to Hugging Face Hub...")
+            if os.path.exists(annual_out):
+                hf_push(annual_out, repo_id, "fundamentals_annual_latest.parquet")
+            if os.path.exists(quarterly_out):
+                hf_push(quarterly_out, repo_id, "fundamentals_quarterly_latest.parquet")
+
+        print("\n--- COMPLETE ---")
+        return
+
+    # ------------------------------------------------------------------ #
+    # DJI MODE — 30 components via per-company EDGAR API                  #
+    # ------------------------------------------------------------------ #
+    print("=== DJI MODE (30 components via EDGAR API) ===")
     cik_map = load_cik_map(force_refresh=refresh_cik)
     symbols = get_dji_symbols()
 
-    annual_frames = []
-    quarterly_frames = []
-    failed = []
+    annual_frames, quarterly_frames, failed = [], [], []
 
     for i, symbol in enumerate(symbols, 1):
         cik = cik_map.get(symbol.upper())
@@ -233,7 +469,7 @@ def main(n_quarters=8, refresh_cik=False):
             continue
 
         print(f"[{i}/{len(symbols)}] {symbol} (CIK {cik})...")
-        annual, quarterly = process_company(symbol, cik, n_quarters=n_quarters)
+        annual, quarterly = process_company_dji(symbol, cik, n_quarters=n_quarters)
         if annual is not None:
             annual_frames.append(annual)
         if quarterly is not None:
@@ -242,8 +478,6 @@ def main(n_quarters=8, refresh_cik=False):
             failed.append(symbol)
 
         time.sleep(REQUEST_INTERVAL)
-
-    today = datetime.datetime.utcnow().strftime("%Y%m%d")
 
     if annual_frames:
         annual_df = pd.concat(annual_frames, ignore_index=True)
@@ -267,11 +501,33 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SEC EDGAR fundamentals pipeline")
     parser.add_argument(
         "--quarters", type=int, default=8,
-        help="Number of recent quarters to retain per metric (default: 8 = 2 years).",
+        help="Recent quarters to retain per metric in DJI mode (default: 8 = 2 years).",
     )
     parser.add_argument(
         "--refresh-cik", action="store_true",
         help="Force re-download of the ticker→CIK map even if cached.",
     )
+    parser.add_argument(
+        "--full-market", action="store_true",
+        help=(
+            "Download all ~13,000 public companies via companyfacts.zip (~7 GB download). "
+            "Checks HF Hub cache first. Requires HF_TOKEN + HF_DATASET_REPO in .env."
+        ),
+    )
+    parser.add_argument(
+        "--hf-repo", type=str, default=None,
+        help="Hugging Face dataset repo ID (e.g. username/financial-fundamentals). "
+             "Falls back to HF_DATASET_REPO env var.",
+    )
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help="Force re-download from EDGAR even if HF Hub cache exists.",
+    )
     args = parser.parse_args()
-    main(n_quarters=args.quarters, refresh_cik=args.refresh_cik)
+    main(
+        n_quarters=args.quarters,
+        refresh_cik=args.refresh_cik,
+        full_market=args.full_market,
+        hf_repo=args.hf_repo,
+        use_hf_cache=not args.no_cache,
+    )
