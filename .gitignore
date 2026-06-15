@@ -8,5 +8,6 @@ __pycache__/
 
 # Storage (data files — not tracked in git, but keep directory structure)
 storage/**/*.parquet
-storage/**/*.json
 storage/**/*.csv
+# CIK map cache is regenerable — exclude it
+storage/**/cik_map.json
