@@ -19,7 +19,7 @@ HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "")
 
 EDGAR_BASE = "https://data.sec.gov"
 COMPANY_TICKERS_URL = f"{EDGAR_BASE}/files/company_tickers.json"
-COMPANYFACTS_ZIP_URL = f"{EDGAR_BASE}/archives/edgar/daily-index/xbrl/companyfacts.zip"
+COMPANYFACTS_ZIP_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
 
 OUTPUT_DIR = os.path.join("storage", "raw", "fundamentals")
 CIK_CACHE_PATH = os.path.join(OUTPUT_DIR, "cik_map.json")
@@ -87,7 +87,7 @@ def load_cik_map(force_refresh=False):
         print(f"Loaded CIK map from cache ({len(cached)} tickers).")
         return cached
 
-    print("Fetching ticker→CIK map from EDGAR...")
+    print("Fetching ticker->CIK map from EDGAR...")
     r = get_with_backoff(COMPANY_TICKERS_URL)
     if not r:
         raise RuntimeError("Failed to fetch company_tickers.json from EDGAR.")
@@ -233,11 +233,16 @@ def process_company_dji(symbol, cik_padded, n_quarters=8):
 # ---------------------------------------------------------------------------
 
 def download_companyfacts_zip():
-    """Stream companyfacts.zip to a temp file. Returns path to temp file."""
-    print(f"Downloading companyfacts.zip from EDGAR (~7 GB)...")
-    print("  This may take 10–30 minutes depending on your connection speed.")
-
+    """Stream companyfacts.zip to a temp file. Reuses existing temp if already downloaded."""
     tmp_path = os.path.join(tempfile.gettempdir(), "companyfacts_edgar.zip")
+
+    if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 100 * 1024 * 1024:
+        print(f"Reusing existing temp file ({os.path.getsize(tmp_path) / 1024 / 1024:,.0f} MB): {tmp_path}")
+        return tmp_path
+
+    print("Downloading companyfacts.zip from EDGAR (~1 GB, ~15,000 companies)...")
+    print("  This may take 1-5 minutes depending on your connection speed.")
+
     r = get_with_backoff(COMPANYFACTS_ZIP_URL, stream=True, timeout=600)
     if not r:
         raise RuntimeError("Failed to initiate download of companyfacts.zip.")
@@ -257,7 +262,7 @@ def download_companyfacts_zip():
                     total_mb = total_bytes / 1024 / 1024
                     print(f"  {mb:,.0f} / {total_mb:,.0f} MB  ({pct:.1f}%)  ", end="\r")
 
-    print(f"\n  Download complete: {downloaded / 1024 / 1024:,.0f} MB → {tmp_path}")
+    print(f"\n  Download complete: {downloaded / 1024 / 1024:,.0f} MB -> {tmp_path}")
     return tmp_path
 
 
@@ -358,7 +363,7 @@ def hf_push(local_path, repo_id, filename_in_repo):
     api = HfApi()
     try:
         api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
-        print(f"  Uploading {os.path.basename(local_path)} → {repo_id}/{filename_in_repo} ...")
+        print(f"  Uploading {os.path.basename(local_path)} -> {repo_id}/{filename_in_repo} ...")
         api.upload_file(
             path_or_fileobj=local_path,
             path_in_repo=filename_in_repo,
@@ -366,7 +371,7 @@ def hf_push(local_path, repo_id, filename_in_repo):
             repo_type="dataset",
             token=HF_TOKEN,
         )
-        print(f"  → https://huggingface.co/datasets/{repo_id}")
+        print(f"  -> https://huggingface.co/datasets/{repo_id}")
     except Exception as e:
         print(f"  HF upload failed: {e}")
 
@@ -406,7 +411,7 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
     # FULL-MARKET MODE                                                     #
     # ------------------------------------------------------------------ #
     if full_market:
-        print("=== FULL MARKET MODE (EDGAR companyfacts.zip — ~13,000 companies) ===")
+        print("=== FULL MARKET MODE (EDGAR companyfacts.zip — ~15,000 companies) ===")
 
         annual_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_annual_{today}.parquet")
         quarterly_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_quarterly_{today}.parquet")
@@ -429,7 +434,7 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         zip_path = None
         try:
             zip_path = download_companyfacts_zip()
-            print("\nStreaming ZIP → parquet (batched)...")
+            print("\nStreaming ZIP -> parquet (batched)...")
             counts = stream_zip_to_parquet(zip_path, annual_out, quarterly_out)
         finally:
             if zip_path and os.path.exists(zip_path):
@@ -437,9 +442,9 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
                 print("Cleaned up temp ZIP.")
 
         if os.path.exists(annual_out):
-            print(f"\nAnnual    → {annual_out} ({counts['annual']:,} rows)")
+            print(f"\nAnnual    -> {annual_out} ({counts['annual']:,} rows)")
         if os.path.exists(quarterly_out):
-            print(f"Quarterly → {quarterly_out} ({counts['quarterly']:,} rows)")
+            print(f"Quarterly -> {quarterly_out} ({counts['quarterly']:,} rows)")
 
         # Push to Hugging Face Hub
         if repo_id:
@@ -483,13 +488,13 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         annual_df = pd.concat(annual_frames, ignore_index=True)
         path = os.path.join(OUTPUT_DIR, f"fundamentals_annual_{today}.parquet")
         annual_df.to_parquet(path, index=False)
-        print(f"\nAnnual   → {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
+        print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
         path = os.path.join(OUTPUT_DIR, f"fundamentals_quarterly_{today}.parquet")
         quarterly_df.to_parquet(path, index=False)
-        print(f"Quarterly → {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
+        print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
 
     if failed:
         print(f"\nFailed/skipped ({len(failed)}): {', '.join(failed)}")
@@ -505,12 +510,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--refresh-cik", action="store_true",
-        help="Force re-download of the ticker→CIK map even if cached.",
+        help="Force re-download of the ticker->CIK map even if cached.",
     )
     parser.add_argument(
         "--full-market", action="store_true",
         help=(
-            "Download all ~13,000 public companies via companyfacts.zip (~7 GB download). "
+            "Download all ~15,000 public companies via companyfacts.zip (~1 GB download). "
             "Checks HF Hub cache first. Requires HF_TOKEN + HF_DATASET_REPO in .env."
         ),
     )
