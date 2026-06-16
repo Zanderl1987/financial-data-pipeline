@@ -11,3 +11,7 @@ storage/**/*.parquet
 storage/**/*.csv
 # CIK map cache is regenerable — exclude it
 storage/**/cik_map.json
+
+# cot_reports library dumps temp files to working directory
+Com95_16.txt
+annualof.txt
