@@ -134,12 +134,17 @@ def main():
     all_metrics = []
     failed = []
 
+    all_chains = []
     for i, symbol in enumerate(symbols, 1):
         print(f"[{i}/{len(symbols)}]", end=" ")
-        _, metrics = capture_daily_metrics(symbol, client)
+        chain_df, metrics = capture_daily_metrics(symbol, client)
         if metrics:
             all_metrics.append(metrics)
-        else:
+        if chain_df is not None and not chain_df.empty:
+            chain_df["date"] = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+            chain_df["fetched_at"] = datetime.datetime.utcnow().isoformat()
+            all_chains.append(chain_df)
+        if not metrics:
             failed.append(symbol)
         time.sleep(REQUEST_INTERVAL)
 
@@ -147,10 +152,17 @@ def main():
         print("No metrics collected.")
         return
 
-    summary_df = pd.DataFrame(all_metrics)
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
+
+    summary_df = pd.DataFrame(all_metrics)
     filename = os.path.join(OUTPUT_DIR, f"options_metrics_{today}.parquet")
     summary_df.to_parquet(filename, index=False)
+
+    if all_chains:
+        raw_df = pd.concat(all_chains, ignore_index=True)
+        raw_path = os.path.join(OUTPUT_DIR, f"options_chain_raw_{today}.parquet")
+        raw_df.to_parquet(raw_path, index=False)
+        print(f"Saved raw chains  ({len(raw_df):,} contracts) → {raw_path}")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved metrics for {len(all_metrics)} symbols → {filename}")
