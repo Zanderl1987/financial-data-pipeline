@@ -271,8 +271,15 @@ def fetch_contract_history(contract_symbol: str, range_str: str) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def fetch_all_histories(contracts: list[dict], symbol: str, range_str: str, today: str) -> None:
+def fetch_all_histories(contracts: list[dict], symbol: str, range_str: str, today: str,
+                        min_oi: int = 0) -> None:
     os.makedirs(HISTORY_DIR, exist_ok=True)
+
+    if min_oi > 0:
+        before = len(contracts)
+        contracts = [c for c in contracts if (c.get("open_interest") or 0) >= min_oi]
+        print(f"  --min-oi {min_oi}: {before:,} -> {len(contracts):,} contracts after filter.")
+
     total = len(contracts)
     all_frames = []
     hits = 0
@@ -341,6 +348,13 @@ def main():
         "--skip-history", action="store_true",
         help="Phase 1 only: fetch chain and save contract list; skip historical OHLCV.",
     )
+    p.add_argument(
+        "--min-oi", dest="min_oi", type=int, default=0,
+        help=(
+            "Skip history fetch for contracts with open interest below this threshold. "
+            "Useful for large chains (e.g. --min-oi 100 cuts ~30%% of NVDA contracts). Default: 0 (fetch all)."
+        ),
+    )
     args = p.parse_args()
 
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
@@ -350,7 +364,8 @@ def main():
         df = pd.read_csv(args.resume)
         for symbol, grp in df.groupby("underlying"):
             print(f"\n{'='*60}\n[{symbol}] {len(grp):,} contracts")
-            fetch_all_histories(grp.to_dict("records"), symbol, args.range_str, today)
+            fetch_all_histories(grp.to_dict("records"), symbol, args.range_str, today,
+                                min_oi=args.min_oi)
         return
 
     # Phase 1 needs a session; Phase 2 (history) does not
@@ -374,7 +389,7 @@ def main():
         save_contracts_csv(contracts, symbol, today)
 
         if not args.skip_history:
-            fetch_all_histories(contracts, symbol, args.range_str, today)
+            fetch_all_histories(contracts, symbol, args.range_str, today, min_oi=args.min_oi)
 
     print("\nDone.")
 
