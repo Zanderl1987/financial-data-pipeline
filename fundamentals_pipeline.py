@@ -18,7 +18,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "")
 
 EDGAR_BASE = "https://data.sec.gov"
-COMPANY_TICKERS_URL = f"{EDGAR_BASE}/files/company_tickers.json"
+COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 COMPANYFACTS_ZIP_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
 
 OUTPUT_DIR = os.path.join("storage", "raw", "fundamentals")
@@ -266,12 +266,15 @@ def download_companyfacts_zip():
     return tmp_path
 
 
-def stream_zip_to_parquet(zip_path, annual_out, quarterly_out, batch_size=1000):
+def stream_zip_to_parquet(zip_path, annual_out, quarterly_out, batch_size=1000, cik_to_ticker=None):
     """
     Stream all company JSON files from the ZIP, write in batches to keep
     memory bounded (~batch_size companies in RAM at a time), then merge
     batch parquets with pyarrow (one batch at a time — no full-load concat).
+    cik_to_ticker: optional dict {zero-padded-cik: ticker} for symbol resolution.
     """
+    cik_to_ticker = cik_to_ticker or {}
+
     with tempfile.TemporaryDirectory() as tmpdir:
         batch_annual, batch_quarterly = [], []
         batch_num = 0
@@ -286,7 +289,9 @@ def stream_zip_to_parquet(zip_path, annual_out, quarterly_out, batch_size=1000):
                 try:
                     with zf.open(name) as f:
                         data = json.load(f)
-                    a_rows, q_rows = extract_company(data)
+                    cik_padded = str(data.get("cik", "")).zfill(10)
+                    ticker = cik_to_ticker.get(cik_padded, "")
+                    a_rows, q_rows = extract_company(data, symbol=ticker)
                     batch_annual.extend(a_rows)
                     batch_quarterly.extend(q_rows)
                 except Exception:
@@ -430,12 +435,16 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
                 print("  Run with --no-cache to force a fresh download and reprocess.")
                 return
 
+        # Build reverse CIK map so full-market rows get ticker symbols populated
+        cik_map = load_cik_map(force_refresh=refresh_cik)
+        cik_to_ticker = {v: k for k, v in cik_map.items()}
+
         # Download and stream-process the ZIP
         zip_path = None
         try:
             zip_path = download_companyfacts_zip()
             print("\nStreaming ZIP -> parquet (batched)...")
-            counts = stream_zip_to_parquet(zip_path, annual_out, quarterly_out)
+            counts = stream_zip_to_parquet(zip_path, annual_out, quarterly_out, cik_to_ticker=cik_to_ticker)
         finally:
             if zip_path and os.path.exists(zip_path):
                 os.unlink(zip_path)
