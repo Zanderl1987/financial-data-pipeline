@@ -30,6 +30,7 @@ Run directly to see a summary:
     python query.py
 """
 
+import glob as _glob_mod
 import os
 import duckdb
 import pandas as pd
@@ -65,6 +66,9 @@ def _con() -> duckdb.DuckDBPyConnection:
     if _CON is None:
         _CON = duckdb.connect()
         for name, glob_path in CATALOG.items():
+            # Only register views for tables that have at least one file
+            if not _glob_mod.glob(glob_path.replace("/", os.sep)):
+                continue
             # union_by_name tolerates schema evolution across incremental files
             _CON.execute(f"""
                 CREATE OR REPLACE VIEW {name} AS
