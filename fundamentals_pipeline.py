@@ -37,12 +37,21 @@ CONCEPTS = {
         "Revenues",
         "SalesRevenueNet",
         "SalesRevenueGoodsNet",
+        # Banks: net interest income + non-interest income rolled up into one line
+        "RevenuesNetOfInterestExpense",
+        # Fallback for banks that only file interest income separately
+        "InterestAndDividendIncomeOperating",
     ],
-    "net_income":          ["NetIncomeLoss", "ProfitLoss"],
+    "net_income": ["NetIncomeLoss", "ProfitLoss"],
     "eps_diluted":         ["EarningsPerShareDiluted"],
     "eps_basic":           ["EarningsPerShareBasic"],
     "gross_profit":        ["GrossProfit"],
-    "operating_income":    ["OperatingIncomeLoss"],
+    "operating_income": [
+        "OperatingIncomeLoss",
+        # Banks don't file OperatingIncomeLoss; pre-tax income is the closest proxy
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    ],
     "total_assets":        ["Assets"],
     "total_liabilities":   ["Liabilities"],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities"],
