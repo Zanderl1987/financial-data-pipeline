@@ -428,7 +428,7 @@ def main(backfill=False, symbols=None, dtes=None, moneyness=None,
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
     mode_tag = "backfill" if backfill else "incremental"
     path = os.path.join(OUTPUT_DIR, f"synthetic_options_{mode_tag}_{today}.parquet")
-    out.to_parquet(path, index=False)
+    out.to_parquet(path, index=False, compression="snappy")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(out):,} rows -> {path}")

@@ -156,12 +156,12 @@ def main():
 
     summary_df = pd.DataFrame(all_metrics)
     filename = os.path.join(OUTPUT_DIR, f"options_metrics_{today}.parquet")
-    summary_df.to_parquet(filename, index=False)
+    summary_df.to_parquet(filename, index=False, compression="snappy")
 
     if all_chains:
         raw_df = pd.concat(all_chains, ignore_index=True)
         raw_path = os.path.join(OUTPUT_DIR, f"options_chain_raw_{today}.parquet")
-        raw_df.to_parquet(raw_path, index=False)
+        raw_df.to_parquet(raw_path, index=False, compression="snappy")
         print(f"Saved raw chains  ({len(raw_df):,} contracts) → {raw_path}")
 
     print(f"\n--- COMPLETE ---")

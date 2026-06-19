@@ -319,7 +319,7 @@ def fetch_all_histories(contracts: list[dict], symbol: str, range_str: str, toda
 
     out = pd.concat(all_frames, ignore_index=True)
     path = os.path.join(HISTORY_DIR, f"options_history_{symbol}_{today}.parquet")
-    out.to_parquet(path, index=False)
+    out.to_parquet(path, index=False, compression="snappy")
     print(f"  Saved {len(out):,} daily bars -> {path}")
 
 

@@ -272,7 +272,7 @@ def main(backfill=False):
 
     if spot_df is not None and not spot_df.empty:
         path = os.path.join(OUTPUT_DIR, f"gas_prices_spot_daily_{mode_tag}_{today}.parquet")
-        spot_df.to_parquet(path, index=False)
+        spot_df.to_parquet(path, index=False, compression="snappy")
         n_series = spot_df["series"].nunique() if "series" in spot_df.columns else "?"
         print(f"\nSpot  → {path}")
         print(f"       {len(spot_df):,} rows, {n_series} series")
@@ -281,7 +281,7 @@ def main(backfill=False):
 
     if retail_df is not None and not retail_df.empty:
         path = os.path.join(OUTPUT_DIR, f"gas_prices_retail_weekly_{mode_tag}_{today}.parquet")
-        retail_df.to_parquet(path, index=False)
+        retail_df.to_parquet(path, index=False, compression="snappy")
         combos = retail_df.groupby(["duoarea", "product"]).ngroups if "duoarea" in retail_df.columns else "?"
         print(f"Retail → {path}")
         print(f"       {len(retail_df):,} rows, {combos} grade×region combinations")

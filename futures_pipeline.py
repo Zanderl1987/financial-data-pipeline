@@ -208,7 +208,7 @@ def main(backfill=False, skip_futures=False, skip_cot=False):
         df = fetch_futures_ohlcv(backfill=backfill)
         if df is not None and not df.empty:
             path = os.path.join(FUTURES_DIR, f"futures_ohlcv_{mode_tag}_{today}.parquet")
-            df.to_parquet(path, index=False)
+            df.to_parquet(path, index=False, compression="snappy")
             print(f"\nFutures -> {path} ({len(df)} rows, {df['symbol'].nunique()} contracts)")
         else:
             print("No futures data written.")
@@ -218,7 +218,7 @@ def main(backfill=False, skip_futures=False, skip_cot=False):
         df = fetch_cot(backfill=backfill)
         if df is not None and not df.empty:
             path = os.path.join(COT_DIR, f"cot_{mode_tag}_{today}.parquet")
-            df.to_parquet(path, index=False)
+            df.to_parquet(path, index=False, compression="snappy")
             print(f"COT -> {path} ({len(df)} rows)")
         else:
             print("No COT data written.")

@@ -319,7 +319,7 @@ def _flush_batch(rows, tmpdir, filename):
     df = pd.DataFrame(rows)
     df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    df.to_parquet(os.path.join(tmpdir, filename), index=False)
+    df.to_parquet(os.path.join(tmpdir, filename), index=False, compression="snappy")
 
 
 def _merge_parquets(parts, output_path):
@@ -487,13 +487,13 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
     if annual_frames:
         annual_df = pd.concat(annual_frames, ignore_index=True)
         path = os.path.join(OUTPUT_DIR, f"fundamentals_annual_{today}.parquet")
-        annual_df.to_parquet(path, index=False)
+        annual_df.to_parquet(path, index=False, compression="snappy")
         print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
         path = os.path.join(OUTPUT_DIR, f"fundamentals_quarterly_{today}.parquet")
-        quarterly_df.to_parquet(path, index=False)
+        quarterly_df.to_parquet(path, index=False, compression="snappy")
         print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
 
     if failed:
