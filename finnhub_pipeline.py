@@ -58,14 +58,32 @@ FALLBACK_SYMBOLS = [
 ]
 
 def get_dji_symbols():
+    """Scrape the 30 Dow components from Wikipedia.
+
+    The components table's index on the page shifts over time, so locate it by
+    content — the table carrying a Symbol/Ticker column with ~30 rows — rather
+    than by a hardcoded position. Falls back to a static list on any failure.
+    """
     try:
-        df = pd.read_html(
+        tables = pd.read_html(
             "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
             storage_options={"User-Agent": "Mozilla/5.0"},
-        )[2]
-        symbols = df["Symbol"].tolist()
-        print(f"Scraped {len(symbols)} DJI symbols from Wikipedia.")
-        return symbols
+        )
+        for df in tables:
+            col = next(
+                (c for c in df.columns
+                 if str(c).strip().lower() in ("symbol", "ticker")),
+                None,
+            )
+            if col is not None and 25 <= len(df) <= 35:
+                symbols = (
+                    df[col].astype(str).str.strip().str.upper()
+                    .str.replace(r"\s+.*$", "", regex=True)  # drop footnote suffixes
+                    .tolist()
+                )
+                print(f"Scraped {len(symbols)} DJI symbols from Wikipedia.")
+                return symbols
+        raise ValueError("no components table with a Symbol/Ticker column found")
     except Exception as e:
         print(f"Scraping DJI symbols failed ({e}). Using hardcoded fallback symbols.")
         return FALLBACK_SYMBOLS
