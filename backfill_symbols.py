@@ -12,24 +12,21 @@ FUNDAMENTALS_DIR = os.path.join("storage", "raw", "fundamentals")
 
 
 def load_cik_to_ticker():
-    from fundamentals_pipeline import load_cik_map
-    cik_map = load_cik_map()
-    return {v: k for k, v in cik_map.items()}
+    from fundamentals_pipeline import load_cik_map, build_cik_to_ticker
+    return build_cik_to_ticker(load_cik_map())
 
 
 def backfill_file(path, cik_to_ticker):
     df = pd.read_parquet(path)
-    before = df["symbol"].eq("").sum() if "symbol" in df.columns else len(df)
 
-    df["symbol"] = df["cik"].map(cik_to_ticker).fillna("").where(
-        df["symbol"].eq("") | df["symbol"].isna(),
-        other=df["symbol"],
-    )
+    # Re-derive symbol from CIK for every row so corrections (e.g. GOOGN->GOOGL)
+    # overwrite previously written values, not just blank ones.
+    df["symbol"] = df["cik"].map(cik_to_ticker).fillna("")
 
-    after = df["symbol"].eq("").sum()
+    blank = df["symbol"].eq("").sum()
+    filled = df["symbol"].ne("").sum()
     df.to_parquet(path, index=False, compression="snappy")
-    print(f"  {os.path.basename(path)}: {before:,} blank -> {after:,} blank "
-          f"({before - after:,} filled, {df['symbol'].ne('').sum():,} total with ticker)")
+    print(f"  {os.path.basename(path)}: {filled:,} rows with ticker, {blank:,} blank (private/foreign)")
 
 
 def main():

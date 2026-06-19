@@ -80,6 +80,35 @@ def get_with_backoff(url, stream=False, timeout=30):
 # CIK mapping + DJI symbol list (used in DJI mode)
 # ---------------------------------------------------------------------------
 
+# When multiple tickers share a CIK, the auto-picker may land on a
+# non-primary class (e.g. GOOGN instead of GOOGL). Override here.
+CANONICAL_TICKER_OVERRIDES = {
+    "0001652044": "GOOGL",  # Alphabet: Class A (voting) over GOOG/GOOGM/GOOGN
+}
+
+
+def _ticker_rank(ticker: str) -> tuple:
+    """Lower rank = more preferred when multiple tickers share a CIK."""
+    has_hyphen = "-" in ticker
+    # Warrants (W), rights (R), units (U), non-voting class suffixes (M, N)
+    has_class_suffix = ticker[-1] in ("W", "R", "U", "M", "N") and len(ticker) > 2
+    return (has_hyphen, has_class_suffix, len(ticker))
+
+
+def build_cik_to_ticker(cik_map: dict) -> dict:
+    """Reverse ticker->CIK map, picking the most canonical ticker per CIK."""
+    from collections import defaultdict
+    cik_to_tickers: dict[str, list] = defaultdict(list)
+    for ticker, cik in cik_map.items():
+        cik_to_tickers[cik].append(ticker)
+    result = {
+        cik: min(tickers, key=_ticker_rank)
+        for cik, tickers in cik_to_tickers.items()
+    }
+    result.update(CANONICAL_TICKER_OVERRIDES)
+    return result
+
+
 def load_cik_map(force_refresh=False):
     if not force_refresh and os.path.exists(CIK_CACHE_PATH):
         with open(CIK_CACHE_PATH) as f:
@@ -125,19 +154,24 @@ def get_dji_symbols():
 
 def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
     """
-    Try each candidate XBRL concept in order; return fact rows for the first
-    one that has data. Returns [] if none found.
+    Collect fact rows across all candidate XBRL concepts, deduplicating by
+    (period_end, form) so companies that switched concepts mid-history (e.g.
+    NVDA moving from RevenueFromContractWithCustomer to Revenues) return a
+    complete time series rather than only the first concept's data.
     """
+    rows = []
+    seen: set[tuple] = set()
+
     for concept in candidate_concepts:
         node = facts_us_gaap.get(concept)
         if not node:
             continue
-        units = node.get("units", {})
-        for unit_key, entries in units.items():
-            if not entries:
-                continue
-            rows = []
+        for unit_key, entries in node.get("units", {}).items():
             for e in entries:
+                key = (e.get("end"), e.get("form"))
+                if key in seen:
+                    continue
+                seen.add(key)
                 rows.append({
                     "metric":        metric_name,
                     "concept":       concept,
@@ -150,8 +184,8 @@ def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
                     "filed":         e.get("filed"),
                     "frame":         e.get("frame"),
                 })
-            return rows
-    return []
+
+    return rows
 
 
 def extract_company(data, symbol=""):
@@ -437,7 +471,7 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
 
         # Build reverse CIK map so full-market rows get ticker symbols populated
         cik_map = load_cik_map(force_refresh=refresh_cik)
-        cik_to_ticker = {v: k for k, v in cik_map.items()}
+        cik_to_ticker = build_cik_to_ticker(cik_map)
 
         # Download and stream-process the ZIP
         zip_path = None
