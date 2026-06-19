@@ -151,5 +151,51 @@ def tables() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def yoy_growth(
+    symbols: list[str] | str | None = None,
+    metric: str = "revenue",
+) -> pd.DataFrame:
+    """
+    Year-over-year growth for any fundamentals metric, computed per company
+    against its own prior fiscal year (handles staggered FY end dates).
+
+    Parameters
+    ----------
+    symbols : ticker or list of tickers (default: all with data)
+    metric  : fundamentals_annual metric name (default: 'revenue')
+
+    Returns a DataFrame indexed by symbol with columns:
+        fiscal_year, prior_B, current_B, yoy_pct, period_end
+    """
+    ann = load("fundamentals_annual")
+    ann["period_end"] = pd.to_datetime(ann["period_end"])
+
+    mask = (ann["metric"] == metric) & (ann["form"] == "10-K") & ann["symbol"].ne("")
+    if symbols is not None:
+        syms = [symbols] if isinstance(symbols, str) else list(symbols)
+        mask &= ann["symbol"].isin(syms)
+
+    rev = (ann[mask]
+           .sort_values("period_end", ascending=False)
+           .drop_duplicates(["symbol", "fiscal_year"])
+           [["symbol", "fiscal_year", "value", "period_end"]]
+           .sort_values(["symbol", "fiscal_year"]))
+
+    rev["prior"] = rev.groupby("symbol")["value"].shift(1)
+
+    latest = (rev.sort_values("fiscal_year", ascending=False)
+                 .drop_duplicates("symbol")
+                 .dropna(subset=["prior"]))
+
+    latest = latest.copy()
+    latest["yoy_pct"]   = ((latest["value"] - latest["prior"]) / latest["prior"] * 100).round(1)
+    latest["current_B"] = (latest["value"] / 1e9).round(2)
+    latest["prior_B"]   = (latest["prior"]  / 1e9).round(2)
+
+    return (latest.set_index("symbol")
+                  [["fiscal_year", "prior_B", "current_B", "yoy_pct", "period_end"]]
+                  .sort_values("yoy_pct", ascending=False))
+
+
 if __name__ == "__main__":
     print(tables().to_string(index=False))
