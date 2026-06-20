@@ -2,6 +2,26 @@
 
 ## Completed
 
+### DuckDB Query Layer
+**Status:** Implemented 2026-06-19
+
+A comprehensive `query.py` module plus a full `analytics/` subpackage, both placed on the D drive master store and synced to the working clone.
+
+**`query.py`** — low-level DuckDB interface:
+- `CATALOG` — 15-table glob registry (prices, options, fundamentals, macro, gas, futures, COT, earnings, insider transactions)
+- `load(table, symbol, series_id, metric, start, end, columns, limit)` — push-down filtered loads
+- `sql(query)` — raw SQL against all registered views
+- `tables()`, `schema()`, `symbols()`, `date_range()` — discovery helpers
+- `reload()` — re-registers views after a pipeline run
+
+**`analytics/`** — high-level domain functions:
+- `fundamentals.py` — `yoy_growth`, `valuation` (P/E, P/S, P/B), `top_by_metric`
+- `events.py` — `upcoming_earnings`, `insider_sentiment`, `earnings_surprise`
+- `options.py` — `iv_summary`, `put_call_ratio`
+- `macro.py` — `rate_environment` (yield curve wide format), `inversion` (2s10s spread), `commodity_vs_symbol`
+
+---
+
 ### Snappy Compression on All Parquet Outputs
 **Status:** Implemented 2026-06-19
 
@@ -21,8 +41,8 @@ Files updated:
 
 ## Candidate Improvements
 
-### 1. DuckDB Query Layer
-**Priority: High | Effort: Low**
+### 1. ~~DuckDB Query Layer~~ ✓ COMPLETED
+**Priority: High | Effort: Low** — see Completed section above
 
 DuckDB can query Parquet files directly with SQL — no database server, no ETL, no catalog. It reads multiple files in one query using glob patterns.
 
