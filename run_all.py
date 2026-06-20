@@ -231,13 +231,13 @@ def run_pipeline(
 ) -> RunResult:
     skip_reason = _check_env(spec)
     if skip_reason:
-        print(f"  SKIP — {skip_reason}")
+        print(f"  SKIP -- {skip_reason}")
         return RunResult(spec.name, "SKIP", 0.0, skip_reason)
 
     script = os.path.join(REPO_ROOT, spec.file)
     if not os.path.exists(script):
         reason = f"{spec.file} not found"
-        print(f"  SKIP — {reason}")
+        print(f"  SKIP -- {reason}")
         return RunResult(spec.name, "SKIP", 0.0, reason)
 
     cmd = [sys.executable, script]
@@ -283,15 +283,15 @@ def _print_summary(results: list[RunResult], backfill: bool, start_time: float) 
     wall_time = _fmt_duration(time.time() - start_time)
     now       = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    icons = {"PASS": "✓", "FAIL": "✗", "SKIP": "○", "DRY RUN": "◌"}
+    icons = {"PASS": "+", "FAIL": "!", "SKIP": "-", "DRY RUN": "?"}
 
-    print(f"\n{'═' * 62}")
-    print(f"  Run Summary — {mode} — {now}  ({wall_time} total)")
-    print(f"{'═' * 62}")
+    print(f"\n{'=' * 62}")
+    print(f"  Run Summary -- {mode} -- {now}  ({wall_time} total)")
+    print(f"{'=' * 62}")
 
     for r in results:
         icon = icons.get(r.status, "?")
-        dur  = _fmt_duration(r.duration) if r.duration else "—"
+        dur  = _fmt_duration(r.duration) if r.duration else "-"
         warn = f"  [{r.val_warnings} val warn]" if r.val_warnings else ""
         note = f"  {r.note}" if r.note and r.status not in ("PASS",) else ""
         print(f"  {icon} {r.status:8s}  {r.name:28s}  {dur:>6s}{warn}{note}")
@@ -366,10 +366,10 @@ def main() -> int:
     validate = not args.no_validate
     start_time = time.time()
 
-    print(f"\n{'═' * 62}")
+    print(f"\n{'=' * 62}")
     print(f"  Financial Data Pipeline Runner")
     print(f"  Mode: {mode}  |  Pipelines: {len(pipelines)}  |  Validate: {validate}")
-    print(f"{'═' * 62}")
+    print(f"{'=' * 62}")
 
     # Stage-grouped run
     current_stage = 0
@@ -379,9 +379,9 @@ def main() -> int:
         if spec.stage != current_stage:
             current_stage = spec.stage
             labels = {1: "Free / Public Sources", 2: "Schwab Authenticated", 3: "Derived Pipelines"}
-            print(f"\n── Stage {current_stage}: {labels.get(current_stage, '')} ──")
+            print(f"\n-- Stage {current_stage}: {labels.get(current_stage, '')} --")
 
-        print(f"\n▶  {spec.name}  —  {spec.desc}")
+        print(f"\n>>  {spec.name}  --  {spec.desc}")
         result = run_pipeline(spec, args.backfill, args.dry_run, validate)
         results.append(result)
 

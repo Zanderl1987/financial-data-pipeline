@@ -63,7 +63,7 @@ class CheckResult:
         return self.severity != Severity.ERROR
 
     def __str__(self) -> str:
-        icon = {"OK": "✓", "WARN": "⚠", "ERROR": "✗"}[self.severity.value]
+        icon = {"OK": "+", "WARN": "!", "ERROR": "X"}[self.severity.value]
         return f"  [{self.severity.value:5s}] {icon} {self.name}: {self.message}"
 
 
@@ -89,7 +89,7 @@ class ValidationResult:
     def __str__(self) -> str:
         status = "PASS" if self.passed else "FAIL"
         e, w = len(self.errors), len(self.warnings)
-        lines = [f"\n{'='*60}", f"  {status}  {self.table}  — {e} error(s), {w} warning(s)", "=" * 60]
+        lines = [f"\n{'='*60}", f"  {status}  {self.table}  -- {e} error(s), {w} warning(s)", "=" * 60]
         lines += [str(c) for c in self.checks]
         return "\n".join(lines)
 
