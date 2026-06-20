@@ -78,6 +78,11 @@ CATALOG: dict[str, str] = {
     "insider_transactions":    _glob("finnhub/insider_transactions/insider_transactions_*.parquet"),
     # Sector ETFs (SPDR sectors + broad indexes)
     "sector_etfs":             _glob("sector_etfs/sector_etfs_*.parquet"),
+    # Schwab real-time data
+    "schwab_quotes":           _glob("schwab/quotes/quotes_*.parquet"),
+    "schwab_options":          _glob("schwab/options/schwab_options_*.parquet"),
+    # News sentiment (Claude-scored)
+    "news_sentiment":          _glob("finnhub/news_sentiment/news_sentiment_*.parquet"),
     # Dividends (Finnhub)
     "dividends":               _glob("finnhub/dividends/dividends_*.parquet"),
     # Finnhub fundamentals + market data

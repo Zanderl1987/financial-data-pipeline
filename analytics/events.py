@@ -121,6 +121,63 @@ def dividend_calendar(days_ahead: int = 60, days_back: int = 7) -> pd.DataFrame:
     return df[cols].sort_values("ex_date").reset_index(drop=True)
 
 
+def news_sentiment(
+    symbols: "list[str] | str | None" = None,
+    days: int = 7,
+) -> pd.DataFrame:
+    """
+    Claude-scored news sentiment for one or more symbols.
+
+    Parameters
+    ----------
+    symbols : ticker or list (default: all)
+    days    : lookback window in calendar days (default: 7)
+
+    Returns DataFrame sorted by date descending:
+        symbol | date | headline | sentiment | score | confidence | key_topics
+
+    sentiment: "bullish" | "bearish" | "neutral"
+    score    : -1.0 (very bearish) to +1.0 (very bullish)
+    """
+    start = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    df = q.load("news_sentiment", symbol=symbols, start=start)
+    if df.empty:
+        return df
+    return df.sort_values("date", ascending=False).reset_index(drop=True)
+
+
+def sentiment_summary(
+    symbols: "list[str] | str | None" = None,
+    days: int = 7,
+) -> pd.DataFrame:
+    """
+    Aggregate sentiment score per symbol over the lookback window.
+
+    Returns DataFrame sorted by avg_score descending:
+        symbol | articles | bullish | neutral | bearish | avg_score | net_sentiment
+    """
+    df = news_sentiment(symbols=symbols, days=days)
+    if df.empty:
+        return df
+
+    agg = (
+        df.groupby("symbol")
+          .agg(
+              articles=("headline", "count"),
+              bullish=("sentiment", lambda s: (s == "bullish").sum()),
+              neutral=("sentiment", lambda s: (s == "neutral").sum()),
+              bearish=("sentiment", lambda s: (s == "bearish").sum()),
+              avg_score=("score", "mean"),
+          )
+          .reset_index()
+    )
+    agg["avg_score"]     = agg["avg_score"].round(3)
+    agg["net_sentiment"] = agg["avg_score"].apply(
+        lambda x: "bullish" if x > 0.1 else ("bearish" if x < -0.1 else "neutral")
+    )
+    return agg.sort_values("avg_score", ascending=False).reset_index(drop=True)
+
+
 def earnings_surprise(
     symbols: "list[str] | str | None" = None,
     n_quarters: int = 4,

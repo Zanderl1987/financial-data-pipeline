@@ -22,6 +22,33 @@ A comprehensive `query.py` module plus a full `analytics/` subpackage, both plac
 
 ---
 
+### Schwab Real-Time Quotes + Options with Greeks + News Sentiment
+**Status:** Implemented 2026-06-19
+
+**`schwab_quotes_pipeline.py`** (Schwab `/quotes` batch endpoint):
+- Single batched call for DJI components + sector ETFs (up to 500 symbols per request)
+- Fields: last/open/high/low/close, bid/ask, 52-week range, PE, EPS, dividend yield/amount/dates
+- Output: `storage/raw/schwab/quotes/quotes_{YYYYMMDD}.parquet` | CATALOG: `schwab_quotes`
+
+**`schwab_options_pipeline.py`** (Schwab `/chains` endpoint):
+- Full options chain with greeks: delta, gamma, theta, vega, rho
+- Configurable symbols (`--symbols`) and weeks out (`--expirations`)
+- Default: top 10 liquid equities + indexes, 4 weeks out, 40 strikes per expiration
+- Output: `storage/raw/schwab/options/schwab_options_incremental_{YYYYMMDD}.parquet` | CATALOG: `schwab_options`
+
+**`news_sentiment_pipeline.py`** (Claude `claude-haiku-4-5`):
+- Scores existing Finnhub news headlines + summaries — only articles not yet scored are processed
+- Batches 20 articles per Claude API call for cost efficiency
+- Fields: sentiment (bullish/bearish/neutral), score (-1.0 to +1.0), confidence, key_topics
+- Output: `storage/raw/finnhub/news_sentiment/news_sentiment_{mode}_{YYYYMMDD}.parquet` | CATALOG: `news_sentiment`
+- Requires: `pip install anthropic` + `ANTHROPIC_API_KEY` in `.env`
+
+**`analytics/events.py`** — new sentiment functions:
+- `news_sentiment(symbols, days=7)` — recent scored headlines sorted by date
+- `sentiment_summary(symbols, days=7)` — aggregate bullish/bearish/neutral counts + avg_score per symbol
+
+---
+
 ### Dividend Pipeline + Sector ETF Pipeline
 **Status:** Implemented 2026-06-19
 
