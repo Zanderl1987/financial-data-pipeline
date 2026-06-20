@@ -22,6 +22,32 @@ A comprehensive `query.py` module plus a full `analytics/` subpackage, both plac
 
 ---
 
+### Dividend Pipeline + Sector ETF Pipeline
+**Status:** Implemented 2026-06-19
+
+**`dividend_pipeline.py`** (Finnhub `/stock/dividend2`):
+- Per-symbol cash dividend history: ex-date, pay-date, record-date, declaration-date, amount, adj_amount, frequency, currency
+- `--backfill` fetches 10 years; incremental default is 2 years
+- Output: `storage/raw/finnhub/dividends/dividends_{mode}_{YYYYMMDD}.parquet`
+- CATALOG key: `dividends`
+
+**`sector_etf_pipeline.py`** (Schwab API):
+- Daily OHLCV for 11 SPDR sector ETFs (XLK/XLF/XLE/XLV/XLY/XLI/XLC/XLRE/XLP/XLU/XLB) + 4 broad indexes (SPY/QQQ/IWM/DIA)
+- Same schema as prices table (OHLCV + pct_change/log_return/intraday_range/vwap + sector label)
+- Output: `storage/raw/sector_etfs/sector_etfs_{mode}_{YYYYMMDD}.parquet`
+- CATALOG key: `sector_etfs`
+
+**`analytics/events.py`** — new dividend functions:
+- `dividend_history(symbols, start)` — full dividend history, ex-date sorted
+- `dividend_calendar(days_ahead=60)` — upcoming ex-dates in window
+
+**`analytics/sectors.py`** — new module:
+- `sector_performance(start, end)` — total return % per ETF over period
+- `sector_vs_spy(start)` — each sector's return relative to SPY
+- `sector_rotation(lookback_days=20)` — momentum ranking by avg log return
+
+---
+
 ### CATALOG Expansion + Credit Spreads
 **Status:** Implemented 2026-06-19
 

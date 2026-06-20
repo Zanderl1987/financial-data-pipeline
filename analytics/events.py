@@ -1,8 +1,9 @@
 """
-Events analytics: earnings calendar, insider transactions, EPS surprise.
+Events analytics: earnings calendar, insider transactions, EPS surprise,
+dividends.
 
-Requires earnings_calendar and insider_transactions tables populated by
-finnhub_events_pipeline.py.
+Requires earnings_calendar, insider_transactions, and dividends tables
+populated by finnhub_events_pipeline.py and dividend_pipeline.py.
 """
 
 import os
@@ -69,6 +70,55 @@ def insider_sentiment(
         lambda x: "bullish" if x > 0 else ("bearish" if x < 0 else "neutral")
     )
     return agg.sort_values("net_shares", ascending=False).reset_index(drop=True)
+
+
+def dividend_history(
+    symbols: "list[str] | str | None" = None,
+    start: "str | None" = None,
+) -> pd.DataFrame:
+    """
+    Cash dividend history per symbol, sorted by ex-date descending.
+
+    Parameters
+    ----------
+    symbols : ticker or list (default: all)
+    start   : 'YYYY-MM-DD' earliest ex-date to include
+
+    Returns DataFrame with:
+        symbol | ex_date | pay_date | record_date | declaration_date |
+        amount | adj_amount | frequency | currency
+    """
+    df = q.load("dividends", symbol=symbols, start=start)
+    if df.empty:
+        return df
+    return (
+        df.sort_values("ex_date", ascending=False)
+          .reset_index(drop=True)
+    )
+
+
+def dividend_calendar(days_ahead: int = 60, days_back: int = 7) -> pd.DataFrame:
+    """
+    Upcoming (and very recent) dividend ex-dates within the given window.
+
+    Parameters
+    ----------
+    days_ahead : how many calendar days forward to look
+    days_back  : how many calendar days back to include (catches recent ex-dates)
+
+    Returns DataFrame sorted by ex_date ascending:
+        symbol | ex_date | pay_date | amount | adj_amount | frequency
+    """
+    today  = datetime.date.today()
+    start  = (today - datetime.timedelta(days=days_back)).isoformat()
+    end    = (today + datetime.timedelta(days=days_ahead)).isoformat()
+    df = q.load("dividends", start=start, end=end)
+    if df.empty:
+        return df
+
+    cols = [c for c in ("symbol", "ex_date", "pay_date", "amount", "adj_amount", "frequency")
+            if c in df.columns]
+    return df[cols].sort_values("ex_date").reset_index(drop=True)
 
 
 def earnings_surprise(

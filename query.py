@@ -76,6 +76,10 @@ CATALOG: dict[str, str] = {
     # Events (Finnhub)
     "earnings_calendar":       _glob("finnhub/earnings_calendar/earnings_calendar_*.parquet"),
     "insider_transactions":    _glob("finnhub/insider_transactions/insider_transactions_*.parquet"),
+    # Sector ETFs (SPDR sectors + broad indexes)
+    "sector_etfs":             _glob("sector_etfs/sector_etfs_*.parquet"),
+    # Dividends (Finnhub)
+    "dividends":               _glob("finnhub/dividends/dividends_*.parquet"),
     # Finnhub fundamentals + market data
     "finnhub_profile":         _glob("finnhub/profile/profile_*.parquet"),
     "finnhub_quotes":          _glob("finnhub/quotes/quotes_*.parquet"),

@@ -177,7 +177,7 @@ def main(backfill=False):
         df["fetched_at"] = datetime.datetime.utcnow().isoformat()
         df = df.rename(columns={"value": "value"})
 
-        if category == "macro":
+        if category in ("macro", "credit"):
             macro_frames.append(df)
         else:
             commodity_frames.append(df)
