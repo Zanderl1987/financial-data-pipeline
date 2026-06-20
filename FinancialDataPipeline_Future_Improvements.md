@@ -109,6 +109,38 @@ Files updated:
 
 ---
 
+---
+
+### Data Validation Layer
+**Status:** Implemented 2026-06-20
+
+**`validate.py`** — standalone validation module:
+- `validate_df(table, df, check_freshness=True)` — validate a fresh DataFrame right before writing; call inside any pipeline
+- `validate_table(table)` — load latest snapshot from disk and validate it
+- `validate_all()` — run on all CATALOG tables, return summary DataFrame (table | status | errors | warnings | rows | latest_file)
+
+**Check categories:**
+- `not_empty` — 0-row output → ERROR
+- `required_cols` — any required column absent → ERROR
+- `nulls:<col>` — critical column >50% null → ERROR; 5–50% null → WARNING
+- `future_dates` — date column has values > today → WARNING
+- `row_count` — new DataFrame < 50% the size of prior snapshot → WARNING (catches silent API failures)
+- `range:<col>` — value outside expected bounds (e.g. sentiment score outside [-1, 1]) → WARNING
+- `fetched_at` — newest timestamp older than 2h (when called inline) → WARNING
+
+**CLI:**
+```bash
+python validate.py                  # health check — all tables with data
+python validate.py --table prices   # single table detail
+python validate.py --all            # include tables with no data yet
+```
+
+**`tests/test_validation.py`** — 20 tests covering schema completeness, all check severities, and validate_all behavior.
+
+**Total test suite: 93 passed, 12 skipped.**
+
+---
+
 ## Candidate Improvements
 
 ### 1. ~~DuckDB Query Layer~~ ✓ COMPLETED
@@ -164,16 +196,8 @@ DuckDB and PyArrow both understand Hive partitioning natively via `dataset.parti
 
 ---
 
-### 4. Data Validation Layer
-**Priority: Medium | Effort: Low–Medium**
-
-Add lightweight schema + freshness checks after each pipeline run:
-- Row count plausibility (warn if output is >50% smaller than previous run)
-- Expected columns present and correctly typed
-- No future dates in the `date` column
-- `fetched_at` within the last hour
-
-[Pandera](https://pandera.readthedocs.io/) or a simple hand-rolled check function would work. Catches silent data quality regressions early.
+### 4. ~~Data Validation Layer~~ ✓ COMPLETED
+**Priority: Medium | Effort: Low–Medium** — see Completed section above
 
 ---
 
