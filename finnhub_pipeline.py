@@ -293,7 +293,7 @@ def main():
             combined = pd.concat(dfs, ignore_index=True)
             filename = f"{key}_{mode_tag}_{today_str}.parquet"
             out_path = os.path.join(DIRS[key], filename)
-            combined.to_parquet(out_path, index=False)
+            combined.to_parquet(out_path, index=False, compression="snappy")
             print(f"  Saved {key} -> {out_path} ({len(combined)} rows)")
         else:
             print(f"  Warning: No data collected for {key}")

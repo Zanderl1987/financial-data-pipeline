@@ -22,6 +22,23 @@ A comprehensive `query.py` module plus a full `analytics/` subpackage, both plac
 
 ---
 
+### CATALOG Expansion + Credit Spreads
+**Status:** Implemented 2026-06-19
+
+**CATALOG fix (`query.py`):** Registered the 7 Finnhub tables that `finnhub_pipeline.py` already fetches but were invisible to the query layer: `finnhub_profile`, `finnhub_quotes`, `finnhub_metrics`, `finnhub_recommendations`, `finnhub_price_targets`, `finnhub_upgrades`, `finnhub_news`. They show "no data" until the pipeline runs; after that they're queryable like any other table.
+
+**Credit spreads (`commodity_macro_pipeline.py`):** Added 4 ICE BofA OAS series to the FRED SERIES catalog:
+- `BAMLH0A0HYM2` — HY Credit Spread (OAS)
+- `BAMLC0A0CM` — IG Corporate Spread (OAS)
+- `BAMLH0A0HYM2EY` — HY Effective Yield
+- `BAMLEMCBPIOAS` — EM Corporate Spread (OAS)
+
+Note: VIX (`VIXCLS`) was already present in the macro pipeline.
+
+**`analytics/macro.credit_spreads()`:** New function — loads all credit spread series and pivots to wide format (`date | hy_spread | ig_spread | hy_yield | em_spread`). Includes interpretation thresholds (hy_spread > 500 bps = stress).
+
+---
+
 ### Snappy Compression on All Parquet Outputs
 **Status:** Implemented 2026-06-19
 

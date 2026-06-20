@@ -76,6 +76,14 @@ CATALOG: dict[str, str] = {
     # Events (Finnhub)
     "earnings_calendar":       _glob("finnhub/earnings_calendar/earnings_calendar_*.parquet"),
     "insider_transactions":    _glob("finnhub/insider_transactions/insider_transactions_*.parquet"),
+    # Finnhub fundamentals + market data
+    "finnhub_profile":         _glob("finnhub/profile/profile_*.parquet"),
+    "finnhub_quotes":          _glob("finnhub/quotes/quotes_*.parquet"),
+    "finnhub_metrics":         _glob("finnhub/metrics/metrics_*.parquet"),
+    "finnhub_recommendations": _glob("finnhub/recommendations/recommendations_*.parquet"),
+    "finnhub_price_targets":   _glob("finnhub/price_targets/price_targets_*.parquet"),
+    "finnhub_upgrades":        _glob("finnhub/upgrades/upgrades_*.parquet"),
+    "finnhub_news":            _glob("finnhub/news/news_*.parquet"),
 }
 
 _CON: duckdb.DuckDBPyConnection | None = None

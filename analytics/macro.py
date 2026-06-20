@@ -1,5 +1,6 @@
 """
-Macro analytics: yield curve shape, 2s10s inversion, commodity correlations.
+Macro analytics: yield curve shape, 2s10s inversion, credit spreads,
+commodity correlations.
 
 Requires the macro table (FRED) to have data; commodity_vs_symbol also
 needs the prices table populated.
@@ -64,6 +65,44 @@ def inversion(start: "str | None" = None) -> pd.DataFrame:
     out["spread_2s10s"] = (out["10y"] - out["2y"]).round(3)
     out["inverted"] = out["spread_2s10s"] < 0
     return out.reset_index(drop=True)
+
+
+CREDIT_SERIES: dict[str, str] = {
+    "hy_spread":  "BAMLH0A0HYM2",
+    "ig_spread":  "BAMLC0A0CM",
+    "hy_yield":   "BAMLH0A0HYM2EY",
+    "em_spread":  "BAMLEMCBPIOAS",
+}
+
+
+def credit_spreads(start: "str | None" = None) -> pd.DataFrame:
+    """
+    Investment-grade and high-yield credit spreads (ICE BofA OAS) over time.
+
+    Wide-format output:
+        date | hy_spread | ig_spread | hy_yield | em_spread
+    Absent series (not yet fetched) are omitted as columns.
+
+    Interpretation:
+        hy_spread > 500 bps  → stress / risk-off
+        ig_spread > 200 bps  → elevated corporate risk
+        widening spread      → market pricing in higher default probability
+    """
+    series_ids = list(CREDIT_SERIES.values())
+    df = q.load("macro", series_id=series_ids, start=start)
+    if df.empty:
+        return df
+
+    reverse_map = {v: k for k, v in CREDIT_SERIES.items()}
+    df = df.copy()
+    df["label"] = df["series_id"].map(reverse_map)
+
+    ordered = [k for k in CREDIT_SERIES if k in df["label"].values]
+    return (
+        df.pivot_table(index="date", columns="label", values="value")[ordered]
+          .reset_index()
+          .sort_values("date")
+    )
 
 
 def commodity_vs_symbol(

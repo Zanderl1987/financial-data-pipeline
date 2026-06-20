@@ -75,6 +75,11 @@ SERIES = {
     "M2SL":           ("M2 Money Supply",              "monthly",  "Bil. USD",     "macro"),
     "VIXCLS":         ("CBOE VIX",                     "daily",    "Index",        "macro"),
     "DTWEXBGS":       ("USD Trade-Weighted Index",     "daily",    "Index",        "macro"),
+    # Credit spreads (ICE BofA OAS) — risk-off / stress signals
+    "BAMLH0A0HYM2":   ("HY Credit Spread (OAS)",       "daily",    "Percent",      "credit"),
+    "BAMLC0A0CM":     ("IG Corporate Spread (OAS)",    "daily",    "Percent",      "credit"),
+    "BAMLH0A0HYM2EY": ("HY Effective Yield",           "daily",    "Percent",      "credit"),
+    "BAMLEMCBPIOAS":  ("EM Corporate Spread (OAS)",    "daily",    "Percent",      "credit"),
 }
 
 
