@@ -197,11 +197,39 @@ DuckDB and PyArrow both understand Hive partitioning natively via `dataset.parti
 ---
 
 ### 4. ~~Data Validation Layer~~ ✓ COMPLETED
+
+---
+
+### 5. ~~Unified Pipeline Runner~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-20
+
+**`run_all.py`** — 15-pipeline staged runner:
+- **Stage 1** (free/public): commodity_macro, gas_prices, futures, short_interest, finnhub, finnhub_events, dividends, fundamentals
+- **Stage 2** (Schwab): prices, sector_etfs, schwab_quotes, schwab_options, options_chain
+- **Stage 3** (derived): synthetic_options (needs prices), news_sentiment (needs finnhub_news)
+
+Gracefully skips pipelines with missing env vars — Schwab pipelines auto-skip when SCHWAB_* are absent; news_sentiment skips without ANTHROPIC_API_KEY. Post-run validation via `validate_table()` after each successful pipeline (disable with `--no-validate`).
+
+**CLI:**
+```bash
+python run_all.py                        # incremental run (all stages)
+python run_all.py --backfill             # full available history
+python run_all.py --stage 1              # free/public sources only
+python run_all.py --only commodity_macro,finnhub
+python run_all.py --skip fundamentals,synthetic_options
+python run_all.py --dry-run              # print commands, don't execute
+```
+
+**`tests/test_runner.py`** — 18 tests covering registry integrity, env-var skip logic, CLI arg filtering, and dry-run behavior.
+
+**Total test suite: 111 passed, 12 skipped.**
+
+---
+
+### 3. Partition-Aware Storage
 **Priority: Medium | Effort: Low–Medium** — see Completed section above
 
 ---
 
-### 5. Unified Pipeline Runner
-**Priority: Low | Effort: Medium**
-
-A `run_all.py` script (or a `Makefile`) that runs all pipelines in dependency order and logs success/failure per pipeline. Would make daily incremental runs a single command instead of invoking each file individually.
+### 5. ~~Unified Pipeline Runner~~ ✓ COMPLETED
+**Priority: Low | Effort: Medium** — see Completed section above
