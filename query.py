@@ -78,6 +78,10 @@ CATALOG: dict[str, str] = {
     "insider_transactions":    _glob("finnhub/insider_transactions/insider_transactions_*.parquet"),
     # Sector ETFs (SPDR sectors + broad indexes)
     "sector_etfs":             _glob("sector_etfs/sector_etfs_*.parquet"),
+    # Short interest
+    "short_interest":          _glob("short_interest/short_interest_*.parquet"),
+    "finra_short_interest":    _glob("finra_short_interest/finra_short_*.parquet"),
+    "sec_ftd":                 _glob("sec_ftd/sec_ftd_*.parquet"),
     # Schwab real-time data
     "schwab_quotes":           _glob("schwab/quotes/quotes_*.parquet"),
     "schwab_options":          _glob("schwab/options/schwab_options_*.parquet"),
@@ -188,7 +192,11 @@ def load(
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     limit_clause = f"LIMIT {limit}" if limit else ""
-    return sql(f"SELECT {select} FROM {table} {where} {limit_clause}".strip())
+    try:
+        return sql(f"SELECT {select} FROM {table} {where} {limit_clause}".strip())
+    except duckdb.CatalogException:
+        # View not registered — table exists in CATALOG but has no files on disk yet
+        return pd.DataFrame()
 
 
 def schema(table: str) -> pd.DataFrame:
