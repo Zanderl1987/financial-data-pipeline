@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import schwabdev
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -148,8 +149,7 @@ def main(backfill: bool = False):
 
     combined  = pd.concat(frames, ignore_index=True)
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(OUTPUT_DIR, f"sector_etfs_{mode}_{today_str}.parquet")
-    combined.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(combined, OUTPUT_DIR, f"sector_etfs_{mode}_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(combined):,} rows for {len(frames)} ETFs → {out_path}")

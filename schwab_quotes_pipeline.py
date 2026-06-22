@@ -32,6 +32,7 @@ import schwabdev
 from dotenv import load_dotenv
 
 from finnhub_pipeline import get_dji_symbols  # reuse Wikipedia scraper
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -154,8 +155,7 @@ def main():
         return
 
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(OUTPUT_DIR, f"quotes_{today_str}.parquet")
-    df.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(df, OUTPUT_DIR, f"quotes_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(df)} rows → {out_path}")

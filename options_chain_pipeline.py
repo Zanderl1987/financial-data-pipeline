@@ -5,6 +5,7 @@ import datetime
 import time
 import os
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -13,7 +14,8 @@ APP_SECRET = os.environ["SCHWAB_APP_SECRET"]
 CALLBACK_URL = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
 TOKEN_PATH = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.json")
 
-OUTPUT_DIR = os.path.join("storage", "raw", "options")
+METRICS_DIR = os.path.join("storage", "raw", "options", "metrics")
+CHAIN_DIR   = os.path.join("storage", "raw", "options", "chain")
 
 FALLBACK_SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"]
 
@@ -122,7 +124,8 @@ def capture_daily_metrics(symbol, client):
 
 
 def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(METRICS_DIR, exist_ok=True)
+    os.makedirs(CHAIN_DIR, exist_ok=True)
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,
@@ -155,13 +158,11 @@ def main():
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
 
     summary_df = pd.DataFrame(all_metrics)
-    filename = os.path.join(OUTPUT_DIR, f"options_metrics_{today}.parquet")
-    summary_df.to_parquet(filename, index=False, compression="snappy")
+    filename = write_partitioned(summary_df, METRICS_DIR, f"options_metrics_{today}.parquet")
 
     if all_chains:
         raw_df = pd.concat(all_chains, ignore_index=True)
-        raw_path = os.path.join(OUTPUT_DIR, f"options_chain_raw_{today}.parquet")
-        raw_df.to_parquet(raw_path, index=False, compression="snappy")
+        raw_path = write_partitioned(raw_df, CHAIN_DIR, f"options_chain_raw_{today}.parquet")
         print(f"Saved raw chains  ({len(raw_df):,} contracts) → {raw_path}")
 
     print(f"\n--- COMPLETE ---")

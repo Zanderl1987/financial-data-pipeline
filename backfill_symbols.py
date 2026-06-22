@@ -33,7 +33,7 @@ def main():
     cik_to_ticker = load_cik_to_ticker()
     print(f"Loaded {len(cik_to_ticker):,} CIK->ticker mappings.")
 
-    targets = sorted(glob.glob(os.path.join(FUNDAMENTALS_DIR, "fundamentals_full_*.parquet")))
+    targets = sorted(glob.glob(os.path.join(FUNDAMENTALS_DIR, "**", "fundamentals_full_*.parquet"), recursive=True))
     if not targets:
         print("No full-market parquet files found to backfill.")
         return

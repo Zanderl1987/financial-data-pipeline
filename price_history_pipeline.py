@@ -6,6 +6,7 @@ import time
 import os
 import argparse
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -136,8 +137,7 @@ def main(backfill=False):
 
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
     mode_tag = "backfill" if backfill else "incremental"
-    filename = os.path.join(OUTPUT_DIR, f"prices_{mode_tag}_{today}.parquet")
-    combined.to_parquet(filename, index=False, compression="snappy")
+    filename = write_partitioned(combined, OUTPUT_DIR, f"prices_{mode_tag}_{today}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(combined)} rows for {len(results)} symbols → {filename}")

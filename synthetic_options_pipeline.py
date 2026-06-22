@@ -45,6 +45,7 @@ import numpy as np
 import pandas as pd
 
 import pricing_models as pm
+from storage_utils import write_partitioned
 
 OUTPUT_DIR = os.path.join("storage", "raw", "synthetic_options")
 PRICES_GLOB = os.path.join("storage", "raw", "prices", "prices_*.parquet")
@@ -427,8 +428,7 @@ def main(backfill=False, symbols=None, dtes=None, moneyness=None,
 
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
     mode_tag = "backfill" if backfill else "incremental"
-    path = os.path.join(OUTPUT_DIR, f"synthetic_options_{mode_tag}_{today}.parquet")
-    out.to_parquet(path, index=False, compression="snappy")
+    path = write_partitioned(out, OUTPUT_DIR, f"synthetic_options_{mode_tag}_{today}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(out):,} rows -> {path}")

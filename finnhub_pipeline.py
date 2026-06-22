@@ -28,6 +28,7 @@ import argparse
 import requests
 import pandas as pd
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -292,8 +293,7 @@ def main():
         if dfs:
             combined = pd.concat(dfs, ignore_index=True)
             filename = f"{key}_{mode_tag}_{today_str}.parquet"
-            out_path = os.path.join(DIRS[key], filename)
-            combined.to_parquet(out_path, index=False, compression="snappy")
+            out_path = write_partitioned(combined, DIRS[key], filename)
             print(f"  Saved {key} -> {out_path} ({len(combined)} rows)")
         else:
             print(f"  Warning: No data collected for {key}")

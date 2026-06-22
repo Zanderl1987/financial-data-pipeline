@@ -182,17 +182,30 @@ Apache Iceberg is an open table format that sits on top of Parquet files and add
 
 ---
 
-### 3. Partition-Aware Storage Layout
-**Priority: Medium | Effort: Medium**
+### 3. ~~Partition-Aware Storage Layout~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-22
 
-Currently files are stored flat with the date encoded in the filename. A Hive-style partition layout would make range queries faster when using DuckDB or Spark:
+All 16 pipelines now write to Hive-style partitioned directories:
 
 ```
-storage/raw/prices/year=2025/month=06/prices.parquet
-storage/raw/prices/year=2026/month=06/prices.parquet
+storage/raw/prices/year=2026/month=06/prices_incremental_20260622.parquet
+storage/raw/fundamentals/annual/year=2026/month=06/fundamentals_full_annual_20260622.parquet
 ```
 
-DuckDB and PyArrow both understand Hive partitioning natively via `dataset.partitioning("hive")`. This is a stepping stone toward Iceberg without the catalog overhead.
+**`storage_utils.py`** — shared write helper:
+- `write_partitioned(df, output_dir, filename)` — derives `year`/`month` from `fetched_at` column, creates `year=YYYY/month=MM/` subdirs, writes Snappy-compressed Parquet
+- `find_parquet_files(directory)` — recursive `**/*.parquet` glob for any directory
+
+**`query.py` CATALOG** — all 28 glob patterns updated to `dir/**/*.parquet`; DuckDB views use `hive_partitioning=True` so `year` and `month` are virtual columns queryable in SQL.
+
+Six tables that shared parent directories were split into subdirectories to avoid glob overlap:
+- `options/metrics/` and `options/chain/` (was `options/`)
+- `fundamentals/annual/` and `fundamentals/quarterly/` (was `fundamentals/`)
+- `gas_prices/spot/` and `gas_prices/retail/` (was `gas_prices/`)
+
+**`validate.py`** and **`tests/test_catalog.py`** updated for recursive globs.
+
+**Total test suite: 111 passed, 12 skipped.**
 
 ---
 
@@ -223,13 +236,3 @@ python run_all.py --dry-run              # print commands, don't execute
 **`tests/test_runner.py`** — 18 tests covering registry integrity, env-var skip logic, CLI arg filtering, and dry-run behavior.
 
 **Total test suite: 111 passed, 12 skipped.**
-
----
-
-### 3. Partition-Aware Storage
-**Priority: Medium | Effort: Low–Medium** — see Completed section above
-
----
-
-### 5. ~~Unified Pipeline Runner~~ ✓ COMPLETED
-**Priority: Low | Effort: Medium** — see Completed section above

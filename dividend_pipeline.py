@@ -24,6 +24,7 @@ import datetime
 import argparse
 import pandas as pd
 
+from storage_utils import write_partitioned
 from finnhub_pipeline import (
     FINNHUB_API_KEY,
     get_with_backoff,
@@ -105,8 +106,7 @@ def main():
         return
 
     out_df = pd.concat(frames, ignore_index=True)
-    out_path = os.path.join(OUTPUT_DIR, f"dividends_{mode}_{today_str}.parquet")
-    out_df.to_parquet(out_path, index=False, compression="snappy")
+    out_path = write_partitioned(out_df, OUTPUT_DIR, f"dividends_{mode}_{today_str}.parquet")
     print(f"  Saved dividends -> {out_path} ({len(out_df):,} rows, "
           f"{out_df['symbol'].nunique()} symbols)")
 

@@ -56,47 +56,48 @@ def _glob(relative: str) -> str:
 
 CATALOG: dict[str, str] = {
     # Equity prices
-    "prices":                  _glob("prices/prices_*.parquet"),
-    # Options
-    "options_metrics":         _glob("options/options_metrics_*.parquet"),
-    "options_chain":           _glob("options/options_chain_raw_*.parquet"),
-    "options_history":         _glob("options_history/options_history_*.parquet"),
-    "synthetic_options":       _glob("synthetic_options/synthetic_options_*.parquet"),
-    # Fundamentals (SEC EDGAR via CIK map)
-    "fundamentals_annual":     _glob("fundamentals/fundamentals_*annual_*.parquet"),
-    "fundamentals_quarterly":  _glob("fundamentals/fundamentals_*quarterly_*.parquet"),
+    "prices":                  _glob("prices/**/*.parquet"),
+    # Options — each in its own subdir to avoid glob conflicts
+    "options_metrics":         _glob("options/metrics/**/*.parquet"),
+    "options_chain":           _glob("options/chain/**/*.parquet"),
+    "options_history":         _glob("options_history/**/*.parquet"),
+    "synthetic_options":       _glob("synthetic_options/**/*.parquet"),
+    # Fundamentals (SEC EDGAR via CIK map) — annual/quarterly in own subdirs
+    "fundamentals_annual":     _glob("fundamentals/annual/**/*.parquet"),
+    "fundamentals_quarterly":  _glob("fundamentals/quarterly/**/*.parquet"),
     # Macro + commodities
-    "commodities":             _glob("commodities/commodities_*.parquet"),
-    "macro":                   _glob("macro/macro_*.parquet"),
-    "gas_spot":                _glob("gas_prices/gas_prices_spot_daily_*.parquet"),
-    "gas_retail":              _glob("gas_prices/gas_prices_retail_weekly_*.parquet"),
+    "commodities":             _glob("commodities/**/*.parquet"),
+    "macro":                   _glob("macro/**/*.parquet"),
+    # Gas prices — spot/retail in own subdirs to avoid glob conflicts
+    "gas_spot":                _glob("gas_prices/spot/**/*.parquet"),
+    "gas_retail":              _glob("gas_prices/retail/**/*.parquet"),
     # Futures + COT
-    "futures":                 _glob("futures/futures_ohlcv_*.parquet"),
-    "cot":                     _glob("cot/cot_*.parquet"),
+    "futures":                 _glob("futures/**/*.parquet"),
+    "cot":                     _glob("cot/**/*.parquet"),
     # Events (Finnhub)
-    "earnings_calendar":       _glob("finnhub/earnings_calendar/earnings_calendar_*.parquet"),
-    "insider_transactions":    _glob("finnhub/insider_transactions/insider_transactions_*.parquet"),
+    "earnings_calendar":       _glob("finnhub/earnings_calendar/**/*.parquet"),
+    "insider_transactions":    _glob("finnhub/insider_transactions/**/*.parquet"),
     # Sector ETFs (SPDR sectors + broad indexes)
-    "sector_etfs":             _glob("sector_etfs/sector_etfs_*.parquet"),
+    "sector_etfs":             _glob("sector_etfs/**/*.parquet"),
     # Short interest
-    "short_interest":          _glob("short_interest/short_interest_*.parquet"),
-    "finra_short_interest":    _glob("finra_short_interest/finra_short_*.parquet"),
-    "sec_ftd":                 _glob("sec_ftd/sec_ftd_*.parquet"),
+    "short_interest":          _glob("short_interest/**/*.parquet"),
+    "finra_short_interest":    _glob("finra_short_interest/**/*.parquet"),
+    "sec_ftd":                 _glob("sec_ftd/**/*.parquet"),
     # Schwab real-time data
-    "schwab_quotes":           _glob("schwab/quotes/quotes_*.parquet"),
-    "schwab_options":          _glob("schwab/options/schwab_options_*.parquet"),
+    "schwab_quotes":           _glob("schwab/quotes/**/*.parquet"),
+    "schwab_options":          _glob("schwab/options/**/*.parquet"),
     # News sentiment (Claude-scored)
-    "news_sentiment":          _glob("finnhub/news_sentiment/news_sentiment_*.parquet"),
+    "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # Dividends (Finnhub)
-    "dividends":               _glob("finnhub/dividends/dividends_*.parquet"),
+    "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # Finnhub fundamentals + market data
-    "finnhub_profile":         _glob("finnhub/profile/profile_*.parquet"),
-    "finnhub_quotes":          _glob("finnhub/quotes/quotes_*.parquet"),
-    "finnhub_metrics":         _glob("finnhub/metrics/metrics_*.parquet"),
-    "finnhub_recommendations": _glob("finnhub/recommendations/recommendations_*.parquet"),
-    "finnhub_price_targets":   _glob("finnhub/price_targets/price_targets_*.parquet"),
-    "finnhub_upgrades":        _glob("finnhub/upgrades/upgrades_*.parquet"),
-    "finnhub_news":            _glob("finnhub/news/news_*.parquet"),
+    "finnhub_profile":         _glob("finnhub/profile/**/*.parquet"),
+    "finnhub_quotes":          _glob("finnhub/quotes/**/*.parquet"),
+    "finnhub_metrics":         _glob("finnhub/metrics/**/*.parquet"),
+    "finnhub_recommendations": _glob("finnhub/recommendations/**/*.parquet"),
+    "finnhub_price_targets":   _glob("finnhub/price_targets/**/*.parquet"),
+    "finnhub_upgrades":        _glob("finnhub/upgrades/**/*.parquet"),
+    "finnhub_news":            _glob("finnhub/news/**/*.parquet"),
 }
 
 _CON: duckdb.DuckDBPyConnection | None = None
@@ -113,12 +114,13 @@ def _con() -> duckdb.DuckDBPyConnection:
 def _register_views(con: duckdb.DuckDBPyConnection) -> None:
     """Register a DuckDB view for every catalog entry that has at least one file."""
     for name, glob_path in CATALOG.items():
-        if not _glob_mod.glob(glob_path.replace("/", os.sep)):
+        if not _glob_mod.glob(glob_path.replace("/", os.sep), recursive=True):
             continue
         # union_by_name tolerates schema drift across incremental files
+        # hive_partitioning reads year=/month= directory structure as virtual columns
         con.execute(f"""
             CREATE OR REPLACE VIEW {name} AS
-            SELECT * FROM read_parquet('{glob_path}', union_by_name=True)
+            SELECT * FROM read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)
         """)
 
 

@@ -32,6 +32,7 @@ import argparse
 import pandas as pd
 import schwabdev
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -195,8 +196,7 @@ def main():
         return
 
     combined = pd.concat(frames, ignore_index=True)
-    out_path = os.path.join(OUTPUT_DIR, f"schwab_options_incremental_{today_str}.parquet")
-    combined.to_parquet(out_path, index=False, compression="snappy")
+    out_path = write_partitioned(combined, OUTPUT_DIR, f"schwab_options_incremental_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(combined):,} contracts for {len(frames)} symbols → {out_path}")

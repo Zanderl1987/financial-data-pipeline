@@ -9,8 +9,8 @@ cik_map = load_cik_map()
 
 BANKS = {"JPM": cik_map["JPM"], "GS": cik_map["GS"]}
 
-annual_files  = sorted(glob.glob(os.path.join(OUTPUT_DIR, "fundamentals_*annual_*.parquet")))
-quarterly_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "fundamentals_*quarterly_*.parquet")))
+annual_files  = sorted(glob.glob(os.path.join(OUTPUT_DIR, "annual",    "**", "*.parquet"), recursive=True))
+quarterly_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "quarterly", "**", "*.parquet"), recursive=True))
 
 if not annual_files:
     raise SystemExit("No annual parquet files found.")

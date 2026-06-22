@@ -30,6 +30,7 @@ import argparse
 import pandas as pd
 
 # Shared, policy-conforming fetch layer (RateLimiter + 429 backoff).
+from storage_utils import write_partitioned
 from finnhub_pipeline import (
     FINNHUB_API_KEY,
     get_with_backoff,
@@ -140,11 +141,11 @@ def main():
     print(f"[earnings_calendar] {mode}: {earn_from} -> {earn_to} (1 request)")
     earn_df = fetch_earnings_calendar(earn_from, earn_to)
     if earn_df is not None:
-        out = os.path.join(
+        out = write_partitioned(
+            earn_df,
             DIRS["earnings_calendar"],
             f"earnings_calendar_{mode}_{today_str}.parquet",
         )
-        earn_df.to_parquet(out, index=False, compression="snappy")
         print(f"  Saved earnings_calendar -> {out} ({len(earn_df):,} rows)")
     else:
         print("  Warning: no earnings calendar data returned.")
@@ -165,11 +166,11 @@ def main():
 
     if ins_frames:
         ins_df = pd.concat(ins_frames, ignore_index=True)
-        out = os.path.join(
+        out = write_partitioned(
+            ins_df,
             DIRS["insider_transactions"],
             f"insider_transactions_{mode}_{today_str}.parquet",
         )
-        ins_df.to_parquet(out, index=False, compression="snappy")
         print(f"  Saved insider_transactions -> {out} ({len(ins_df):,} rows)")
     else:
         print("  Warning: no insider transaction data returned.")

@@ -102,14 +102,14 @@ class TestCatalogPaths:
         assert not bad, f"CATALOG entries without .parquet extension: {bad}"
 
     def test_storage_dirs_exist(self):
-        """Each CATALOG glob path's parent directory should exist (or have a .gitkeep)."""
+        """Each CATALOG glob path's base (non-wildcard) directory should exist."""
         missing_dirs = []
         for name, glob_path in q.CATALOG.items():
-            parent = os.path.dirname(glob_path)
-            # Replace forward slashes for os.path on Windows
-            parent_os = parent.replace("/", os.sep)
-            if not os.path.isdir(parent_os):
-                missing_dirs.append((name, parent_os))
+            # Strip wildcard segments — base dir is everything before the first *
+            normalized = glob_path.replace("/", os.sep)
+            base = normalized.split("*")[0].rstrip(os.sep)
+            if not os.path.isdir(base):
+                missing_dirs.append((name, base))
         assert not missing_dirs, (
             f"Storage directories missing for tables: "
             + ", ".join(f"{n} → {p}" for n, p in missing_dirs)

@@ -51,6 +51,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 from finnhub_pipeline import get_dji_symbols
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -131,8 +132,7 @@ def run_yfinance(symbols: list[str]) -> None:
 
     df = pd.DataFrame(rows)
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(DIR_YF, f"short_interest_snapshot_{today_str}.parquet")
-    df.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(df, DIR_YF, f"short_interest_snapshot_{today_str}.parquet")
 
     print(f"\n  Saved {len(df)} rows → {out_path}")
     if failed:
@@ -269,8 +269,7 @@ def run_finra() -> None:
         return
 
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(DIR_FINRA, f"finra_short_{today_str}.parquet")
-    df.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(df, DIR_FINRA, f"finra_short_{today_str}.parquet")
     print(f"  Saved {len(df):,} rows (settlement {found_date}) → {out_path}")
 
     if "symbol" in df.columns and "shares_short" in df.columns:
@@ -383,8 +382,7 @@ def run_ftd() -> None:
 
     combined  = pd.concat(frames, ignore_index=True).drop_duplicates()
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(DIR_FTD, f"sec_ftd_{today_str}.parquet")
-    combined.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(combined, DIR_FTD, f"sec_ftd_{today_str}.parquet")
     print(f"  Saved {len(combined):,} FTD rows → {out_path}")
 
     if "symbol" in combined.columns and "shares_failed" in combined.columns:

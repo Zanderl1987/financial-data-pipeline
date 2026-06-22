@@ -21,8 +21,10 @@ EDGAR_BASE = "https://data.sec.gov"
 COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 COMPANYFACTS_ZIP_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
 
-OUTPUT_DIR = os.path.join("storage", "raw", "fundamentals")
-CIK_CACHE_PATH = os.path.join(OUTPUT_DIR, "cik_map.json")
+OUTPUT_DIR          = os.path.join("storage", "raw", "fundamentals")
+ANNUAL_DIR          = os.path.join(OUTPUT_DIR, "annual")
+QUARTERLY_DIR       = os.path.join(OUTPUT_DIR, "quarterly")
+CIK_CACHE_PATH      = os.path.join(OUTPUT_DIR, "cik_map.json")
 
 # Safe target: 8 req/sec (hard limit is 10 req/sec; violations trigger ~10 min IP block)
 REQUEST_INTERVAL = 0.125
@@ -461,8 +463,15 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
     if full_market:
         print("=== FULL MARKET MODE (EDGAR companyfacts.zip — ~15,000 companies) ===")
 
-        annual_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_annual_{today}.parquet")
-        quarterly_out = os.path.join(OUTPUT_DIR, f"fundamentals_full_quarterly_{today}.parquet")
+        year_tag  = datetime.datetime.utcnow().year
+        month_tag = f"{datetime.datetime.utcnow().month:02d}"
+        annual_partition   = os.path.join(ANNUAL_DIR,    f"year={year_tag}", f"month={month_tag}")
+        quarterly_partition = os.path.join(QUARTERLY_DIR, f"year={year_tag}", f"month={month_tag}")
+        os.makedirs(annual_partition,   exist_ok=True)
+        os.makedirs(quarterly_partition, exist_ok=True)
+
+        annual_out    = os.path.join(annual_partition,    f"fundamentals_full_annual_{today}.parquet")
+        quarterly_out = os.path.join(quarterly_partition, f"fundamentals_full_quarterly_{today}.parquet")
 
         # Check HF Hub first — skip the 7 GB download if fresh data is already there
         if use_hf_cache and repo_id:
@@ -536,15 +545,22 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
 
         time.sleep(REQUEST_INTERVAL)
 
+    year_tag  = datetime.datetime.utcnow().year
+    month_tag = f"{datetime.datetime.utcnow().month:02d}"
+
     if annual_frames:
         annual_df = pd.concat(annual_frames, ignore_index=True)
-        path = os.path.join(OUTPUT_DIR, f"fundamentals_annual_{today}.parquet")
+        annual_partition = os.path.join(ANNUAL_DIR, f"year={year_tag}", f"month={month_tag}")
+        os.makedirs(annual_partition, exist_ok=True)
+        path = os.path.join(annual_partition, f"fundamentals_annual_{today}.parquet")
         annual_df.to_parquet(path, index=False, compression="snappy")
         print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
-        path = os.path.join(OUTPUT_DIR, f"fundamentals_quarterly_{today}.parquet")
+        quarterly_partition = os.path.join(QUARTERLY_DIR, f"year={year_tag}", f"month={month_tag}")
+        os.makedirs(quarterly_partition, exist_ok=True)
+        path = os.path.join(quarterly_partition, f"fundamentals_quarterly_{today}.parquet")
         quarterly_df.to_parquet(path, index=False, compression="snappy")
         print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
 

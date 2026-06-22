@@ -42,6 +42,7 @@ import urllib.request
 from typing import Optional, Tuple
 
 import pandas as pd
+from storage_utils import write_partitioned
 
 # ── config ────────────────────────────────────────────────────────────────────
 CHAIN_URL  = "https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
@@ -318,8 +319,7 @@ def fetch_all_histories(contracts: list[dict], symbol: str, range_str: str, toda
         return
 
     out = pd.concat(all_frames, ignore_index=True)
-    path = os.path.join(HISTORY_DIR, f"options_history_{symbol}_{today}.parquet")
-    out.to_parquet(path, index=False, compression="snappy")
+    path = write_partitioned(out, HISTORY_DIR, f"options_history_{symbol}_{today}.parquet")
     print(f"  Saved {len(out):,} daily bars -> {path}")
 
 

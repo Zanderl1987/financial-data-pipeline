@@ -5,12 +5,14 @@ import time
 import os
 import argparse
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
 EIA_API_KEY = os.environ["EIA_API_KEY"]
 EIA_BASE = "https://api.eia.gov/v2"
-OUTPUT_DIR = os.path.join("storage", "raw", "gas_prices")
+SPOT_DIR   = os.path.join("storage", "raw", "gas_prices", "spot")
+RETAIL_DIR = os.path.join("storage", "raw", "gas_prices", "retail")
 
 # EIA doesn't publish a hard rate limit but suspends keys on abuse — be conservative
 REQUEST_INTERVAL = 0.25  # 240 req/min
@@ -253,7 +255,8 @@ def fetch_retail_prices(start_date=None):
 # ---------------------------------------------------------------------------
 
 def main(backfill=False):
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(SPOT_DIR, exist_ok=True)
+    os.makedirs(RETAIL_DIR, exist_ok=True)
 
     if backfill:
         start_date = None
@@ -271,8 +274,7 @@ def main(backfill=False):
     retail_df = fetch_retail_prices(start_date)
 
     if spot_df is not None and not spot_df.empty:
-        path = os.path.join(OUTPUT_DIR, f"gas_prices_spot_daily_{mode_tag}_{today}.parquet")
-        spot_df.to_parquet(path, index=False, compression="snappy")
+        path = write_partitioned(spot_df, SPOT_DIR, f"gas_prices_spot_daily_{mode_tag}_{today}.parquet")
         n_series = spot_df["series"].nunique() if "series" in spot_df.columns else "?"
         print(f"\nSpot  → {path}")
         print(f"       {len(spot_df):,} rows, {n_series} series")
@@ -280,8 +282,7 @@ def main(backfill=False):
         print("\nSpot prices: no data returned (check EIA_API_KEY and series IDs).")
 
     if retail_df is not None and not retail_df.empty:
-        path = os.path.join(OUTPUT_DIR, f"gas_prices_retail_weekly_{mode_tag}_{today}.parquet")
-        retail_df.to_parquet(path, index=False, compression="snappy")
+        path = write_partitioned(retail_df, RETAIL_DIR, f"gas_prices_retail_weekly_{mode_tag}_{today}.parquet")
         combos = retail_df.groupby(["duoarea", "product"]).ngroups if "duoarea" in retail_df.columns else "?"
         print(f"Retail → {path}")
         print(f"       {len(retail_df):,} rows, {combos} grade×region combinations")

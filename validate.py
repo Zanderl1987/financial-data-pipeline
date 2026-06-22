@@ -303,7 +303,7 @@ def _check_value_ranges(df: pd.DataFrame, schema: dict) -> list:
 def _check_row_count(table: str, df: pd.DataFrame) -> CheckResult:
     """Warn if the new DataFrame is less than 50% the size of the most recent snapshot."""
     glob_path = q.CATALOG.get(table, "")
-    existing = sorted(_glob_mod.glob(glob_path.replace("/", os.sep)))
+    existing = sorted(_glob_mod.glob(glob_path.replace("/", os.sep), recursive=True))
     if not existing:
         return CheckResult("row_count", Severity.OK, f"{len(df):,} rows (no prior snapshot to compare)")
     try:
@@ -399,7 +399,7 @@ def validate_table(table: str) -> ValidationResult:
             CheckResult("catalog", Severity.ERROR, f"'{table}' not in CATALOG")
         ])
     glob_path = q.CATALOG[table]
-    files = sorted(_glob_mod.glob(glob_path.replace("/", os.sep)))
+    files = sorted(_glob_mod.glob(glob_path.replace("/", os.sep), recursive=True))
     if not files:
         return ValidationResult(table, [
             CheckResult("files", Severity.WARNING, "No parquet files on disk yet")
@@ -423,7 +423,7 @@ def validate_all() -> pd.DataFrame:
     rows = []
     for table in sorted(q.CATALOG):
         glob_path = q.CATALOG[table]
-        files = sorted(_glob_mod.glob(glob_path.replace("/", os.sep)))
+        files = sorted(_glob_mod.glob(glob_path.replace("/", os.sep), recursive=True))
         if not files:
             rows.append({
                 "table": table, "status": "NO DATA",

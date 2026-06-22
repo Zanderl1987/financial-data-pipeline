@@ -35,9 +35,11 @@ import json
 import datetime
 import argparse
 import time
+import glob as _glob_mod
 import pandas as pd
 import anthropic
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -145,16 +147,13 @@ def load_news(days: int | None = None) -> pd.DataFrame:
 
 def load_already_scored() -> set[str]:
     """Return set of headline strings already scored (dedup key)."""
-    if not os.path.exists(OUTPUT_DIR):
-        return set()
     scored = set()
-    for f in os.listdir(OUTPUT_DIR):
-        if f.endswith(".parquet"):
-            try:
-                df = pd.read_parquet(os.path.join(OUTPUT_DIR, f), columns=["headline"])
-                scored.update(df["headline"].tolist())
-            except Exception:
-                pass
+    for path in _glob_mod.glob(os.path.join(OUTPUT_DIR, "**", "*.parquet"), recursive=True):
+        try:
+            df = pd.read_parquet(path, columns=["headline"])
+            scored.update(df["headline"].tolist())
+        except Exception:
+            pass
     return scored
 
 
@@ -231,8 +230,7 @@ def main():
     out_df["fetched_at"] = datetime.datetime.utcnow().isoformat()
 
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
-    out_path  = os.path.join(OUTPUT_DIR, f"news_sentiment_{mode}_{today_str}.parquet")
-    out_df.to_parquet(out_path, index=False, compression="snappy")
+    out_path  = write_partitioned(out_df, OUTPUT_DIR, f"news_sentiment_{mode}_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Scored {len(out_df):,} articles → {out_path}")
