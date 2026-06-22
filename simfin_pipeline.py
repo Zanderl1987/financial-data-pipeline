@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-SimFin Pipeline — Financial Statements & Ratios.
+SimFin Pipeline -- Financial Statements.
 
 SimFin provides structured income statements, balance sheets, and cash flow
 statements sourced from SEC filings. The free API tier has a 12-month data
 delay but includes 10+ years of history for 4,000+ US stocks.
 
-Data fetched via SimFin API v3 (direct HTTP, no extra package required):
-  - Income statements — revenue, gross profit, EBIT, EBITDA, net income, EPS
-  - Balance sheets — assets, liabilities, equity, cash, debt, working capital
-  - Cash flow statements — operating CF, capex, FCF, dividends, buybacks
-  - Share price history (daily) — for P/E, P/S, P/B ratio computation
-
-All three statements are fetched for both annual and quarterly periods.
-The 'period_type' column distinguishes them within each table.
+API: SimFin v3 (backend.simfin.com/api/v3)
+  Statement codes: PL (income/P&L), BS (balance sheet), CF (cash flow)
+  Period codes: FY, Q1, Q2, Q3, Q4, H1, H2, 9M
+  Omitting period returns all periods in a single call.
 
 Requires: SIMFIN_API_KEY in .env
 
@@ -45,22 +41,22 @@ BASE_URL = "https://backend.simfin.com/api/v3"
 BASE_DIR = os.path.join("storage", "raw", "simfin")
 REQUEST_INTERVAL = 0.5
 MAX_RETRIES = 3
+BATCH_SIZE = 2  # free tier allows max 2 companies per request
 
-# Same core watchlist as tiingo_pipeline; SimFin uses tickers directly
 DEFAULT_SYMBOLS = [
     # DJI 30
     "AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW",
     "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM",
     "MRK", "MSFT", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT",
-    # High-interest large-cap tech + growth
+    # Large-cap tech + growth
     "NVDA", "META", "GOOGL", "AMZN", "TSLA", "PLTR", "AMD", "ORCL", "NFLX",
     # Banks & financials
     "BAC", "C", "WFC", "MS",
 ]
 
-# SimFin statement type codes
+# SimFin v3 statement codes: PL, BS, CF (NOT IS/BS/CF like v2)
 STATEMENT_TYPES = {
-    "income":   "IS",
+    "income":   "PL",
     "balance":  "BS",
     "cashflow": "CF",
 }
@@ -74,7 +70,7 @@ def get_with_backoff(url, params=None):
     headers = make_headers()
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            resp = requests.get(url, headers=headers, params=params, timeout=60)
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code == 429:
@@ -84,7 +80,7 @@ def get_with_backoff(url, params=None):
             elif resp.status_code == 404:
                 return None
             else:
-                print(f"  HTTP {resp.status_code}: {resp.text[:200]}")
+                print(f"  HTTP {resp.status_code}: {resp.text[:300]}")
                 return None
         except requests.RequestException as exc:
             print(f"  Request error (attempt {attempt}): {exc}")
@@ -92,39 +88,42 @@ def get_with_backoff(url, params=None):
     return None
 
 
-def fetch_statement(ticker, statement_code, period):
+def fetch_statements_batch(tickers, statement_code):
     """
-    Fetch one statement type for one ticker and period ('annual' or 'quarterly').
-    Returns a list of dicts (one per fiscal period) or empty list.
+    Fetch one statement type for a batch of tickers (all fiscal periods).
+    Tickers sent as comma-separated string. Omitting period returns all periods.
+    Response: list of company objects with nested statements array.
     """
     url = f"{BASE_URL}/companies/statements/compact"
-    params = {
-        "ticker":      ticker,
-        "statements":  statement_code,
-        "period":      period,
-    }
-    data = get_with_backoff(url, params)
-    if not data:
-        return []
+    params = [
+        ("ticker",     ",".join(tickers)),
+        ("statements", statement_code),
+    ]
+    return get_with_backoff(url, params) or []
 
-    # SimFin compact format: {"columns": [...], "data": [[...], ...]}
-    # The outer key is the statement code (e.g., "IS", "BS", "CF")
-    stmt = data.get(statement_code, {})
-    if not stmt:
-        # Some responses return data directly
-        stmt = data
 
-    columns = stmt.get("columns", [])
-    rows_raw = stmt.get("data", [])
-    if not columns or not rows_raw:
-        return []
+def parse_company_statements(company_data, statement_code, symbol_col="ticker"):
+    """
+    Parse the v3 response for one company entry into flat row dicts.
+    company_data: {"ticker": "AAPL", "statements": [{"statement": "PL", "columns": [...], "data": [[...]]}]}
+    """
+    ticker = company_data.get("ticker", "")
+    name = company_data.get("name", "")
+    currency = company_data.get("currency", "")
+    stmts = company_data.get("statements", [])
 
     rows = []
-    for row in rows_raw:
-        record = dict(zip(columns, row))
-        record["symbol"] = ticker
-        record["period_type"] = period
-        rows.append(record)
+    for stmt in stmts:
+        if stmt.get("statement") != statement_code:
+            continue
+        columns = stmt.get("columns", [])
+        raw_data = stmt.get("data", [])
+        for row_vals in raw_data:
+            record = dict(zip(columns, row_vals))
+            record["symbol"] = ticker
+            record["company_name"] = name
+            record["currency"] = currency
+            rows.append(record)
     return rows
 
 
@@ -163,16 +162,25 @@ def main():
     for stmt_name, stmt_code in STATEMENT_TYPES.items():
         output_dir = os.path.join(BASE_DIR, stmt_name)
         os.makedirs(output_dir, exist_ok=True)
-        print(f"[simfin_{stmt_name}] Fetching {stmt_name} statements...")
+        print(f"[simfin_{stmt_name}] Fetching {stmt_name} statements (code={stmt_code})...")
 
         all_rows = []
-        for i, sym in enumerate(symbols, 1):
-            for period in ("annual", "quarterly"):
-                rows = fetch_statement(sym, stmt_code, period)
+        total_batches = (len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE
+
+        for batch_num, batch_start in enumerate(range(0, len(symbols), BATCH_SIZE), 1):
+            batch = symbols[batch_start:batch_start + BATCH_SIZE]
+            company_list = fetch_statements_batch(batch, stmt_code)
+
+            batch_rows = 0
+            for company in company_list:
+                rows = parse_company_statements(company, stmt_code)
                 all_rows.extend(rows)
-                time.sleep(REQUEST_INTERVAL)
-            if i % 10 == 0 or i == len(symbols):
-                print(f"  [{i}/{len(symbols)}] processed {sym}...")
+                batch_rows += len(rows)
+
+            end_idx = min(batch_start + BATCH_SIZE, len(symbols))
+            print(f"  batch {batch_num}/{total_batches} [{end_idx}/{len(symbols)}] "
+                  f"+{batch_rows} rows ({len(company_list)} companies)")
+            time.sleep(REQUEST_INTERVAL)
 
         if not all_rows:
             print(f"  No data returned for simfin_{stmt_name}.\n")
@@ -181,26 +189,34 @@ def main():
         df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
 
-        # Standardize date column if present (SimFin uses 'Report Date' or 'Fiscal Year')
-        for date_col in ("report_date", "fiscal_year", "period_end_date"):
+        # Rename fiscal_period to period_type for consistency
+        if "fiscal_period" in df.columns:
+            df["period_type"] = df["fiscal_period"]
+        elif "period_type" not in df.columns:
+            df["period_type"] = "unknown"
+
+        # Standardize date columns
+        for date_col in ("report_date", "publish_date", "restated"):
             if date_col in df.columns:
                 df[date_col] = pd.to_datetime(df[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
 
-        # Convert all numeric-looking columns
+        # Convert numeric columns (skip known string/date columns)
+        skip_cols = {"symbol", "company_name", "currency", "period_type", "fiscal_period",
+                     "fiscal_year", "report_date", "publish_date", "restated", "source",
+                     "value_check", "data_model", "ttm"}
         for col in df.columns:
-            if col not in ("symbol", "period_type", "report_date", "fiscal_year",
-                           "period_end_date", "currency", "restated_date",
-                           "shares_basic", "shares_diluted"):
+            if col not in skip_cols:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         df["fetched_at"] = now.isoformat()
 
+        period_counts = df["period_type"].value_counts().to_dict() if "period_type" in df.columns else {}
         path = write_partitioned(
             df, output_dir,
             f"simfin_{stmt_name}_{mode}_{today_str}.parquet",
         )
-        print(f"  -> {path}  ({len(df):,} rows, {df['symbol'].nunique()} symbols, "
-              f"{df['period_type'].value_counts().to_dict()})\n")
+        print(f"  -> {path}")
+        print(f"     {len(df):,} rows | {df['symbol'].nunique()} symbols | periods: {period_counts}\n")
 
     print("--- SIMFIN PIPELINE COMPLETE ---")
 

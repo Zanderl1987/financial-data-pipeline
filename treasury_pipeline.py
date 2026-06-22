@@ -3,16 +3,25 @@
 US Treasury Fiscal Data Pipeline.
 
 Pulls from https://fiscaldata.treasury.gov — no API key required.
+Base URL: https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2
 
 Datasets fetched:
-  - Debt to the Penny (daily) — total public debt outstanding,
-    broken into debt held by public and intragovernmental holdings
-  - Average Interest Rates on US Treasury Securities — by security type
-    (bills, notes, bonds, TIPS, FRNs) and maturity range
-  - Treasury Securities Auctions — historical auction results including
-    offering amount, bid-to-cover ratio, high rate, CUSIP, issue/maturity dates
-  - Daily Treasury Statement (DTS) — operating cash balance (TGA), withdrawals,
-    deposits, and net position for each business day
+  treasury_debt table:
+    - Debt to the Penny (daily) — total public debt outstanding split into
+      debt held by public and intragovernmental holdings
+    - Average Interest Rates on US Treasury Securities — by security type
+      (bills, notes, bonds, TIPS, FRNs) and maturity range
+    - Interest Expense (monthly FYTD) — government interest expense by
+      expense category and group
+    - Statement of Net Cost (annual) — gross cost, earned revenue, net cost
+      per agency; overall fiscal deficit signal
+
+  treasury_auctions table:
+    - Record-Setting Auction Data — historical firsts/bests per auction
+      (highest offering, lowest rate, best bid-to-cover, etc.)
+
+Note: Full Treasury Securities Auctions Data requires Enterprise API access
+and is not available on the public endpoint.
 
 CLI:
   python treasury_pipeline.py             # incremental (last 365 days)
@@ -35,7 +44,7 @@ from storage_utils import write_partitioned
 
 load_dotenv()
 
-BASE_URL = "https://api.fiscaldata.treasury.gov/services/api/v1"
+BASE_URL = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2"
 BASE_DIR = os.path.join("storage", "raw", "treasury")
 PAGE_SIZE = 10000
 REQUEST_INTERVAL = 0.5
@@ -52,6 +61,9 @@ def get_with_backoff(url, params=None):
                 wait = 30 * attempt
                 print(f"  429 rate limit. Waiting {wait}s (attempt {attempt}/{MAX_RETRIES}).")
                 time.sleep(wait)
+            elif resp.status_code == 404:
+                print(f"  404 Not Found: {url}")
+                return None
             else:
                 print(f"  HTTP {resp.status_code}: {resp.text[:120]}")
                 return None
@@ -61,19 +73,18 @@ def get_with_backoff(url, params=None):
     return None
 
 
-def fetch_paginated(endpoint, params=None, date_filter=None):
-    """
-    Fetch all pages of a Treasury Fiscal Data endpoint.
-    date_filter: ISO string like '2024-01-01' — filters record_date >= this
-    """
-    params = dict(params or {})
-    params["page[size]"] = PAGE_SIZE
-    params["page[number]"] = 1
+def fetch_paginated(endpoint, sort_field="record_date", date_filter=None):
+    """Fetch all pages of a Treasury Fiscal Data endpoint."""
+    params = {
+        "page[size]":   PAGE_SIZE,
+        "page[number]": 1,
+        "sort":         sort_field,
+    }
     if date_filter:
         params["filter"] = f"record_date:gte:{date_filter}"
 
-    all_rows = []
     url = f"{BASE_URL}/{endpoint}"
+    all_rows = []
 
     while True:
         data = get_with_backoff(url, params)
@@ -82,13 +93,12 @@ def fetch_paginated(endpoint, params=None, date_filter=None):
         rows = data.get("data", [])
         all_rows.extend(rows)
 
-        meta = data.get("meta", {})
-        total_pages = meta.get("total-pages", 1)
-        current_page = params["page[number]"]
-        if current_page >= total_pages or not rows:
+        meta = data.get("meta", {}).get("pagination", data.get("meta", {}))
+        total_pages = meta.get("total_pages", meta.get("total-pages", 1))
+        current = params["page[number]"]
+        if current >= total_pages or not rows:
             break
-
-        params["page[number]"] = current_page + 1
+        params["page[number]"] = current + 1
         time.sleep(REQUEST_INTERVAL)
 
     return all_rows
@@ -99,101 +109,69 @@ def fetch_paginated(endpoint, params=None, date_filter=None):
 # ---------------------------------------------------------------------------
 
 def fetch_debt_to_penny(date_filter=None):
-    """
-    Debt to the Penny — daily total public debt outstanding.
-    Fields: record_date, debt_held_public_amt, intragov_hold_amt, tot_pub_debt_out_amt
-    """
-    rows = fetch_paginated(
-        "accounting/od/debt_to_penny",
-        params={"sort": "record_date"},
-        date_filter=date_filter,
-    )
+    """Daily total public debt outstanding."""
+    rows = fetch_paginated("accounting/od/debt_to_penny",
+                           sort_field="record_date", date_filter=date_filter)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    numeric_cols = ["debt_held_public_amt", "intragov_hold_amt", "tot_pub_debt_out_amt"]
+    numeric_cols = [c for c in df.columns if c.endswith("_amt") or "debt" in c.lower()]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.rename(columns={
-        "record_date":             "date",
-        "debt_held_public_amt":    "debt_held_public",
-        "intragov_hold_amt":       "debt_intragovernmental",
-        "tot_pub_debt_out_amt":    "debt_total",
-    })
-    return df
+    return df.rename(columns={"record_date": "date"}) if "record_date" in df.columns else df
 
 
 def fetch_avg_interest_rates(date_filter=None):
-    """
-    Average Interest Rates on US Treasury Securities.
-    Fields: record_date, security_type_desc, security_desc, avg_interest_rate_amt
-    Covers bills, notes, bonds, TIPS, FRNs, total marketable, total nonmarketable
-    """
-    rows = fetch_paginated(
-        "accounting/od/avg_interest_rates",
-        params={"sort": "record_date"},
-        date_filter=date_filter,
-    )
+    """Average interest rates on US Treasury securities by type."""
+    rows = fetch_paginated("accounting/od/avg_interest_rates",
+                           sort_field="record_date", date_filter=date_filter)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    if "avg_interest_rate_amt" in df.columns:
-        df["avg_interest_rate_amt"] = pd.to_numeric(df["avg_interest_rate_amt"], errors="coerce")
-    df = df.rename(columns={
-        "record_date":            "date",
-        "security_type_desc":     "security_type",
-        "security_desc":          "security_name",
-        "avg_interest_rate_amt":  "avg_interest_rate",
-    })
-    return df
-
-
-def fetch_auctions(date_filter=None):
-    """
-    Treasury Securities Auctions — historical results.
-    Includes offering amount, bid-to-cover, high rate, CUSIP, issue/maturity dates.
-    """
-    rows = fetch_paginated(
-        "accounting/od/securities_auctions",
-        params={"sort": "-auction_date"},
-        date_filter=date_filter,
-    )
-    if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows)
-    numeric_cols = [
-        "offering_amt", "total_accepted", "total_tendered",
-        "bid_to_cover_ratio", "high_rate", "int_rate",
-        "price_per100", "allotted_at_high",
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
+    for col in df.columns:
+        if "rate" in col.lower() or "amt" in col.lower():
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "auction_date" in df.columns:
-        df = df.rename(columns={"auction_date": "date"})
-    return df
+    return df.rename(columns={"record_date": "date"}) if "record_date" in df.columns else df
 
 
-def fetch_dts_operating_cash(date_filter=None):
-    """
-    Daily Treasury Statement — closing balance of Treasury General Account (TGA)
-    and daily operating cash summary.
-    """
-    rows = fetch_paginated(
-        "accounting/dts/dts_table_1",
-        params={"sort": "record_date"},
-        date_filter=date_filter,
-    )
+def fetch_interest_expense(date_filter=None):
+    """Monthly FYTD government interest expense by category."""
+    rows = fetch_paginated("accounting/od/interest_expense",
+                           sort_field="record_date", date_filter=date_filter)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    numeric_cols = [c for c in df.columns if "amt" in c.lower() or "balance" in c.lower()]
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "record_date" in df.columns:
-        df = df.rename(columns={"record_date": "date"})
-    return df
+    for col in df.columns:
+        if "amt" in col.lower():
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df.rename(columns={"record_date": "date"}) if "record_date" in df.columns else df
+
+
+def fetch_net_cost(date_filter=None):
+    """Annual Statement of Net Cost — gross cost, earned revenue, net cost per agency."""
+    rows = fetch_paginated("accounting/od/statement_net_cost",
+                           sort_field="record_date", date_filter=date_filter)
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    for col in df.columns:
+        if "amt" in col.lower() or "bil_amt" in col.lower():
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df.rename(columns={"record_date": "date"}) if "record_date" in df.columns else df
+
+
+def fetch_record_auctions():
+    """Record-setting auction data — no date filter (full dataset is small)."""
+    rows = fetch_paginated("accounting/od/record_setting_auction",
+                           sort_field="record_date", date_filter=None)
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    for col in df.columns:
+        if any(x in col.lower() for x in ("rate", "amt", "ratio", "offer", "bid")):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df.rename(columns={"record_date": "date"}) if "record_date" in df.columns else df
 
 
 # ---------------------------------------------------------------------------
@@ -223,60 +201,54 @@ def main():
     for d in [debt_dir, auctions_dir]:
         os.makedirs(d, exist_ok=True)
 
-    # ---- Debt to the Penny ----
-    print("\n[treasury_debt] Fetching debt-to-penny + avg interest rates...")
-    debt_df = fetch_debt_to_penny(date_filter)
-    rates_df = fetch_avg_interest_rates(date_filter)
-
+    # ---- Debt table: debt_to_penny + avg_interest_rates + interest_expense + net_cost ----
+    print("\n[treasury_debt] Fetching debt, rates, interest expense, net cost...")
     debt_frames = []
+
+    debt_df = fetch_debt_to_penny(date_filter)
     if not debt_df.empty:
         debt_df["dataset"] = "debt_to_penny"
-        debt_df["fetched_at"] = now.isoformat()
         debt_frames.append(debt_df)
-        print(f"  Debt to penny: {len(debt_df):,} rows")
+        print(f"  debt_to_penny:      {len(debt_df):,} rows")
 
+    rates_df = fetch_avg_interest_rates(date_filter)
     if not rates_df.empty:
         rates_df["dataset"] = "avg_interest_rates"
-        rates_df["fetched_at"] = now.isoformat()
         debt_frames.append(rates_df)
-        print(f"  Avg interest rates: {len(rates_df):,} rows")
+        print(f"  avg_interest_rates: {len(rates_df):,} rows")
+
+    expense_df = fetch_interest_expense(date_filter)
+    if not expense_df.empty:
+        expense_df["dataset"] = "interest_expense"
+        debt_frames.append(expense_df)
+        print(f"  interest_expense:   {len(expense_df):,} rows")
+
+    netcost_df = fetch_net_cost(date_filter)
+    if not netcost_df.empty:
+        netcost_df["dataset"] = "statement_net_cost"
+        debt_frames.append(netcost_df)
+        print(f"  statement_net_cost: {len(netcost_df):,} rows")
 
     if debt_frames:
-        combined_debt = pd.concat(debt_frames, ignore_index=True)
-        path = write_partitioned(
-            combined_debt, debt_dir,
-            f"treasury_debt_{mode}_{today_str}.parquet",
-        )
-        print(f"  -> {path}  ({len(combined_debt):,} total rows)")
+        combined = pd.concat(debt_frames, ignore_index=True)
+        combined["fetched_at"] = now.isoformat()
+        path = write_partitioned(combined, debt_dir,
+                                 f"treasury_debt_{mode}_{today_str}.parquet")
+        print(f"  -> {path}  ({len(combined):,} total rows)")
     else:
         print("  No debt data returned.")
 
-    # ---- Auctions ----
-    print("\n[treasury_auctions] Fetching auction results...")
-    auctions_df = fetch_auctions(date_filter)
-    if not auctions_df.empty:
-        auctions_df["fetched_at"] = now.isoformat()
-        path = write_partitioned(
-            auctions_df, auctions_dir,
-            f"treasury_auctions_{mode}_{today_str}.parquet",
-        )
-        print(f"  -> {path}  ({len(auctions_df):,} rows)")
+    # ---- Auctions table: record-setting auction data ----
+    print("\n[treasury_auctions] Fetching record-setting auction data...")
+    rec_df = fetch_record_auctions()
+    if not rec_df.empty:
+        rec_df["dataset"] = "record_setting_auction"
+        rec_df["fetched_at"] = now.isoformat()
+        path = write_partitioned(rec_df, auctions_dir,
+                                 f"treasury_auctions_{mode}_{today_str}.parquet")
+        print(f"  -> {path}  ({len(rec_df):,} rows)")
     else:
         print("  No auction data returned.")
-
-    # ---- Daily Treasury Statement ----
-    print("\n[treasury_debt] Fetching DTS operating cash balance (TGA)...")
-    dts_df = fetch_dts_operating_cash(date_filter)
-    if not dts_df.empty:
-        dts_df["dataset"] = "dts_operating_cash"
-        dts_df["fetched_at"] = now.isoformat()
-        path = write_partitioned(
-            dts_df, debt_dir,
-            f"treasury_dts_{mode}_{today_str}.parquet",
-        )
-        print(f"  -> {path}  ({len(dts_df):,} rows)")
-    else:
-        print("  No DTS data returned (endpoint may not be available).")
 
     print("\n--- TREASURY PIPELINE COMPLETE ---")
 

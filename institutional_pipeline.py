@@ -26,7 +26,6 @@ Output:
 
 import argparse
 import datetime
-import io
 import os
 import re
 import time
@@ -69,19 +68,19 @@ INSTITUTIONS = {
 }
 
 
-def make_headers():
+def make_headers(host=None):
     return {
         "User-Agent": EDGAR_USER_AGENT,
         "Accept-Encoding": "gzip, deflate",
-        "Host": "data.sec.gov",
+        **({"Host": host} if host else {}),
     }
 
 
-def get_with_backoff(url, headers=None, stream=False):
-    h = headers or make_headers()
+def get_with_backoff(url, headers=None):
+    h = headers if headers is not None else make_headers()
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = requests.get(url, headers=h, timeout=30, stream=stream)
+            resp = requests.get(url, headers=h, timeout=30)
             if resp.status_code == 200:
                 return resp
             if resp.status_code == 429:
@@ -99,10 +98,15 @@ def get_with_backoff(url, headers=None, stream=False):
     return None
 
 
+def cik_int(cik_str):
+    """Return integer CIK (strips leading zeros) for use in www.sec.gov URLs."""
+    return str(int(cik_str))
+
+
 def get_13f_filings(cik, max_filings):
     """Return list of recent 13F-HR filing metadata for a CIK."""
     url = f"{BASE_URL}/submissions/CIK{cik}.json"
-    resp = get_with_backoff(url)
+    resp = get_with_backoff(url, headers=make_headers("data.sec.gov"))
     if not resp:
         return []
 
@@ -111,21 +115,67 @@ def get_13f_filings(cik, max_filings):
     forms = recent.get("form", [])
     accession_nums = recent.get("accessionNumber", [])
     filed_dates = recent.get("filingDate", [])
-    primary_docs = recent.get("primaryDocument", [])
 
     filings = []
-    for form, accession, filed, primary_doc in zip(forms, accession_nums, filed_dates, primary_docs):
+    for form, accession, filed in zip(forms, accession_nums, filed_dates):
         if form != "13F-HR":
             continue
-        filings.append({
-            "accession": accession,
-            "filed_date": filed,
-            "primary_doc": primary_doc,
-        })
+        filings.append({"accession": accession, "filed_date": filed})
         if len(filings) >= max_filings:
             break
-
     return filings
+
+
+def get_filing_doc_names(cik, accession):
+    """
+    Get filenames in a filing directory by parsing the HTML directory listing.
+    Returns list of filename strings (e.g. ['53405.xml', 'primary_doc.xml']).
+    EDGAR doesn't provide an index JSON — parse the directory HTML instead.
+    """
+    acc_nodash = accession.replace("-", "")
+    cik_url = cik_int(cik)
+    url = (f"https://www.sec.gov/Archives/edgar/data/{cik_url}/{acc_nodash}/")
+    resp = get_with_backoff(url, headers=make_headers())
+    if not resp:
+        return []
+    # Extract href filenames from directory listing HTML
+    hrefs = re.findall(r'href="[^"]*?/([^/"]+\.[a-zA-Z0-9]+)"', resp.text)
+    return list(dict.fromkeys(hrefs))  # deduplicate preserving order
+
+
+def fetch_info_table_xml(cik, accession):
+    """
+    Find and fetch the 13F info table XML.
+    Strategy: list the filing directory; the info table is any .xml file
+    that is NOT primary_doc.xml (which is the cover page).
+    In EDGAR 13F filings the info table has a numeric filename like '53405.xml'.
+    """
+    filenames = get_filing_doc_names(cik, accession)
+    if not filenames:
+        return None
+
+    # Prefer files with 'infotable' in name; fallback to any .xml not primary_doc.xml
+    info_doc = None
+    for name in filenames:
+        if name.endswith(".xml") and "infotable" in name.lower():
+            info_doc = name
+            break
+    if not info_doc:
+        for name in filenames:
+            lname = name.lower()
+            if name.endswith(".xml") and "primary_doc" not in lname and "index" not in lname:
+                info_doc = name
+                break
+
+    if not info_doc:
+        return None
+
+    acc_nodash = accession.replace("-", "")
+    cik_url = cik_int(cik)
+    xml_url = (f"https://www.sec.gov/Archives/edgar/data/{cik_url}"
+               f"/{acc_nodash}/{info_doc}")
+    resp = get_with_backoff(xml_url, headers=make_headers())
+    return resp.text if resp else None
 
 
 def parse_13f_xml(xml_content, institution_name, cik, filed_date):
@@ -173,15 +223,6 @@ def parse_13f_xml(xml_content, institution_name, cik, filed_date):
     return rows
 
 
-def fetch_filing_document(cik, accession, primary_doc):
-    """Fetch the primary 13F XML document from EDGAR Archives."""
-    # Accession number formatted as path: 0001067983-24-000001 -> 0001067983/24000001
-    acc_no_dash = accession.replace("-", "")
-    url = f"https://www.sec.gov/Archives/edgar/{acc_no_dash[:10]}/{acc_no_dash}/{primary_doc}"
-    resp = get_with_backoff(url)
-    if not resp:
-        return None
-    return resp.text
 
 
 def main():
@@ -215,15 +256,10 @@ def main():
         for filing in filings:
             acc = filing["accession"]
             filed = filing["filed_date"]
-            primary_doc = filing["primary_doc"]
 
-            # Fetch the actual XML document
-            xml_content = fetch_filing_document(cik, acc, primary_doc)
+            xml_content = fetch_info_table_xml(cik, acc)
             if not xml_content:
-                # Try common alternate document name patterns
-                xml_content = fetch_filing_document(cik, acc, "primary_doc.xml")
-            if not xml_content:
-                print(f"    Skipping {acc} — could not fetch document")
+                print(f"    Skipping {acc} — could not fetch info table")
                 time.sleep(REQUEST_INTERVAL)
                 continue
 
@@ -232,7 +268,7 @@ def main():
                 all_rows.extend(rows)
                 print(f"    {filed}: {len(rows):,} holdings")
             else:
-                print(f"    {filed}: no holdings parsed")
+                print(f"    {filed}: no holdings parsed (check XML format)")
             time.sleep(REQUEST_INTERVAL)
 
     if not all_rows:
