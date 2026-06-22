@@ -105,9 +105,9 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="finnhub_events",
         file="finnhub_events_pipeline.py",
-        desc="Finnhub earnings calendar + insider transactions",
+        desc="Finnhub earnings calendar + insider transactions + IPO calendar",
         stage=1,
-        tables=["earnings_calendar", "insider_transactions"],
+        tables=["earnings_calendar", "insider_transactions", "ipo_calendar"],
         requires_env=["FINNHUB_API_KEY"],
         backfill_args=["--backfill"],
     ),
@@ -129,6 +129,62 @@ PIPELINES: list[PipelineSpec] = [
         requires_env=["EDGAR_USER_AGENT"],
         backfill_args=["--quarters", "40"],   # ~10 years of quarterly data
         timeout=1800,                          # large download; allow 30 min
+    ),
+    PipelineSpec(
+        name="bls",
+        file="bls_pipeline.py",
+        desc="BLS CPI, PPI, employment (nonfarm payrolls by sector), JOLTS, unemployment",
+        stage=1,
+        tables=["bls_cpi", "bls_ppi", "bls_employment", "bls_jolts", "bls_unemployment"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="treasury",
+        file="treasury_pipeline.py",
+        desc="US Treasury fiscal data — debt, avg interest rates, auction results, DTS",
+        stage=1,
+        tables=["treasury_debt", "treasury_auctions"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="world_bank",
+        file="world_bank_pipeline.py",
+        desc="World Bank global macro — GDP, inflation, trade, labor for 30+ countries",
+        stage=1,
+        tables=["world_bank"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="simfin",
+        file="simfin_pipeline.py",
+        desc="SimFin income statements, balance sheets, cash flow for watchlist symbols",
+        stage=1,
+        tables=["simfin_income", "simfin_balance", "simfin_cashflow"],
+        requires_env=["SIMFIN_API_KEY"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="tiingo",
+        file="tiingo_pipeline.py",
+        desc="Tiingo clean adjusted EOD prices + ticker-tagged news for watchlist",
+        stage=1,
+        tables=["tiingo_prices", "tiingo_news"],
+        requires_env=["TIINGO_API_KEY"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="institutional",
+        file="institutional_pipeline.py",
+        desc="SEC 13F institutional holdings for top 18 asset managers",
+        stage=1,
+        tables=["institutional_holdings"],
+        requires_env=["EDGAR_USER_AGENT"],
+        backfill_args=["--backfill"],
+        timeout=900,
     ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
@@ -191,6 +247,15 @@ PIPELINES: list[PipelineSpec] = [
         tables=["news_sentiment"],
         requires_env=["ANTHROPIC_API_KEY"],
         backfill_args=["--backfill"],
+    ),
+    PipelineSpec(
+        name="alpha_vantage",
+        file="alpha_vantage_pipeline.py",
+        desc="Alpha Vantage technical indicators (RSI/MACD/BB/ADX etc.) + forex rates",
+        stage=3,
+        tables=["alpha_vantage_technical", "alpha_vantage_forex"],
+        requires_env=["ALPHA_VANTAGE_API_KEY"],
+        timeout=1200,  # paced to respect 25 calls/day free tier
     ),
 ]
 

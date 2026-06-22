@@ -29,14 +29,29 @@ EXPECTED_TABLES = [
     "options_chain",
     "options_history",
     "synthetic_options",
-    # Fundamentals
+    # Fundamentals — SEC EDGAR
     "fundamentals_annual",
     "fundamentals_quarterly",
-    # Macro + commodities
+    # SimFin financial statements
+    "simfin_income",
+    "simfin_balance",
+    "simfin_cashflow",
+    # Macro + commodities (FRED)
     "commodities",
     "macro",
     "gas_spot",
     "gas_retail",
+    # BLS labor market
+    "bls_cpi",
+    "bls_ppi",
+    "bls_employment",
+    "bls_jolts",
+    "bls_unemployment",
+    # US Treasury fiscal data
+    "treasury_debt",
+    "treasury_auctions",
+    # World Bank global macro
+    "world_bank",
     # Futures + COT
     "futures",
     "cot",
@@ -49,9 +64,18 @@ EXPECTED_TABLES = [
     "schwab_options",
     # Sector ETFs
     "sector_etfs",
+    # Tiingo prices + news
+    "tiingo_prices",
+    "tiingo_news",
+    # Alpha Vantage
+    "alpha_vantage_technical",
+    "alpha_vantage_forex",
+    # Institutional holdings (13F)
+    "institutional_holdings",
     # Events (Finnhub)
     "earnings_calendar",
     "insider_transactions",
+    "ipo_calendar",
     "dividends",
     # Finnhub fundamentals
     "finnhub_profile",

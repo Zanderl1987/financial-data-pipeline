@@ -224,6 +224,100 @@ SCHEMAS: dict[str, dict] = {
     "finnhub_price_targets":   {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
     "finnhub_upgrades":        {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
     "finnhub_news":            {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
+    # ── BLS labor market ─────────────────────────────────────────────────────
+    "bls_cpi": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bls_ppi": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bls_employment": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bls_jolts": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bls_unemployment": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── US Treasury fiscal data ──────────────────────────────────────────────
+    "treasury_debt": {
+        "required":    ["date", "fetched_at"],
+        "critical_nn": ["date"],
+        "date_col":    "date",
+    },
+    "treasury_auctions": {
+        "required":    ["date", "fetched_at"],
+        "critical_nn": ["date"],
+        "date_col":    "date",
+    },
+    # ── World Bank global macro ──────────────────────────────────────────────
+    "world_bank": {
+        "required":    ["country_code", "indicator", "date", "value"],
+        "critical_nn": ["country_code", "indicator", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── SimFin financial statements ──────────────────────────────────────────
+    "simfin_income": {
+        "required":    ["symbol", "period_type", "fetched_at"],
+        "critical_nn": ["symbol", "period_type"],
+        "date_col":    None,
+    },
+    "simfin_balance": {
+        "required":    ["symbol", "period_type", "fetched_at"],
+        "critical_nn": ["symbol", "period_type"],
+        "date_col":    None,
+    },
+    "simfin_cashflow": {
+        "required":    ["symbol", "period_type", "fetched_at"],
+        "critical_nn": ["symbol", "period_type"],
+        "date_col":    None,
+    },
+    # ── Tiingo ───────────────────────────────────────────────────────────────
+    "tiingo_prices": {
+        "required":    ["symbol", "date", "open", "high", "low", "close", "volume"],
+        "critical_nn": ["symbol", "date", "close"],
+        "date_col":    "date",
+    },
+    "tiingo_news": {
+        "required":    ["article_id", "date", "title"],
+        "critical_nn": ["article_id", "date"],
+        "date_col":    "date",
+    },
+    # ── Alpha Vantage ────────────────────────────────────────────────────────
+    "alpha_vantage_technical": {
+        "required":    ["symbol", "date", "indicator"],
+        "critical_nn": ["symbol", "date", "indicator"],
+        "date_col":    "date",
+    },
+    "alpha_vantage_forex": {
+        "required":    ["pair", "date", "open", "high", "low", "close"],
+        "critical_nn": ["pair", "date", "close"],
+        "date_col":    "date",
+    },
+    # ── Institutional holdings ───────────────────────────────────────────────
+    "institutional_holdings": {
+        "required":    ["institution", "filed_date", "company_name", "value_usd"],
+        "critical_nn": ["institution", "filed_date"],
+        "date_col":    "filed_date",
+    },
+    # ── IPO calendar ─────────────────────────────────────────────────────────
+    "ipo_calendar": {
+        "required":    ["date", "fetched_at"],
+        "critical_nn": ["date"],
+        "date_col":    "date",
+        "value_ranges": {"price_range_low": (0, 10000), "price_range_high": (0, 10000)},
+    },
 }
 
 

@@ -7,6 +7,9 @@ Finnhub Events Pipeline:
     market for the window, so this feed costs exactly one API call per run.
   - Insider Transactions (/stock/insider-transactions) — per-symbol insider
     buy/sell filings (SEC Form 3/4/5). One request per target symbol.
+  - IPO Calendar (/calendar/ipo) — upcoming and recently priced IPOs with
+    offering price range, shares offered, exchange, and status. Single
+    market-wide request per date window, same pattern as earnings calendar.
 
 Rate-limit compliance:
   Reuses the RateLimiter + get_with_backoff fetch layer from finnhub_pipeline.py,
@@ -22,6 +25,7 @@ CLI:
 Outputs:
   storage/raw/finnhub/earnings_calendar/earnings_calendar_{mode}_{YYYYMMDD}.parquet
   storage/raw/finnhub/insider_transactions/insider_transactions_{mode}_{YYYYMMDD}.parquet
+  storage/raw/finnhub/ipo_calendar/ipo_calendar_{mode}_{YYYYMMDD}.parquet
 """
 
 import os
@@ -39,15 +43,18 @@ from finnhub_pipeline import (
 
 OUTPUT_BASE = os.path.join("storage", "raw", "finnhub")
 DIRS = {
-    "earnings_calendar": os.path.join(OUTPUT_BASE, "earnings_calendar"),
+    "earnings_calendar":   os.path.join(OUTPUT_BASE, "earnings_calendar"),
     "insider_transactions": os.path.join(OUTPUT_BASE, "insider_transactions"),
+    "ipo_calendar":        os.path.join(OUTPUT_BASE, "ipo_calendar"),
 }
 
 # Date windows (days). Earnings reaches forward to capture upcoming releases;
 # insider transactions only look backward (filings are historical).
-EARNINGS_BACK = {"incremental": 7, "backfill": 365}
-EARNINGS_FWD = {"incremental": 30, "backfill": 90}
-INSIDER_BACK = {"incremental": 90, "backfill": 730}
+EARNINGS_BACK = {"incremental": 7,  "backfill": 365}
+EARNINGS_FWD  = {"incremental": 30, "backfill": 90}
+INSIDER_BACK  = {"incremental": 90, "backfill": 730}
+IPO_BACK      = {"incremental": 30, "backfill": 365}
+IPO_FWD       = {"incremental": 90, "backfill": 90}
 
 # Standardize API field names to lowercase snake_case for a consistent schema.
 EARNINGS_RENAME = {
@@ -67,8 +74,35 @@ INSIDER_RENAME = {
 }
 
 
+IPO_RENAME = {
+    "numberOfShares":   "shares_offered",
+    "totalSharesValue": "total_value",
+    "priceRangeLow":    "price_range_low",
+    "priceRangeHigh":   "price_range_high",
+    # date, exchange, name, price, status, symbol already lowercase
+}
+
+
 def _now_iso():
     return datetime.datetime.utcnow().isoformat()
+
+
+def fetch_ipo_calendar(start_date, end_date):
+    """One market-wide call returning upcoming and recently priced IPOs."""
+    data = get_with_backoff("calendar/ipo", {"from": start_date, "to": end_date})
+    if not data:
+        return None
+    rows = data.get("ipoCalendar")
+    if not rows:
+        return None
+    df = pd.DataFrame(rows)
+    df = df.rename(columns=IPO_RENAME)
+    # Normalize numeric fields
+    for col in ("shares_offered", "total_value", "price_range_low", "price_range_high", "price"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["fetched_at"] = _now_iso()
+    return df
 
 
 def fetch_earnings_calendar(start_date, end_date):
@@ -149,6 +183,21 @@ def main():
         print(f"  Saved earnings_calendar -> {out} ({len(earn_df):,} rows)")
     else:
         print("  Warning: no earnings calendar data returned.")
+
+    # ---- IPO calendar (single market-wide request) ----
+    ipo_from = fmt(today - datetime.timedelta(days=IPO_BACK[mode]))
+    ipo_to = fmt(today + datetime.timedelta(days=IPO_FWD[mode]))
+    print(f"\n[ipo_calendar] {mode}: {ipo_from} -> {ipo_to} (1 request)")
+    ipo_df = fetch_ipo_calendar(ipo_from, ipo_to)
+    if ipo_df is not None:
+        out = write_partitioned(
+            ipo_df,
+            DIRS["ipo_calendar"],
+            f"ipo_calendar_{mode}_{today_str}.parquet",
+        )
+        print(f"  Saved ipo_calendar -> {out} ({len(ipo_df):,} rows)")
+    else:
+        print("  Warning: no IPO calendar data returned.")
 
     # ---- Insider transactions (per-symbol) ----
     symbols = get_dji_symbols()

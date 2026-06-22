@@ -55,42 +55,66 @@ def _glob(relative: str) -> str:
 # ---------------------------------------------------------------------------
 
 CATALOG: dict[str, str] = {
-    # Equity prices
+    # ── Equity prices ───────────────────────────────────────────────────────
     "prices":                  _glob("prices/**/*.parquet"),
-    # Options — each in its own subdir to avoid glob conflicts
+    # ── Options ─────────────────────────────────────────────────────────────
     "options_metrics":         _glob("options/metrics/**/*.parquet"),
     "options_chain":           _glob("options/chain/**/*.parquet"),
     "options_history":         _glob("options_history/**/*.parquet"),
     "synthetic_options":       _glob("synthetic_options/**/*.parquet"),
-    # Fundamentals (SEC EDGAR via CIK map) — annual/quarterly in own subdirs
+    # ── Fundamentals — SEC EDGAR ─────────────────────────────────────────────
     "fundamentals_annual":     _glob("fundamentals/annual/**/*.parquet"),
     "fundamentals_quarterly":  _glob("fundamentals/quarterly/**/*.parquet"),
-    # Macro + commodities
+    # ── SimFin financial statements ──────────────────────────────────────────
+    "simfin_income":           _glob("simfin/income/**/*.parquet"),
+    "simfin_balance":          _glob("simfin/balance/**/*.parquet"),
+    "simfin_cashflow":         _glob("simfin/cashflow/**/*.parquet"),
+    # ── Macro + commodities (FRED) ──────────────────────────────────────────
     "commodities":             _glob("commodities/**/*.parquet"),
     "macro":                   _glob("macro/**/*.parquet"),
-    # Gas prices — spot/retail in own subdirs to avoid glob conflicts
+    # ── BLS labor market ─────────────────────────────────────────────────────
+    "bls_cpi":                 _glob("bls/cpi/**/*.parquet"),
+    "bls_ppi":                 _glob("bls/ppi/**/*.parquet"),
+    "bls_employment":          _glob("bls/employment/**/*.parquet"),
+    "bls_jolts":               _glob("bls/jolts/**/*.parquet"),
+    "bls_unemployment":        _glob("bls/unemployment/**/*.parquet"),
+    # ── US Treasury fiscal data ──────────────────────────────────────────────
+    "treasury_debt":           _glob("treasury/debt/**/*.parquet"),
+    "treasury_auctions":       _glob("treasury/auctions/**/*.parquet"),
+    # ── World Bank global macro ──────────────────────────────────────────────
+    "world_bank":              _glob("world_bank/**/*.parquet"),
+    # ── Gas prices ───────────────────────────────────────────────────────────
     "gas_spot":                _glob("gas_prices/spot/**/*.parquet"),
     "gas_retail":              _glob("gas_prices/retail/**/*.parquet"),
-    # Futures + COT
+    # ── Futures + COT ───────────────────────────────────────────────────────
     "futures":                 _glob("futures/**/*.parquet"),
     "cot":                     _glob("cot/**/*.parquet"),
-    # Events (Finnhub)
+    # ── Finnhub events ──────────────────────────────────────────────────────
     "earnings_calendar":       _glob("finnhub/earnings_calendar/**/*.parquet"),
     "insider_transactions":    _glob("finnhub/insider_transactions/**/*.parquet"),
-    # Sector ETFs (SPDR sectors + broad indexes)
+    "ipo_calendar":            _glob("finnhub/ipo_calendar/**/*.parquet"),
+    # ── Sector ETFs ─────────────────────────────────────────────────────────
     "sector_etfs":             _glob("sector_etfs/**/*.parquet"),
-    # Short interest
+    # ── Short interest ───────────────────────────────────────────────────────
     "short_interest":          _glob("short_interest/**/*.parquet"),
     "finra_short_interest":    _glob("finra_short_interest/**/*.parquet"),
     "sec_ftd":                 _glob("sec_ftd/**/*.parquet"),
-    # Schwab real-time data
+    # ── Schwab real-time ────────────────────────────────────────────────────
     "schwab_quotes":           _glob("schwab/quotes/**/*.parquet"),
     "schwab_options":          _glob("schwab/options/**/*.parquet"),
-    # News sentiment (Claude-scored)
+    # ── Tiingo prices + news ─────────────────────────────────────────────────
+    "tiingo_prices":           _glob("tiingo/prices/**/*.parquet"),
+    "tiingo_news":             _glob("tiingo/news/**/*.parquet"),
+    # ── Alpha Vantage technical + forex ──────────────────────────────────────
+    "alpha_vantage_technical": _glob("alpha_vantage/technical/**/*.parquet"),
+    "alpha_vantage_forex":     _glob("alpha_vantage/forex/**/*.parquet"),
+    # ── Institutional holdings (13F) ─────────────────────────────────────────
+    "institutional_holdings":  _glob("institutional/**/*.parquet"),
+    # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
-    # Dividends (Finnhub)
+    # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
-    # Finnhub fundamentals + market data
+    # ── Finnhub fundamentals + market data ───────────────────────────────────
     "finnhub_profile":         _glob("finnhub/profile/**/*.parquet"),
     "finnhub_quotes":          _glob("finnhub/quotes/**/*.parquet"),
     "finnhub_metrics":         _glob("finnhub/metrics/**/*.parquet"),
