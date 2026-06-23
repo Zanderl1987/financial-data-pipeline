@@ -148,6 +148,28 @@ CATALOG: dict[str, str] = {
     "patents":                 _glob("patents/**/*.parquet"),
     # ── ECB policy rates, Euribor, yield curve, HICP ─────────────────────────
     "ecb_rates":               _glob("ecb/**/*.parquet"),
+    # ── USGS critical mineral statistics ─────────────────────────────────────
+    "usgs_minerals":           _glob("usgs_minerals/**/*.parquet"),
+    # ── UN Comtrade international trade flows ─────────────────────────────────
+    "comtrade_trade":          _glob("comtrade/**/*.parquet"),
+    # ── Fama-French factor returns + industry portfolios ──────────────────────
+    "ff_factors":              _glob("fama_french/factors/**/*.parquet"),
+    "ff_industry":             _glob("fama_french/industry/**/*.parquet"),
+    # ── Shiller long-run valuation (CAPE, P/E, dividends back to 1871) ───────
+    "shiller_cape":            _glob("shiller/**/*.parquet"),
+    # ── CBOE volatility indices (VIX, VIX9D, VIX3M, VIX6M, VVIX, SKEW) ─────
+    "cboe_volatility":         _glob("cboe/**/*.parquet"),
+    # ── FDIC bank financials, institutions, failures ──────────────────────────
+    "fdic_institutions":       _glob("fdic/institutions/**/*.parquet"),
+    "fdic_financials":         _glob("fdic/financials/**/*.parquet"),
+    "fdic_failures":           _glob("fdic/failures/**/*.parquet"),
+    # ── Crypto Fear & Greed Index (Alternative.me) ────────────────────────────
+    "fear_greed":              _glob("fear_greed/**/*.parquet"),
+    # ── Nasdaq Data Link: S&P 500 valuation + Treasury yield curve ────────────
+    "market_valuation":        _glob("nasdaq_data_link/valuation/**/*.parquet"),
+    "treasury_yield_curve":    _glob("nasdaq_data_link/yield_curve/**/*.parquet"),
+    # ── NY Fed SOMA balance sheet holdings (Treasuries + Agency MBS) ─────────
+    "fed_soma":                _glob("fed_soma/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

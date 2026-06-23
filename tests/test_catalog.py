@@ -124,6 +124,28 @@ EXPECTED_TABLES = [
     "patents",
     # ECB rates
     "ecb_rates",
+    # USGS critical minerals
+    "usgs_minerals",
+    # UN Comtrade trade flows
+    "comtrade_trade",
+    # Fama-French factor returns + industry portfolios
+    "ff_factors",
+    "ff_industry",
+    # Shiller long-run CAPE valuation
+    "shiller_cape",
+    # CBOE volatility indices
+    "cboe_volatility",
+    # FDIC banking data
+    "fdic_institutions",
+    "fdic_financials",
+    "fdic_failures",
+    # Fear & Greed Index
+    "fear_greed",
+    # Nasdaq Data Link
+    "market_valuation",
+    "treasury_yield_curve",
+    # NY Fed SOMA balance sheet
+    "fed_soma",
 ]
 
 

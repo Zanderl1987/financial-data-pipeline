@@ -42,6 +42,13 @@ PIPELINE_MODULES = [
     "congressional_trades_pipeline",
     "patents_pipeline",
     "ecb_pipeline",
+    "fama_french_pipeline",
+    "shiller_pipeline",
+    "cboe_pipeline",
+    "fdic_pipeline",
+    "fear_greed_pipeline",
+    "nasdaq_data_link_pipeline",
+    "fed_soma_pipeline",
 ]
 
 

@@ -457,6 +457,90 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"value": (0, 50_000)},       # thousand barrels per day
     },
+    # ── USGS DS-140 critical mineral statistics ───────────────────────────────
+    "usgs_minerals": {
+        "required":    ["commodity", "category", "sheet", "metric", "year", "value", "fetched_at"],
+        "critical_nn": ["commodity", "metric", "year", "value"],
+        "date_col":    None,
+        "value_ranges": {"year": (1900, 2031)},
+    },
+    # ── Fama-French factor returns ────────────────────────────────────────────
+    "ff_factors": {
+        "required":    ["date", "frequency", "factor", "value", "source", "fetched_at"],
+        "critical_nn": ["date", "frequency", "factor", "value"],
+        "date_col":    "date",
+    },
+    # ── Fama-French 48 industry portfolios ────────────────────────────────────
+    "ff_industry": {
+        "required":    ["date", "frequency", "weighting", "industry", "return_pct", "fetched_at"],
+        "critical_nn": ["date", "industry", "return_pct"],
+        "date_col":    "date",
+    },
+    # ── Shiller CAPE long-run valuation ──────────────────────────────────────
+    "shiller_cape": {
+        "required":    ["date", "price", "cape", "fetched_at"],
+        "critical_nn": ["date", "price"],
+        "date_col":    "date",
+        "value_ranges": {"cape": (0, 200), "price": (0, 1_000_000)},
+    },
+    # ── CBOE volatility indices ───────────────────────────────────────────────
+    "cboe_volatility": {
+        "required":    ["date", "index_name", "close", "fetched_at"],
+        "critical_nn": ["date", "index_name", "close"],
+        "date_col":    "date",
+        "value_ranges": {"close": (0, 400)},
+    },
+    # ── FDIC bank institutions ────────────────────────────────────────────────
+    "fdic_institutions": {
+        "required":    ["cert", "instname", "asset", "fetched_at"],
+        "critical_nn": ["cert", "instname"],
+        "date_col":    None,
+    },
+    # ── FDIC bank financials ──────────────────────────────────────────────────
+    "fdic_financials": {
+        "required":    ["cert", "repdte", "asset", "fetched_at"],
+        "critical_nn": ["cert", "repdte", "asset"],
+        "date_col":    "report_date",
+    },
+    # ── FDIC bank failures ────────────────────────────────────────────────────
+    "fdic_failures": {
+        "required":    ["cert", "name", "faildate", "fetched_at"],
+        "critical_nn": ["cert", "name", "faildate"],
+        "date_col":    "faildate",
+    },
+    # ── Crypto Fear & Greed Index ─────────────────────────────────────────────
+    "fear_greed": {
+        "required":    ["date", "value", "classification", "source", "fetched_at"],
+        "critical_nn": ["date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 100)},
+    },
+    # ── Nasdaq Data Link: S&P 500 valuation metrics ───────────────────────────
+    "market_valuation": {
+        "required":    ["date", "series", "value", "fetched_at"],
+        "critical_nn": ["date", "series", "value"],
+        "date_col":    "date",
+    },
+    # ── Nasdaq Data Link: Treasury yield curve ────────────────────────────────
+    "treasury_yield_curve": {
+        "required":    ["date", "10yr", "fetched_at"],
+        "critical_nn": ["date", "10yr"],
+        "date_col":    "date",
+        "value_ranges": {"10yr": (0, 25)},
+    },
+    # ── NY Fed SOMA balance sheet holdings ────────────────────────────────────
+    "fed_soma": {
+        "required":    ["as_of_date", "asset_type", "fetched_at"],
+        "critical_nn": ["as_of_date", "asset_type"],
+        "date_col":    "as_of_date",
+    },
+    # ── UN Comtrade trade flows (battery materials and components) ────────────
+    "comtrade_trade": {
+        "required":    ["hs_code", "hs_name", "category", "year", "flow", "trade_value_usd", "fetched_at"],
+        "critical_nn": ["hs_code", "year", "flow"],
+        "date_col":    None,
+        "value_ranges": {"trade_value_usd": (0, 5e12)},
+    },
 }
 
 
