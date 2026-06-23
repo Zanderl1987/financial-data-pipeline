@@ -27,7 +27,8 @@ from storage_utils import write_partitioned
 
 load_dotenv()
 
-USDA_API_KEY = os.getenv("USDA_NASS_API_KEY", "")
+USDA_API_KEY   = os.getenv("USDA_NASS_API_KEY", "")
+USDA_API_KEY_2 = os.getenv("USDA_NASS_API_KEY_2", "")
 USDA_BASE = "https://quickstats.nass.usda.gov/api/api_GET/"
 USDA_DIR = os.path.join("storage", "raw", "usda")
 
@@ -63,7 +64,12 @@ FERTILIZER_COMMODITIES = [
 # ---------------------------------------------------------------------------
 
 def _get_with_backoff(params: dict) -> dict | None:
-    for attempt in range(1, MAX_RETRIES + 1):
+    keys = [k for k in [USDA_API_KEY, USDA_API_KEY_2] if k]
+    key_idx = 0
+    params["key"] = keys[key_idx]
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        attempt += 1
         try:
             r = requests.get(USDA_BASE, params=params, timeout=60)
             if r.status_code == 200:
@@ -72,6 +78,12 @@ def _get_with_backoff(params: dict) -> dict | None:
                 except Exception as e:
                     print(f"  JSON parse error: {e}")
                     return None
+            if r.status_code == 401 and key_idx + 1 < len(keys):
+                key_idx += 1
+                params["key"] = keys[key_idx]
+                print(f"  401 unauthorized -- switching to backup API key")
+                attempt -= 1  # don't count key rotation as a retry
+                continue
             if r.status_code == 429:
                 wait = BACKOFF_SECONDS * attempt
                 print(f"  429 rate limit -- backing off {wait}s (attempt {attempt}/{MAX_RETRIES})")
@@ -255,10 +267,9 @@ def _clean_fertilizers(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def main(backfill: bool = False) -> None:
-    if not USDA_API_KEY:
-        print("ERROR: USDA_NASS_API_KEY not set.")
+    if not USDA_API_KEY and not USDA_API_KEY_2:
+        print("ERROR: No USDA API key found (USDA_NASS_API_KEY or USDA_NASS_API_KEY_2).")
         print("  Register free at https://quickstats.nass.usda.gov/api")
-        print("  Then add USDA_NASS_API_KEY=<your_key> to your .env file.")
         return
 
     os.makedirs(os.path.join(USDA_DIR, "crops"), exist_ok=True)
