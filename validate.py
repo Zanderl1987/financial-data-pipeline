@@ -377,6 +377,25 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"value_mo_usd": (0, 1e13)},
     },
+    # ── EIA expanded (petroleum inventories, nat gas storage, crude production)
+    "eia_petroleum_stocks": {
+        "required":    ["series_id", "series_name", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 2_000_000)},   # thousand barrels
+    },
+    "eia_natgas_storage": {
+        "required":    ["duoarea", "date", "value", "fetched_at"],
+        "critical_nn": ["duoarea", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (-500, 5_000)},     # BCF; can be negative (net withdrawal)
+    },
+    "eia_crude_production": {
+        "required":    ["series_id", "series_name", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 50_000)},       # thousand barrels per day
+    },
 }
 
 

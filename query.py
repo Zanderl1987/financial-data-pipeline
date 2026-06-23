@@ -127,6 +127,10 @@ CATALOG: dict[str, str] = {
     # ── US Census international trade (HS chapters) ───────────────────────────
     "us_imports_hs":           _glob("trade/imports/**/*.parquet"),
     "us_exports_hs":           _glob("trade/exports/**/*.parquet"),
+    # ── EIA petroleum inventories, natural gas storage, crude production ──────
+    "eia_petroleum_stocks":    _glob("eia/petroleum_stocks/**/*.parquet"),
+    "eia_natgas_storage":      _glob("eia/natgas_storage/**/*.parquet"),
+    "eia_crude_production":    _glob("eia/crude_production/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

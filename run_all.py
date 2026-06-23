@@ -215,6 +215,16 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=600,
     ),
+    PipelineSpec(
+        name="eia",
+        file="eia_pipeline.py",
+        desc="EIA weekly petroleum inventories, natural gas storage, monthly crude production",
+        stage=1,
+        tables=["eia_petroleum_stocks", "eia_natgas_storage", "eia_crude_production"],
+        requires_env=["EIA_API_KEY"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
         name="prices",
