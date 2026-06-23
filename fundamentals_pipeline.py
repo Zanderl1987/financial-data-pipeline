@@ -10,6 +10,7 @@ import tempfile
 import argparse
 import pyarrow.parquet as pq
 from dotenv import load_dotenv
+from storage_utils import write_partitioned
 
 load_dotenv()
 
@@ -545,23 +546,14 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
 
         time.sleep(REQUEST_INTERVAL)
 
-    year_tag  = datetime.datetime.utcnow().year
-    month_tag = f"{datetime.datetime.utcnow().month:02d}"
-
     if annual_frames:
         annual_df = pd.concat(annual_frames, ignore_index=True)
-        annual_partition = os.path.join(ANNUAL_DIR, f"year={year_tag}", f"month={month_tag}")
-        os.makedirs(annual_partition, exist_ok=True)
-        path = os.path.join(annual_partition, f"fundamentals_annual_{today}.parquet")
-        annual_df.to_parquet(path, index=False, compression="snappy")
+        path = write_partitioned(annual_df, ANNUAL_DIR, f"fundamentals_annual_{today}.parquet")
         print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
-        quarterly_partition = os.path.join(QUARTERLY_DIR, f"year={year_tag}", f"month={month_tag}")
-        os.makedirs(quarterly_partition, exist_ok=True)
-        path = os.path.join(quarterly_partition, f"fundamentals_quarterly_{today}.parquet")
-        quarterly_df.to_parquet(path, index=False, compression="snappy")
+        path = write_partitioned(quarterly_df, QUARTERLY_DIR, f"fundamentals_quarterly_{today}.parquet")
         print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
 
     if failed:
