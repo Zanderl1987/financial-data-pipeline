@@ -110,6 +110,23 @@ CATALOG: dict[str, str] = {
     "alpha_vantage_forex":     _glob("alpha_vantage/forex/**/*.parquet"),
     # ── Institutional holdings (13F) ─────────────────────────────────────────
     "institutional_holdings":  _glob("institutional/**/*.parquet"),
+    # ── IMF Primary Commodity Prices ─────────────────────────────────────────
+    "imf_commodities":         _glob("imf/**/*.parquet"),
+    # ── Metals spot prices ───────────────────────────────────────────────────
+    "metals_spot":             _glob("metals/**/*.parquet"),
+    # ── FAO global food & agriculture statistics ──────────────────────────────
+    "fao_production":          _glob("fao/production/**/*.parquet"),
+    "fao_prices":              _glob("fao/prices/**/*.parquet"),
+    # ── World Bank Pink Sheet commodity prices ────────────────────────────────
+    "wb_commodities":          _glob("worldbank_pink/**/*.parquet"),
+    # ── NOAA climate ─────────────────────────────────────────────────────────
+    "noaa_climate":            _glob("climate/**/*.parquet"),
+    # ── USDA NASS crop production + fertilizer prices ─────────────────────────
+    "usda_crops":              _glob("usda/crops/**/*.parquet"),
+    "usda_fertilizers":        _glob("usda/fertilizers/**/*.parquet"),
+    # ── US Census international trade (HS chapters) ───────────────────────────
+    "us_imports_hs":           _glob("trade/imports/**/*.parquet"),
+    "us_exports_hs":           _glob("trade/exports/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

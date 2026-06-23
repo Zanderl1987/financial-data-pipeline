@@ -318,6 +318,65 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"price_range_low": (0, 10000), "price_range_high": (0, 10000)},
     },
+    # ── IMF Primary Commodity Prices ─────────────────────────────────────────
+    "imf_commodities": {
+        "required":    ["series_id", "date", "value", "category"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── Metals spot prices ───────────────────────────────────────────────────
+    "metals_spot": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── FAO FAOSTAT ──────────────────────────────────────────────────────────
+    "fao_production": {
+        "required":    ["country", "commodity", "year", "value"],
+        "critical_nn": ["country", "commodity", "value"],
+        "date_col":    None,
+    },
+    "fao_prices": {
+        "required":    ["country", "commodity", "year", "value"],
+        "critical_nn": ["country", "commodity", "value"],
+        "date_col":    None,
+    },
+    # ── World Bank Pink Sheet commodity prices ────────────────────────────────
+    "wb_commodities": {
+        "required":    ["commodity", "value", "fetched_at"],
+        "critical_nn": ["commodity", "value"],
+        "date_col":    "date",
+    },
+    # ── NOAA NCEI climate (monthly summaries) ────────────────────────────────
+    "noaa_climate": {
+        "required":    ["station_id", "date", "fetched_at"],
+        "critical_nn": ["station_id", "date"],
+        "date_col":    "date",
+    },
+    # ── USDA NASS crop production + fertilizer prices ─────────────────────────
+    "usda_crops": {
+        "required":    ["commodity", "stat_category", "year", "value", "fetched_at"],
+        "critical_nn": ["commodity", "value"],
+        "date_col":    "date",
+    },
+    "usda_fertilizers": {
+        "required":    ["commodity", "stat_category", "date", "value", "fetched_at"],
+        "critical_nn": ["commodity", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── US Census international trade (HS chapters) ───────────────────────────
+    "us_imports_hs": {
+        "required":    ["hs2_code", "hs2_desc", "date", "value_mo_usd", "fetched_at"],
+        "critical_nn": ["hs2_code", "date"],
+        "date_col":    "date",
+        "value_ranges": {"value_mo_usd": (0, 1e13)},
+    },
+    "us_exports_hs": {
+        "required":    ["hs2_code", "hs2_desc", "date", "value_mo_usd", "fetched_at"],
+        "critical_nn": ["hs2_code", "date"],
+        "date_col":    "date",
+        "value_ranges": {"value_mo_usd": (0, 1e13)},
+    },
 }
 
 

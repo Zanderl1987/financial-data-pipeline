@@ -87,10 +87,18 @@ PPI_SERIES = {
     "WPU06":         ("PPI Fuels & Related Products",        "Index 1982=100"),
     "WPU0561":       ("PPI Gasoline",                        "Index 1982=100"),
     "WPU102":        ("PPI Processed Foods & Feeds",         "Index 1982=100"),
-    "WPS141":        ("PPI Metals & Metal Products",         "Index 1982=100"),
-    "WPU114":        ("PPI Chemicals & Allied Products",     "Index 1982=100"),
-    "WPU15":         ("PPI Rubber & Plastic Products",       "Index 1982=100"),
-    "WPU11":         ("PPI Lumber & Wood Products",          "Index 1982=100"),
+    "WPS141":        ("PPI Metals & Metal Products",              "Index 1982=100"),
+    "WPU114":        ("PPI Chemicals & Allied Products",          "Index 1982=100"),
+    "WPU15":         ("PPI Rubber & Plastic Products",            "Index 1982=100"),
+    "WPU11":         ("PPI Lumber & Wood Products",               "Index 1982=100"),
+    # Supply-chain / input-cost extensions
+    "PCU325211325211":  ("PPI Plastics Material & Resin Mfg",    "Index 2012=100"),
+    "PCU325311325311A": ("PPI Nitrogenous Fertilizer Mfg",       "Index 2012=100"),
+    "WPU0652013A":      ("PPI Synthetic Ammonia & Urea",         "Index 1982=100"),
+    "WPU061":           ("PPI Industrial Chemicals",              "Index 1982=100"),
+    "WPU10":            ("PPI Metals & Metal Products Detailed",  "Index 1982=100"),
+    "PCU3334":          ("PPI Computer & Electronic Product Mfg", "Index 2012=100"),
+    "WPU0571":          ("PPI Softwood Lumber",                   "Index 1982=100"),
 }
 
 EMPLOYMENT_SERIES = {

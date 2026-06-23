@@ -141,6 +141,26 @@ python validate.py --all            # include tables with no data yet
 
 ---
 
+### 8. ~~USDA NASS + US Census Trade Pipelines~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-23
+
+**`usda_pipeline.py`** (USDA NASS QuickStats API — requires `USDA_NASS_API_KEY`):
+- 8 major US field crops: corn, soybeans, wheat, cotton, rice, sorghum, barley, oats
+- Annual national production statistics: area planted/harvested, yield, production, price received
+- Fertilizer prices paid by farmers: anhydrous ammonia, DAP, urea, potash (monthly, national)
+- Backfill from 2000; incremental = last 5 years
+- CATALOG: `usda_crops`, `usda_fertilizers`; Stage 1 in `run_all.py`
+
+**`trade_pipeline.py`** (US Census Bureau International Trade API — requires `CENSUS_API_KEY`):
+- 5 agricultural HTS chapters: cereals (10), oilseeds (12), fats/oils (15), feed residues (23), fertilizers (31)
+- World totals only (`CTY_CODE=0000`) — imports and exports separately
+- Backfill = annual YTD totals (December) from 2010; incremental = last 24 months monthly
+- CATALOG: `us_imports_hs`, `us_exports_hs`; Stage 1 in `run_all.py`
+
+**Total test suite: 111 passed, 12 skipped.** CATALOG expanded 51→55 tables.
+
+---
+
 ## Candidate Improvements
 
 ### 1. ~~DuckDB Query Layer~~ ✓ COMPLETED
@@ -213,6 +233,42 @@ Six tables that shared parent directories were split into subdirectories to avoi
 
 ---
 
+### 6. ~~4 New Commodity Pipelines~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-23
+
+Four new free-data-source pipelines, no new API keys required. CATALOG expanded from 45 to 50 tables. All 111 tests still passing.
+
+**`imf_commodities_pipeline.py`** (FRED API — IMF PCPS mirror):
+- 14 confirmed-working series: base metals (Al/Ni/Zn/Pb/Fe/Sn), coal, LNG (Japan + European), rice, palm oil, tea, Non-Fuel Commodity Index, Food Commodity Index
+- Supplements `commodity_macro_pipeline.py` — no overlap with existing series
+- CATALOG: `imf_commodities`
+
+**`metals_pipeline.py`** (FRED API + api.metals.live):
+- 7 base metals via FRED IMF PCPS monthly series: Cu, Al, Ni, Zn, Pb, Fe (iron ore), Sn
+- api.metals.live real-time spot (SSL error on current host — graceful fallback)
+- Precious metals (Au, Ag, Pt, Pd) already in `commodity_macro_pipeline.py`
+- CATALOG: `metals_spot`
+
+**`fao_pipeline.py`** (FAOSTAT bulk ZIP fallback):
+- Crop production (quantities + harvested area) for 10 major countries, 17+ commodities
+- Producer prices (USD/tonne) for 12 key commodities
+- Primary method: FAOSTAT REST API (fenixservices.fao.org) — returns HTTP 521 frequently
+- Fallback: bulk ZIP at `https://bulks-faostat.fao.org/production/` (reliable; ~25MB + ~8MB)
+- CATALOG: `fao_production`, `fao_prices`
+
+**`worldbank_pink_sheet.py`** (World Bank Pink Sheet Excel):
+- 71 commodities, monthly prices 1960–present (~50,000 rows)
+- Covers fertilizers (urea, DAP, potash, phosphate), rubber, cocoa, and other series absent from FRED
+- URL hash changes monthly — update `PINK_SHEET_URLS[0]` each month (find at worldbank.org/en/research/commodity-markets)
+- Excel structure: rows 0-3 = title, row 4 = commodity names, row 5 = units, row 6+ = "1960M01" dates
+- Required openpyxl >= 3.1.5 (upgraded from 3.0.10 during implementation)
+- CATALOG: `wb_commodities`
+
+**`bls_pipeline.py`** — added 7 supply-chain input cost PPI series:
+- Plastics/Resin Mfg (PCU325211325211), Nitrogenous Fertilizer Mfg (PCU325311325311A), Synthetic Ammonia/Urea (WPU0652013A), Industrial Chemicals (WPU061), Metals/Metal Products (WPU10), Computer/Electronic Product Mfg (PCU3334), Softwood Lumber (WPU0571)
+
+---
+
 ### 5. ~~Unified Pipeline Runner~~ ✓ COMPLETED
 **Status:** Implemented 2026-06-20
 
@@ -234,5 +290,18 @@ python run_all.py --dry-run              # print commands, don't execute
 ```
 
 **`tests/test_runner.py`** — 18 tests covering registry integrity, env-var skip logic, CLI arg filtering, and dry-run behavior.
+
+**Total test suite: 111 passed, 12 skipped.**
+
+---
+
+### 7. ~~NOAA NCEI Climate Pipeline~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-23
+
+**`noaa_climate_pipeline.py`** (NOAA NCEI Access Services API v1 — keyless, no token required):
+- 15 stations covering major US agricultural regions: Corn Belt (Des Moines), Winter Wheat (Wichita), Central Valley (Fresno), Spring Wheat (Minneapolis), Southeast (Atlanta), Cotton/Citrus (Phoenix), Midwest Hub (Chicago), Cotton/Cattle (Dallas), Export Hub (New Orleans), Cotton/Soybeans (Memphis), Northeast (New York), Pacific Coast (LA), Northern Plains (Great Falls), Corn/Soybeans (Omaha), Delta Ag (Jackson)
+- Monthly measures: TMAX, TMIN, TAVG, PRCP, SNOW, HDD, CDD, DP01, DP10, EMXT, EMNT
+- Backfill: 1990 to present; incremental: last 2 years
+- CATALOG: `noaa_climate`; added to Stage 1 of `run_all.py`
 
 **Total test suite: 111 passed, 12 skipped.**
