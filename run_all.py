@@ -305,6 +305,7 @@ PIPELINES: list[PipelineSpec] = [
         desc="UN Comtrade — US import/export flows for battery materials and components",
         stage=1,
         tables=["comtrade_trade"],
+        requires_env=["COMTRADE_API_KEY"],
         backfill_args=["--backfill"],
         timeout=600,
     ),

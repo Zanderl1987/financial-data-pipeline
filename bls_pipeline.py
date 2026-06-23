@@ -99,6 +99,13 @@ PPI_SERIES = {
     "WPU10":            ("PPI Metals & Metal Products Detailed",  "Index 1982=100"),
     "PCU3334":          ("PPI Computer & Electronic Product Mfg", "Index 2012=100"),
     "WPU0571":          ("PPI Softwood Lumber",                   "Index 1982=100"),
+    # Battery and automotive manufacturing — supply chain cost indices
+    "PCU331110331110":  ("PPI Iron and Steel Mills",              "Index 2012=100"),
+    "PCU331210331210":  ("PPI Steel Product Mfg Purchased Steel", "Index 2012=100"),
+    "PCU335911335911":  ("PPI Storage Battery Mfg",               "Index 2012=100"),
+    "PCU336111336111":  ("PPI Automobile Manufacturing",          "Index 2012=100"),
+    "PCU3363":          ("PPI Motor Vehicle Parts Mfg",           "Index 2012=100"),
+    "PCU334413334413":  ("PPI Semiconductor Device Mfg",          "Index 2012=100"),
 }
 
 EMPLOYMENT_SERIES = {

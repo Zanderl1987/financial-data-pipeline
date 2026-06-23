@@ -46,11 +46,12 @@ GDP_TABLES = [
 
 INCOME_TABLES = [
     ("T20100", "Q", "Personal income and its disposition, quarterly"),
-    ("T20200", "M", "Personal income and outlays, monthly"),
+    ("T20600", "M", "Personal income and its disposition, monthly"),
 ]
 
 PROFITS_TABLES = [
-    ("T60700A", "A", "Corporate profits by industry, annual"),
+    ("T61600D", "A", "Corporate profits by industry, annual"),
+    ("T61900D", "A", "Corporate profits after tax by industry, annual"),
 ]
 
 

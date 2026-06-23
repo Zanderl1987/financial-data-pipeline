@@ -56,6 +56,9 @@ SERIES: dict[str, tuple] = {
     "PLEADUSDM":      ("Lead",                         "monthly", "USD/MT",          "metals"),
     "PIORECRUSDM":    ("Iron Ore",                     "monthly", "USD/DMT",         "metals"),
     "PTINUSDM":       ("Tin",                          "monthly", "USD/MT",          "metals"),
+    # NOTE: Cobalt, lithium, manganese, graphite, and rare earths are NOT available via
+    # FRED's IMF PCPS mirror. These are sourced from usgs_minerals_pipeline (annual)
+    # and comtrade_pipeline (trade flows). The World Bank Pink Sheet also lacks them.
     # Silver already in commodity_macro_pipeline; SLVPRUSD ID returns 400 on FRED
 
     # Agricultural (rice, palm oil, tea not in commodity_macro)
