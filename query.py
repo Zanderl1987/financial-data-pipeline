@@ -131,6 +131,23 @@ CATALOG: dict[str, str] = {
     "eia_petroleum_stocks":    _glob("eia/petroleum_stocks/**/*.parquet"),
     "eia_natgas_storage":      _glob("eia/natgas_storage/**/*.parquet"),
     "eia_crude_production":    _glob("eia/crude_production/**/*.parquet"),
+    # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
+    "crypto_market":           _glob("crypto/market/**/*.parquet"),
+    "crypto_history":          _glob("crypto/history/**/*.parquet"),
+    # ── Forex rates (Frankfurter / ECB) ──────────────────────────────────────
+    "forex_rates":             _glob("forex/**/*.parquet"),
+    # ── BEA national accounts ─────────────────────────────────────────────────
+    "bea_gdp":                 _glob("bea/gdp/**/*.parquet"),
+    "bea_income":              _glob("bea/income/**/*.parquet"),
+    "bea_profits":             _glob("bea/profits/**/*.parquet"),
+    # ── OECD macro indicators ─────────────────────────────────────────────────
+    "oecd_macro":              _glob("oecd/**/*.parquet"),
+    # ── Congressional stock trade disclosures ─────────────────────────────────
+    "congressional_trades":    _glob("congressional_trades/**/*.parquet"),
+    # ── USPTO PatentsView ─────────────────────────────────────────────────────
+    "patents":                 _glob("patents/**/*.parquet"),
+    # ── ECB policy rates, Euribor, yield curve, HICP ─────────────────────────
+    "ecb_rates":               _glob("ecb/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

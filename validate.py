@@ -379,6 +379,65 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"value_mo_usd": (0, 1e13)},
     },
+    # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
+    "crypto_market": {
+        "required":    ["coin_id", "symbol", "name", "price_usd", "fetched_at"],
+        "critical_nn": ["coin_id", "symbol", "price_usd"],
+        "date_col":    None,
+        "value_ranges": {"price_usd": (0, 1e9)},
+    },
+    "crypto_history": {
+        "required":    ["coin_id", "symbol", "date", "open", "high", "low", "close"],
+        "critical_nn": ["coin_id", "symbol", "date", "close"],
+        "date_col":    "date",
+    },
+    # ── Forex rates (Frankfurter keyless) ────────────────────────────────────
+    "forex_rates": {
+        "required":    ["base", "currency", "pair", "date", "rate"],
+        "critical_nn": ["pair", "date", "rate"],
+        "date_col":    "date",
+        "value_ranges": {"rate": (0, 1_000_000)},
+    },
+    # ── BEA national accounts ─────────────────────────────────────────────────
+    "bea_gdp": {
+        "required":    ["table_id", "line_name", "date", "value", "fetched_at"],
+        "critical_nn": ["table_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bea_income": {
+        "required":    ["table_id", "line_name", "date", "value", "fetched_at"],
+        "critical_nn": ["table_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bea_profits": {
+        "required":    ["table_id", "line_name", "date", "value", "fetched_at"],
+        "critical_nn": ["table_id", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── OECD macro indicators ─────────────────────────────────────────────────
+    "oecd_macro": {
+        "required":    ["country_code", "indicator", "date", "value", "unit", "fetched_at"],
+        "critical_nn": ["country_code", "indicator", "date", "value"],
+        "date_col":    "date",
+    },
+    # ── Congressional trade disclosures ───────────────────────────────────────
+    "congressional_trades": {
+        "required":    ["chamber", "member_name", "transaction_type", "fetched_at"],
+        "critical_nn": ["chamber", "member_name"],
+        "date_col":    "transaction_date",
+    },
+    # ── USPTO patents ─────────────────────────────────────────────────────────
+    "patents": {
+        "required":    ["patent_id", "patent_date", "sector", "fetched_at"],
+        "critical_nn": ["patent_id", "patent_date", "sector"],
+        "date_col":    "patent_date",
+    },
+    # ── ECB rates and Euribor ─────────────────────────────────────────────────
+    "ecb_rates": {
+        "required":    ["series_id", "series_name", "date", "value", "unit", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
     # ── EIA expanded (petroleum inventories, nat gas storage, crude production)
     "eia_petroleum_stocks": {
         "required":    ["series_id", "series_name", "date", "value", "fetched_at"],

@@ -35,6 +35,13 @@ PIPELINE_MODULES = [
     "schwab_options_pipeline",
     "news_sentiment_pipeline",
     "short_interest_pipeline",
+    "coingecko_pipeline",
+    "forex_pipeline",
+    "bea_pipeline",
+    "oecd_pipeline",
+    "congressional_trades_pipeline",
+    "patents_pipeline",
+    "ecb_pipeline",
 ]
 
 

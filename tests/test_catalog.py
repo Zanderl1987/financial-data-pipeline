@@ -87,6 +87,43 @@ EXPECTED_TABLES = [
     "finnhub_news",
     # Sentiment
     "news_sentiment",
+    # IMF, metals, commodities expansions
+    "imf_commodities",
+    "metals_spot",
+    # FAO global food & agriculture
+    "fao_production",
+    "fao_prices",
+    # World Bank Pink Sheet
+    "wb_commodities",
+    # NOAA climate
+    "noaa_climate",
+    # USDA NASS
+    "usda_crops",
+    "usda_fertilizers",
+    # US Census trade
+    "us_imports_hs",
+    "us_exports_hs",
+    # EIA energy
+    "eia_petroleum_stocks",
+    "eia_natgas_storage",
+    "eia_crude_production",
+    # CoinGecko cryptocurrency
+    "crypto_market",
+    "crypto_history",
+    # Forex rates
+    "forex_rates",
+    # BEA national accounts
+    "bea_gdp",
+    "bea_income",
+    "bea_profits",
+    # OECD macro
+    "oecd_macro",
+    # Congressional trade disclosures
+    "congressional_trades",
+    # USPTO patents
+    "patents",
+    # ECB rates
+    "ecb_rates",
 ]
 
 
