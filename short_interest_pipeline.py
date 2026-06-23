@@ -134,7 +134,7 @@ def run_yfinance(symbols: list[str]) -> None:
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
     out_path  = write_partitioned(df, DIR_YF, f"short_interest_snapshot_{today_str}.parquet")
 
-    print(f"\n  Saved {len(df)} rows → {out_path}")
+    print(f"\n  Saved {len(df)} rows -> {out_path}")
     if failed:
         print(f"  No short data for ({len(failed)}): {', '.join(failed)}")
 
@@ -259,7 +259,7 @@ def run_finra() -> None:
         if result is not None and not result.empty:
             df = result
             found_date = date_str
-            print(f"✓ ({len(df):,} rows)")
+            print(f"[OK] ({len(df):,} rows)")
             break
         else:
             print("not found")
@@ -270,7 +270,7 @@ def run_finra() -> None:
 
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
     out_path  = write_partitioned(df, DIR_FINRA, f"finra_short_{today_str}.parquet")
-    print(f"  Saved {len(df):,} rows (settlement {found_date}) → {out_path}")
+    print(f"  Saved {len(df):,} rows (settlement {found_date}) -> {out_path}")
 
     if "symbol" in df.columns and "shares_short" in df.columns:
         top = df.nlargest(10, "shares_short")[
@@ -369,7 +369,7 @@ def run_ftd() -> None:
         df = _download_ftd(year, month, half)
         if df is not None and not df.empty:
             frames.append(df)
-            print(f"✓ ({len(df):,} rows)")
+            print(f"[OK] ({len(df):,} rows)")
             if len(frames) >= 2:   # grab both halves of the most recent complete month
                 break
         else:
@@ -383,7 +383,7 @@ def run_ftd() -> None:
     combined  = pd.concat(frames, ignore_index=True).drop_duplicates()
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
     out_path  = write_partitioned(combined, DIR_FTD, f"sec_ftd_{today_str}.parquet")
-    print(f"  Saved {len(combined):,} FTD rows → {out_path}")
+    print(f"  Saved {len(combined):,} FTD rows -> {out_path}")
 
     if "symbol" in combined.columns and "shares_failed" in combined.columns:
         top = combined.nlargest(10, "shares_failed")[

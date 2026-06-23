@@ -191,12 +191,12 @@ def main(backfill=False):
     if commodity_frames:
         commodities_df = pd.concat(commodity_frames, ignore_index=True)
         path = write_partitioned(commodities_df, COMMODITIES_DIR, f"commodities_{mode_tag}_{today}.parquet")
-        print(f"\nCommodities → {path} ({len(commodities_df)} rows, {commodities_df['series_id'].nunique()} series)")
+        print(f"\nCommodities -> {path} ({len(commodities_df)} rows, {commodities_df['series_id'].nunique()} series)")
 
     if macro_frames:
         macro_df = pd.concat(macro_frames, ignore_index=True)
         path = write_partitioned(macro_df, MACRO_DIR, f"macro_{mode_tag}_{today}.parquet")
-        print(f"Macro       → {path} ({len(macro_df)} rows, {macro_df['series_id'].nunique()} series)")
+        print(f"Macro       -> {path} ({len(macro_df)} rows, {macro_df['series_id'].nunique()} series)")
 
     if failed:
         print(f"\nFailed/empty ({len(failed)}): {', '.join(failed)}")

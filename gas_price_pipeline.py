@@ -276,7 +276,7 @@ def main(backfill=False):
     if spot_df is not None and not spot_df.empty:
         path = write_partitioned(spot_df, SPOT_DIR, f"gas_prices_spot_daily_{mode_tag}_{today}.parquet")
         n_series = spot_df["series"].nunique() if "series" in spot_df.columns else "?"
-        print(f"\nSpot  → {path}")
+        print(f"\nSpot  -> {path}")
         print(f"       {len(spot_df):,} rows, {n_series} series")
     else:
         print("\nSpot prices: no data returned (check EIA_API_KEY and series IDs).")
@@ -284,7 +284,7 @@ def main(backfill=False):
     if retail_df is not None and not retail_df.empty:
         path = write_partitioned(retail_df, RETAIL_DIR, f"gas_prices_retail_weekly_{mode_tag}_{today}.parquet")
         combos = retail_df.groupby(["duoarea", "product"]).ngroups if "duoarea" in retail_df.columns else "?"
-        print(f"Retail → {path}")
+        print(f"Retail -> {path}")
         print(f"       {len(retail_df):,} rows, {combos} grade×region combinations")
     else:
         print("Retail prices: no data returned (check EIA_API_KEY).")

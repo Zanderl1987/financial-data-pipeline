@@ -127,14 +127,14 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "fundamentals_annual": {
-        "required":    ["symbol", "metric", "value", "period"],
+        "required":    ["symbol", "metric", "value", "period_end"],
         "critical_nn": ["symbol", "metric"],
-        "date_col":    "period",
+        "date_col":    "period_end",
     },
     "fundamentals_quarterly": {
-        "required":    ["symbol", "metric", "value", "period"],
+        "required":    ["symbol", "metric", "value", "period_end"],
         "critical_nn": ["symbol", "metric"],
-        "date_col":    "period",
+        "date_col":    "period_end",
     },
     "commodities": {
         "required":    ["series_id", "date", "value"],
@@ -147,14 +147,16 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "gas_spot": {
-        "required":    ["series_id", "date", "value"],
-        "critical_nn": ["series_id", "date", "value"],
+        "required":    ["series", "date", "price_usd_gallon"],
+        "critical_nn": ["series", "date", "price_usd_gallon"],
         "date_col":    "date",
+        "value_ranges": {"price_usd_gallon": (0, 20)},
     },
     "gas_retail": {
-        "required":    ["series_id", "date", "value"],
-        "critical_nn": ["series_id", "date", "value"],
+        "required":    ["duoarea", "date", "price_usd_gallon"],
+        "critical_nn": ["duoarea", "date", "price_usd_gallon"],
         "date_col":    "date",
+        "value_ranges": {"price_usd_gallon": (0, 20)},
     },
     "futures": {
         "required":    ["symbol", "date", "open", "high", "low", "close"],
@@ -172,9 +174,9 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "insider_transactions": {
-        "required":    ["symbol", "date"],
-        "critical_nn": ["symbol", "date"],
-        "date_col":    "date",
+        "required":    ["symbol", "transaction_date"],
+        "critical_nn": ["symbol", "transaction_date"],
+        "date_col":    "transaction_date",
     },
     "sector_etfs": {
         "required":    ["symbol", "date", "open", "high", "low", "close", "volume", "sector"],

@@ -354,7 +354,8 @@ def run_pipeline(
 
     t0 = time.time()
     try:
-        result = subprocess.run(cmd, timeout=spec.timeout)
+        result = subprocess.run(cmd, timeout=spec.timeout,
+                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         duration = time.time() - t0
         if result.returncode != 0:
             return RunResult(spec.name, "FAIL", duration, f"exit {result.returncode}")
