@@ -541,6 +541,85 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
         "value_ranges": {"trade_value_usd": (0, 5e12)},
     },
+    # ── Open-Meteo daily weather ──────────────────────────────────────────────
+    "open_meteo_weather": {
+        "required":    ["location", "date", "temperature_2m_max", "temperature_2m_min", "fetched_at"],
+        "critical_nn": ["location", "date"],
+        "date_col":    "date",
+    },
+    # ── Wikipedia pageviews ───────────────────────────────────────────────────
+    "wikipedia_pageviews": {
+        "required":    ["article", "date", "views", "fetched_at"],
+        "critical_nn": ["article", "date", "views"],
+        "date_col":    "date",
+        "value_ranges": {"views": (0, 50_000_000)},
+    },
+    # ── OpenFDA drug approvals + recalls ─────────────────────────────────────
+    "openfda_approvals": {
+        "required":    ["application_number", "fetched_at"],
+        "critical_nn": ["application_number"],
+        "date_col":    None,
+    },
+    "openfda_recalls": {
+        "required":    ["recall_number", "fetched_at"],
+        "critical_nn": ["recall_number"],
+        "date_col":    "recall_initiation_date",
+    },
+    # ── Treasury TIC foreign holdings ─────────────────────────────────────────
+    "treasury_tic_holders": {
+        "required":    ["country", "date", "holdings_bn", "fetched_at"],
+        "critical_nn": ["country", "date"],
+        "date_col":    "date",
+        "value_ranges": {"holdings_bn": (0, 10_000)},
+    },
+    "treasury_tic_slt": {
+        "required":    ["fetched_at"],
+        "critical_nn": [],
+        "date_col":    "date",
+    },
+    # ── Google Trends search interest ─────────────────────────────────────────
+    "google_trends_economic": {
+        "required":    ["date", "keyword", "interest", "group", "fetched_at"],
+        "critical_nn": ["date", "keyword", "interest"],
+        "date_col":    "date",
+        "value_ranges": {"interest": (0, 100)},
+    },
+    "google_trends_market": {
+        "required":    ["date", "keyword", "interest", "group", "fetched_at"],
+        "critical_nn": ["date", "keyword", "interest"],
+        "date_col":    "date",
+        "value_ranges": {"interest": (0, 100)},
+    },
+    "google_trends_sector": {
+        "required":    ["date", "keyword", "interest", "group", "fetched_at"],
+        "critical_nn": ["date", "keyword", "interest"],
+        "date_col":    "date",
+        "value_ranges": {"interest": (0, 100)},
+    },
+    # ── Reddit sentiment ──────────────────────────────────────────────────────
+    "reddit_posts": {
+        "required":    ["post_id", "subreddit", "title", "date", "fetched_at"],
+        "critical_nn": ["post_id", "subreddit", "date"],
+        "date_col":    "date",
+    },
+    "reddit_mentions": {
+        "required":    ["date", "subreddit", "ticker", "mention_count", "fetched_at"],
+        "critical_nn": ["date", "subreddit", "ticker", "mention_count"],
+        "date_col":    "date",
+        "value_ranges": {"mention_count": (0, 10_000)},
+    },
+    # ── AIS vessel tracking ───────────────────────────────────────────────────
+    "ais_positions": {
+        "required":    ["mmsi", "zone", "ship_type", "fetched_at"],
+        "critical_nn": ["mmsi", "zone"],
+        "date_col":    None,
+    },
+    "ais_zone_summary": {
+        "required":    ["zone", "ship_type_label", "vessel_count", "fetched_at"],
+        "critical_nn": ["zone", "ship_type_label", "vessel_count"],
+        "date_col":    None,
+        "value_ranges": {"vessel_count": (0, 10_000)},
+    },
 }
 
 

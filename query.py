@@ -170,6 +170,20 @@ CATALOG: dict[str, str] = {
     "treasury_yield_curve":    _glob("nasdaq_data_link/yield_curve/**/*.parquet"),
     # ── NY Fed SOMA balance sheet holdings (Treasuries + Agency MBS) ─────────
     "fed_soma":                _glob("fed_soma/**/*.parquet"),
+    # ── Alternative / attention data ─────────────────────────────────────────
+    "open_meteo_weather":      _glob("open_meteo/**/*.parquet"),
+    "wikipedia_pageviews":     _glob("wikipedia/**/*.parquet"),
+    "openfda_approvals":       _glob("openfda/approvals/**/*.parquet"),
+    "openfda_recalls":         _glob("openfda/recalls/**/*.parquet"),
+    "treasury_tic_holders":    _glob("treasury_tic/**/*.parquet"),
+    "treasury_tic_slt":        _glob("treasury_tic/**/*.parquet"),
+    "google_trends_economic":  _glob("google_trends/**/*.parquet"),
+    "google_trends_market":    _glob("google_trends/**/*.parquet"),
+    "google_trends_sector":    _glob("google_trends/**/*.parquet"),
+    "reddit_posts":            _glob("reddit/**/*.parquet"),
+    "reddit_mentions":         _glob("reddit/**/*.parquet"),
+    "ais_positions":           _glob("ais/positions/**/*.parquet"),
+    "ais_zone_summary":        _glob("ais/zone_summary/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

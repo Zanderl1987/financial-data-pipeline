@@ -382,7 +382,7 @@ PIPELINES: list[PipelineSpec] = [
         stage=1,
         tables=["open_meteo_weather"],
         backfill_args=["--backfill"],
-        timeout=300,
+        timeout=1800,   # 25 locations; each may hit 60s rate-limit pause
     ),
     PipelineSpec(
         name="wikipedia",
