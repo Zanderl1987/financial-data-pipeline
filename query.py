@@ -184,6 +184,18 @@ CATALOG: dict[str, str] = {
     "reddit_mentions":         _glob("reddit/**/*.parquet"),
     "ais_positions":           _glob("ais/positions/**/*.parquet"),
     "ais_zone_summary":        _glob("ais/zone_summary/**/*.parquet"),
+    # ── Stock Analysis (scraped, no API key) ─────────────────────────────────
+    "sa_movers":              _glob("stockanalysis/movers/**/*.parquet"),
+    "sa_ipos":                _glob("stockanalysis/ipos/history/**/*.parquet"),
+    "sa_ipo_calendar":        _glob("stockanalysis/ipos/calendar/**/*.parquet"),
+    "sa_ipo_stats":           _glob("stockanalysis/ipos/stats/**/*.parquet"),
+    "sa_corporate_actions":   _glob("stockanalysis/corporate_actions/**/*.parquet"),
+    "sa_stock_list":          _glob("stockanalysis/stocks/**/*.parquet"),
+    "sa_etf_list":            _glob("stockanalysis/etfs/**/*.parquet"),
+    "sa_income":              _glob("stockanalysis/financials/income/**/*.parquet"),
+    "sa_balance":             _glob("stockanalysis/financials/balance/**/*.parquet"),
+    "sa_cashflow":            _glob("stockanalysis/financials/cashflow/**/*.parquet"),
+    "sa_ratios":              _glob("stockanalysis/financials/ratios/**/*.parquet"),
     # ── Finviz market data (scraped, no API key) ─────────────────────────────
     "finviz_movers":           _glob("finviz/movers/**/*.parquet"),
     "finviz_screener":         _glob("finviz/screener/**/*.parquet"),

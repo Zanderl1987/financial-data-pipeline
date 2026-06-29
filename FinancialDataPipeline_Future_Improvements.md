@@ -337,6 +337,39 @@ Note: Finviz provides 15-minute delayed quotes on the free tier. Requests are th
 
 ---
 
+### 10. ~~Stock Analysis Pipeline~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-29
+
+**`stockanalysis_pipeline.py`** (stockanalysis.com HTML scraping — no API key required):
+- 19 datasets across 11 CATALOG tables; runs as Stage 1 in `run_all.py`
+- **Market movers** (`sa_movers`): top 100 gainers + losers per timeframe (1D/1W/1M/YTD/1Y/3Y/5Y) plus premarket gainers/losers — `signal` column distinguishes all 16 variants
+- **IPO history** (`sa_ipos`): recent ~200 IPOs — date, symbol, company, IPO price, current price, return
+- **IPO calendar** (`sa_ipo_calendar`): upcoming IPOs — exchange, price range, shares offered, deal size, estimated market cap, revenue
+- **IPO statistics** (`sa_ipo_stats`): annual + monthly IPO counts back to 2000
+- **Corporate actions** (`sa_corporate_actions`): splits, acquisitions, spinoffs, bankruptcies, symbol changes, new listings, delistings — `action_type` column; `--backfill` flag fetches all years to 1998
+- **Stock reference** (`sa_stock_list`): ~500 US stocks with symbol, company, industry, market cap
+- **ETF reference** (`sa_etf_list`): ETFs with symbol, fund name, asset class, AUM
+- **Income statements** (`sa_income`): revenue, gross profit, EBITDA, net income, EPS, margins, FCF — wide format, annual + quarterly
+- **Balance sheets** (`sa_balance`): full A/L/E including net cash, tangible book value
+- **Cash flow** (`sa_cashflow`): operating/investing/financing cash flows + FCF
+- **Ratios + KPIs** (`sa_ratios`): P/E, P/S, P/B, ROE, ROA, margins, debt ratios
+
+**CLI:**
+```bash
+python stockanalysis_pipeline.py                              # all datasets
+python stockanalysis_pipeline.py --only movers
+python stockanalysis_pipeline.py --only ipos
+python stockanalysis_pipeline.py --only actions
+python stockanalysis_pipeline.py --only actions --backfill    # all years to 1998
+python stockanalysis_pipeline.py --only reference
+python stockanalysis_pipeline.py --only financials
+python stockanalysis_pipeline.py --only financials --symbols AAPL,MSFT,NVDA
+```
+
+Financials default to DJI components + sector ETFs (~45 symbols). Requests throttled at 2s intervals.
+
+---
+
 ## Candidate Improvements (Next Up)
 
 ### A. Market-Wide Gainers / Losers via Yahoo Finance Screener

@@ -226,6 +226,18 @@ PIPELINES: list[PipelineSpec] = [
         timeout=600,
     ),
     PipelineSpec(
+        name="stockanalysis",
+        file="stockanalysis_pipeline.py",
+        desc="Stock Analysis movers, IPOs, corporate actions, reference lists, per-symbol financials",
+        stage=1,
+        tables=[
+            "sa_movers", "sa_ipos", "sa_ipo_calendar", "sa_ipo_stats",
+            "sa_corporate_actions", "sa_stock_list", "sa_etf_list",
+            "sa_income", "sa_balance", "sa_cashflow", "sa_ratios",
+        ],
+        timeout=1800,   # financials for ~45 symbols × 4 stmts × 2 periods
+    ),
+    PipelineSpec(
         name="finviz",
         file="finviz_pipeline.py",
         desc="Finviz market movers, S&P 500 screener, financials, insider trades, sector/group data",
