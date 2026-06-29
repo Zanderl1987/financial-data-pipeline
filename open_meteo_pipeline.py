@@ -40,7 +40,7 @@ OUTPUT_DIR  = os.path.join("storage", "raw", "open_meteo")
 
 BACKFILL_START  = "1990-01-01"
 INCREMENTAL_YEARS = 2
-REQUEST_INTERVAL  = 0.5   # archive API is generous; 0.5s keeps us well under limits
+REQUEST_INTERVAL  = 8.0   # 8s between locations avoids the per-minute quota on Open-Meteo archive
 MAX_RETRIES       = 3
 
 DAILY_VARS = [
@@ -99,7 +99,7 @@ def _get_with_retry(params: dict) -> dict | None:
             if r.status_code == 200:
                 return r.json()
             if r.status_code == 429:
-                wait = 60 * attempt
+                wait = 30 * attempt
                 print(f"    429 rate limit — waiting {wait}s (attempt {attempt})")
                 time.sleep(wait)
             else:
