@@ -305,3 +305,58 @@ python run_all.py --dry-run              # print commands, don't execute
 - CATALOG: `noaa_climate`; added to Stage 1 of `run_all.py`
 
 **Total test suite: 111 passed, 12 skipped.**
+
+---
+
+### 9. ~~Finviz Pipeline~~ ✓ COMPLETED
+**Status:** Implemented 2026-06-29
+
+**`finviz_pipeline.py`** (finviz.com HTML scraping — no API key required):
+- 15 datasets across 8 CATALOG tables; runs as Stage 1 in `run_all.py`
+- **Market movers** (`finviz_movers`): top gainers, losers, unusual volume, new 52-week highs/lows, most volatile, overbought, oversold — all with `signal` column; up to 200 results each
+- **S&P 500 overview** (`finviz_screener`): ticker, company, sector, industry, country, market cap, P/E, price, % change, volume; paginated to 500 rows
+- **Financial metrics** (`finviz_financials`): ROA, ROE, ROIC, current ratio, quick ratio, LT debt/equity, gross/operating/net margins; S&P 500 universe
+- **Insider trading** (`finviz_insider`): ticker, owner, role, date, transaction type, cost/share, shares, total value ($), total shares held; 10 pages (200 rows) default
+- **Sector performance** (`finviz_sector_perf`): 11 GICS sectors, week/month/quarter/half/year/YTD returns
+- **Industry performance** (`finviz_industry_perf`): ~140 industries, same timeframes
+- **Country performance** (`finviz_country_perf`): US-listed stocks by country of origin
+- **Group valuation** (`finviz_group_valuation`): P/E, Fwd P/E, PEG, P/S, P/B, P/FCF, dividend yield, analyst rec by sector and industry; `group_type` column distinguishes them
+
+**CLI:**
+```bash
+python finviz_pipeline.py                             # all datasets
+python finviz_pipeline.py --only movers               # just movers
+python finviz_pipeline.py --only screener,financials
+python finviz_pipeline.py --only insider
+python finviz_pipeline.py --only groups
+python finviz_pipeline.py --max-screener-results 250
+python finviz_pipeline.py --insider-pages 5
+```
+
+Note: Finviz provides 15-minute delayed quotes on the free tier. Requests are throttled at 1.5s intervals.
+
+---
+
+## Candidate Improvements (Next Up)
+
+### A. Market-Wide Gainers / Losers via Yahoo Finance Screener
+**Priority: High | Effort: Low**
+
+Add `market_movers_pipeline.py` using `yfinance`'s built-in screener endpoint to get true market-wide top gainers/losers (not just S&P 500). Yahoo's screener returns ~25 top movers per call, no auth required. Add `market_movers()` function to `analytics/`.
+
+---
+
+### B. Portfolio Tracking Pipeline
+**Priority: High | Effort: Medium**
+
+Import actual holdings (from a CSV or Schwab `/accounts` endpoint) and overlay against prices, dividends, options exposure, and fundamentals. Would enable P&L tracking, cost basis, and position-level risk analytics.
+
+---
+
+### C. Scheduled Run + Freshness Dashboard
+**Priority: Medium | Effort: Low**
+
+- Windows Task Scheduler entry to run `run_all.py` on a daily schedule with a run log
+- `python status.py` — one-command summary showing every CATALOG table's latest file date and row count in a clean table
+
+---

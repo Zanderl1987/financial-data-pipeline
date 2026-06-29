@@ -184,6 +184,15 @@ CATALOG: dict[str, str] = {
     "reddit_mentions":         _glob("reddit/**/*.parquet"),
     "ais_positions":           _glob("ais/positions/**/*.parquet"),
     "ais_zone_summary":        _glob("ais/zone_summary/**/*.parquet"),
+    # ── Finviz market data (scraped, no API key) ─────────────────────────────
+    "finviz_movers":           _glob("finviz/movers/**/*.parquet"),
+    "finviz_screener":         _glob("finviz/screener/**/*.parquet"),
+    "finviz_financials":       _glob("finviz/financials/**/*.parquet"),
+    "finviz_insider":          _glob("finviz/insider/**/*.parquet"),
+    "finviz_sector_perf":      _glob("finviz/groups/sector/**/*.parquet"),
+    "finviz_industry_perf":    _glob("finviz/groups/industry/**/*.parquet"),
+    "finviz_country_perf":     _glob("finviz/groups/country/**/*.parquet"),
+    "finviz_group_valuation":  _glob("finviz/groups/valuation/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────

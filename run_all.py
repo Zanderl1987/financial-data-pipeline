@@ -225,6 +225,17 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=600,
     ),
+    PipelineSpec(
+        name="finviz",
+        file="finviz_pipeline.py",
+        desc="Finviz market movers, S&P 500 screener, financials, insider trades, sector/group data",
+        stage=1,
+        tables=[
+            "finviz_movers", "finviz_screener", "finviz_financials", "finviz_insider",
+            "finviz_sector_perf", "finviz_industry_perf", "finviz_country_perf",
+            "finviz_group_valuation",
+        ],
+    ),
     # ── Stage 1 — New free/public sources ──────────────────────────────────────
     PipelineSpec(
         name="coingecko",
