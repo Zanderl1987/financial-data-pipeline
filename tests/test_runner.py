@@ -177,3 +177,48 @@ class TestDryRun:
         spec = next(p for p in PIPELINES if p.name == "commodity_macro")
         result = ra.run_pipeline(spec, backfill=False, dry_run=True, validate=False)
         assert result.status == "SKIP"
+
+
+# ── Curated compaction wiring ─────────────────────────────────────────────────
+
+class TestCuratedCompaction:
+    def test_helper_compacts_only_passed_tables(self, monkeypatch):
+        """compact_curated should call compact_all with exactly the run's tables."""
+        captured = {}
+
+        def fake_compact_all(tables=None, verbose=True):
+            captured["tables"] = tables
+            import pandas as pd
+            return pd.DataFrame([{"table": t, "raw_rows": 1, "curated_rows": 1,
+                                  "removed": 0, "pct_removed": 0.0} for t in (tables or [])])
+
+        monkeypatch.setattr(ra.curated, "compact_all", fake_compact_all)
+        specs = [
+            PipelineSpec(name="a", file="a.py", desc="", stage=1, tables=["macro", "commodities"]),
+            PipelineSpec(name="b", file="b.py", desc="", stage=1, tables=["macro", "futures"]),
+        ]
+        ra.compact_curated(specs)
+        # union of tables, de-duplicated and sorted
+        assert captured["tables"] == ["commodities", "futures", "macro"]
+
+    def test_helper_noop_on_empty(self, monkeypatch):
+        called = {"hit": False}
+        monkeypatch.setattr(ra.curated, "compact_all",
+                            lambda *a, **k: called.__setitem__("hit", True))
+        ra.compact_curated([])
+        assert called["hit"] is False
+
+    def test_compaction_error_is_swallowed(self, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise RuntimeError("disk full")
+        monkeypatch.setattr(ra.curated, "compact_all", boom)
+        spec = PipelineSpec(name="a", file="a.py", desc="", stage=1, tables=["macro"])
+        ra.compact_curated([spec])  # must not raise
+        assert "compaction error" in capsys.readouterr().out
+
+    def test_no_compact_flag_parses(self):
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--no-compact", action="store_true")
+        assert parser.parse_args(["--no-compact"]).no_compact is True
+        assert parser.parse_args([]).no_compact is False

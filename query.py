@@ -44,10 +44,20 @@ import duckdb
 import pandas as pd
 
 _STORAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "raw")
+_CURATED_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "curated")
+
+# When True (default), a table's view reads its deduplicated curated snapshot
+# (storage/curated/<table>/<table>.parquet) if one exists, falling back to the
+# raw glob otherwise. Set q.USE_CURATED = False then q.reload() to force raw.
+USE_CURATED = True
 
 
 def _glob(relative: str) -> str:
     return os.path.join(_STORAGE_ROOT, relative).replace("\\", "/")
+
+
+def _curated_file(table: str) -> str:
+    return os.path.join(_CURATED_ROOT, table, f"{table}.parquet").replace("\\", "/")
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +241,22 @@ def _con() -> duckdb.DuckDBPyConnection:
 
 
 def _register_views(con: duckdb.DuckDBPyConnection) -> None:
-    """Register a DuckDB view for every catalog entry that has at least one file."""
+    """
+    Register a DuckDB view for every catalog entry that has data.
+
+    Prefers the deduplicated curated snapshot (storage/curated/<table>/...) when
+    one exists and USE_CURATED is True; otherwise reads the raw dated-file glob.
+    Curated reads are clean of the cross-run row duplication inherent in the raw
+    layer — see curated.py.
+    """
     for name, glob_path in CATALOG.items():
+        curated = _curated_file(name)
+        if USE_CURATED and os.path.exists(curated.replace("/", os.sep)):
+            con.execute(f"""
+                CREATE OR REPLACE VIEW {name} AS
+                SELECT * FROM read_parquet('{curated}')
+            """)
+            continue
         if not _glob_mod.glob(glob_path.replace("/", os.sep), recursive=True):
             continue
         # union_by_name tolerates schema drift across incremental files

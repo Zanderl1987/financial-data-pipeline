@@ -17,6 +17,7 @@ Usage
   python run_all.py --skip fundamentals,synthetic_options
   python run_all.py --dry-run              # print commands, don't execute
   python run_all.py --no-validate          # skip post-run validation
+  python run_all.py --no-compact           # skip post-run curated compaction
 """
 
 import argparse
@@ -32,6 +33,7 @@ from dotenv import load_dotenv
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO_ROOT)
 
+import curated
 from validate import validate_table
 
 load_dotenv()
@@ -649,6 +651,33 @@ def _print_summary(results: list[RunResult], backfill: bool, start_time: float) 
     print()
 
 
+# ── Curated compaction ───────────────────────────────────────────────────────
+
+def compact_curated(passed_specs: list[PipelineSpec]) -> None:
+    """
+    Rebuild deduplicated curated snapshots for the tables that just ran.
+
+    Pipelines append a fresh dated Parquet file each run; left alone, the query
+    layer would glob those alongside every prior file and double-count rows.
+    Compacting here keeps storage/curated/ (which query.py reads by default)
+    in sync with the raw layer after every run. Only tables whose pipeline
+    PASSed are touched — no point re-reading unchanged tables.
+    """
+    tables = sorted({t for spec in passed_specs for t in spec.tables})
+    if not tables:
+        return
+
+    print(f"\n-- Curated Compaction ({len(tables)} table(s)) --")
+    try:
+        df = curated.compact_all(tables=tables, verbose=True)
+    except Exception as exc:  # noqa: BLE001 — never let compaction sink a run
+        print(f"  ! compaction error: {exc}")
+        return
+    if df is not None and not df.empty:
+        removed = int(df["removed"].sum())
+        print(f"  Compacted {len(df)} table(s); removed {removed:,} duplicate row(s).")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -681,6 +710,10 @@ def main() -> int:
         "--no-validate", action="store_true",
         help="Skip post-run validation checks.",
     )
+    parser.add_argument(
+        "--no-compact", action="store_true",
+        help="Skip post-run curated compaction (dedup of the tables that ran).",
+    )
     args = parser.parse_args()
 
     # Build filtered pipeline list
@@ -706,11 +739,13 @@ def main() -> int:
 
     mode = "BACKFILL" if args.backfill else "INCREMENTAL"
     validate = not args.no_validate
+    compact = not args.no_compact
     start_time = time.time()
 
     print(f"\n{'=' * 62}")
     print(f"  Financial Data Pipeline Runner")
-    print(f"  Mode: {mode}  |  Pipelines: {len(pipelines)}  |  Validate: {validate}")
+    print(f"  Mode: {mode}  |  Pipelines: {len(pipelines)}  |  "
+          f"Validate: {validate}  |  Compact: {compact}")
     print(f"{'=' * 62}")
 
     # Stage-grouped run
@@ -726,6 +761,13 @@ def main() -> int:
         print(f"\n>>  {spec.name}  --  {spec.desc}")
         result = run_pipeline(spec, args.backfill, args.dry_run, validate)
         results.append(result)
+
+    # Rebuild curated snapshots for the tables that ran, so the query layer
+    # (which prefers curated files) stays in sync with the new raw files.
+    if compact and not args.dry_run:
+        spec_by_name = {p.name: p for p in PIPELINES}
+        passed_specs = [spec_by_name[r.name] for r in results if r.status == "PASS"]
+        compact_curated(passed_specs)
 
     _print_summary(results, args.backfill, start_time)
 

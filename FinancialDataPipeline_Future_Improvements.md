@@ -2,6 +2,73 @@
 
 ## Completed
 
+### Value-Extraction Stack: Curated Layer + Feature Matrix + Signals + Backtest
+**Status:** Implemented 2026-06-29
+
+The store had grown to ~85 raw tables but only ~21 analytics functions — heavy
+on ingestion, light on extraction. This session built the four layers that turn
+the breadth into usable, trustworthy signal. Full suite: **173 passed, 13 skipped.**
+
+**`curated.py`** — deduplicated/compacted snapshots (fixes a silent correctness bug):
+- The query layer globs *every* dated incremental file with `union_by_name=True`
+  and no dedup. Because incremental pipelines re-fetch overlapping windows, the
+  same logical row was written many times. Measured: **4.46M duplicate rows —
+  42.4% of the entire store** (`institutional_holdings` 84%, `gas_retail` raw
+  97%, `fundamentals_annual` 51%). Every COUNT/AVG/return in analytics/ was
+  computing over duplicates.
+- `compact(table)` / `compact_all()` dedup each table on a natural key (keeping
+  the latest `fetched_at`), writing one Snappy file to
+  `storage/curated/<table>/<table>.parquet`.
+- `KEYS` registry of per-table natural keys; tables without a key (or whose key
+  columns aren't all present) fall back to **safe full-row dedup** — a partial
+  key would silently merge distinct rows, so it's never used.
+- Always sources from raw (`_raw_reads` context) so re-runs rebuild cleanly.
+- `query.py` now **prefers the curated snapshot** when one exists (toggle
+  `q.USE_CURATED`), so the whole analytics stack reads clean data with no API
+  change. CLI: `python curated.py [--table T | --summary | --check]`.
+
+**`analytics/features.py`** — `feature_matrix()` point-in-time (symbol, date) panel:
+- Price features (returns 1/21/63/252d, 12-1 momentum, 21d realized vol, dollar
+  volume), point-in-time fundamentals via **DuckDB ASOF JOIN on the SEC `filed`
+  date** (no look-ahead), and broadcast macro series (DGS10/DGS2/VIX/2s10s/HY OAS).
+- Every block is guarded — missing source tables are skipped, panel still builds.
+  Price source auto-detects (`prices` → `tiingo_prices` → `sector_etfs`).
+
+**`analytics/signals.py`** — cross-sectional factor library:
+- `momentum`, `value` (earnings yield), `quality` (ROA + gross margin),
+  `low_vol`, `growth` (PIT YoY revenue). Each z-scored within each date; the
+  `composite` is a weight-renormalized blend of whichever factors have data.
+- `signal_panel()` (full panel), `rank_symbols()` (latest-date ranking with a
+  `rank` column), plus single-factor wrappers. Custom `weights=` tilt the blend.
+
+**`backtest.py`** — vectorized signal→returns evaluator:
+- Quantile portfolios (long top / short bottom), D/W/M/Q rebalance, transaction
+  costs in bps, equal-weight buy-and-hold benchmark.
+- **Look-ahead safe:** weights set on rebalance date *t* are lagged one day, so a
+  score earns the return of *t+1* onward. Verified by a perfect-foresight test
+  (Sharpe +44) mirrored exactly by its negation (−44).
+- `BacktestResult` carries `.equity`, `.returns`, `.weights`, `.metrics`
+  (CAGR, ann vol, Sharpe, max drawdown, hit rate, turnover, vs-benchmark) and
+  `.summary()`.
+
+**Tests:** `tests/test_curated.py`, `test_features.py`, `test_signals.py`,
+`test_backtest.py` — 34 new tests (dedup keying, PIT feature math, z-score/
+composite renormalization, portfolio construction + look-ahead safety).
+
+**Post-run compaction wired into `run_all.py` (2026-06-29):** after every run,
+`compact_curated()` rebuilds curated snapshots for exactly the tables whose
+pipeline PASSed (union of their `tables`), keeping `storage/curated/` in sync
+with new raw files. Skipped on `--dry-run`; opt out with `--no-compact`. Errors
+are swallowed so compaction can never sink a run. Header now shows `Compact:`.
+Covered by 4 new tests in `tests/test_runner.py` (suite: 177 passed, 13 skipped).
+
+**Follow-ups not yet done:** add short-interest/insider/sentiment signal blocks
+(tables were empty in this clone); split the catalog glob collisions
+(`treasury_tic_holders`/`_slt`, `google_trends_*`, `reddit_*`) once discriminator
+columns are known (`FILTERS` hook is in place in curated.py).
+
+---
+
 ### DuckDB Query Layer
 **Status:** Implemented 2026-06-19
 
