@@ -88,15 +88,19 @@ def fetch_fhfa(now: datetime.datetime) -> pd.DataFrame | None:
         return None
 
     df = pd.read_csv(io.BytesIO(content), low_memory=False)
-    df = df.rename(columns={"yr": "year", "period": "period_month"})
     df["date"] = pd.to_datetime(
-        df["year"].astype(str) + "-" + df["period_month"].astype(str) + "-01",
+        df["yr"].astype(str) + "-" + df["period"].astype(str) + "-01",
         errors="coerce",
     )
     df = df.dropna(subset=["date"])
     df["index_nsa"] = pd.to_numeric(df["index_nsa"], errors="coerce")
     df["index_sa"] = pd.to_numeric(df["index_sa"], errors="coerce")
-    df = df.drop(columns=[c for c in ("H", "period_month") if c in df.columns])
+    # Drop "yr"/"period" (fully represented by "date") rather than renaming
+    # "yr" -> "year": DuckDB's hive_partitioning=True (used on the raw glob
+    # view) treats "year"/"month" as reserved virtual columns derived from
+    # the storage/raw/.../year=YYYY/month=MM directory, and silently
+    # overwrites a same-named physical column with the partition's value.
+    df = df.drop(columns=[c for c in ("H", "yr", "period") if c in df.columns])
     df["source"] = "FHFA HPI"
     df["fetched_at"] = now.isoformat()
     print(f"  Parsed {len(df):,} rows across {df['level'].nunique()} geography levels.")
