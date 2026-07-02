@@ -7,9 +7,11 @@ Uses the EIA Open Data API v2 — same key as the gas pipeline.
 Add EIA_API_KEY to .env.
 
 Outputs:
-  storage/raw/eia/petroleum_stocks/**/*.parquet   (CATALOG: eia_petroleum_stocks)
-  storage/raw/eia/natgas_storage/**/*.parquet     (CATALOG: eia_natgas_storage)
-  storage/raw/eia/crude_production/**/*.parquet   (CATALOG: eia_crude_production)
+  storage/raw/eia/petroleum_stocks/**/*.parquet    (CATALOG: eia_petroleum_stocks)
+  storage/raw/eia/natgas_storage/**/*.parquet      (CATALOG: eia_natgas_storage)
+  storage/raw/eia/crude_production/**/*.parquet    (CATALOG: eia_crude_production)
+  storage/raw/eia/refinery_activity/**/*.parquet   (CATALOG: eia_refinery_activity)
+  storage/raw/eia/crude_trade/**/*.parquet         (CATALOG: eia_crude_trade)
 
 Usage:
   python eia_pipeline.py              # incremental (last 6 months)
@@ -33,9 +35,11 @@ EIA_API_KEY = os.environ["EIA_API_KEY"]
 EIA_BASE = "https://api.eia.gov/v2"
 
 EIA_DIR = os.path.join("storage", "raw", "eia")
-STOCKS_DIR  = os.path.join(EIA_DIR, "petroleum_stocks")
-NATGAS_DIR  = os.path.join(EIA_DIR, "natgas_storage")
-CRUDE_DIR   = os.path.join(EIA_DIR, "crude_production")
+STOCKS_DIR    = os.path.join(EIA_DIR, "petroleum_stocks")
+NATGAS_DIR    = os.path.join(EIA_DIR, "natgas_storage")
+CRUDE_DIR     = os.path.join(EIA_DIR, "crude_production")
+REFINERY_DIR  = os.path.join(EIA_DIR, "refinery_activity")
+TRADE_DIR     = os.path.join(EIA_DIR, "crude_trade")
 
 REQUEST_INTERVAL = 0.25   # 240 req/min — EIA suspends keys on abuse
 MAX_RETRIES      = 3
@@ -86,6 +90,25 @@ CRUDE_SERIES: dict[str, str] = {
     "MCRFPCA2": "California",
     "MCRFPOK2": "Oklahoma",
     "MCRFPWY2": "Wyoming",
+}
+
+# ---------------------------------------------------------------------------
+# Refinery activity (route: petroleum/pnp/wiup)
+# Units: thousand barrels per day (inputs), percent (utilization); weekly
+# ---------------------------------------------------------------------------
+REFINERY_SERIES: dict[str, str] = {
+    "WCRRIUS2": "US Refiner Net Input of Crude Oil",
+    "WGIRIUS2": "US Gross Inputs into Refineries",
+    "WPULEUS3": "US Percent Utilization of Refinery Operable Capacity",
+}
+
+# ---------------------------------------------------------------------------
+# Crude oil imports/exports (route: petroleum/move/wkly)
+# Units: thousand barrels per day; weekly
+# ---------------------------------------------------------------------------
+CRUDE_TRADE_SERIES: dict[str, str] = {
+    "WCEIMUS2": "US Commercial Crude Oil Imports (Excl. SPR)",
+    "WCREXUS2": "US Crude Oil Exports",
 }
 
 
@@ -280,11 +303,89 @@ def fetch_crude_production(start_date: str | None = None) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Refinery activity (weekly)
+# ---------------------------------------------------------------------------
+
+def fetch_refinery_activity(start_date: str | None = None) -> pd.DataFrame:
+    print("Fetching weekly refinery activity (EIA petroleum/pnp/wiup)...")
+    rows = _fetch_paginated(
+        "petroleum/pnp/wiup/data/",
+        base_params={
+            "api_key":            EIA_API_KEY,
+            "data[]":             "value",
+            "frequency":          "weekly",
+            "sort[0][column]":    "period",
+            "sort[0][direction]": "asc",
+        },
+        list_params={"facets[series][]": list(REFINERY_SERIES.keys())},
+        start_date=start_date,
+        label="refinery",
+    )
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={"period": "date", "series": "series_id"})
+    df["date"]        = pd.to_datetime(df["date"], errors="coerce")
+    df["value"]       = pd.to_numeric(df["value"], errors="coerce")
+    df["series_name"] = df["series_id"].map(REFINERY_SERIES)
+    df["units"]       = df.get("units", "")
+    df["frequency"]   = "weekly"
+    df["source"]      = "EIA"
+    df["fetched_at"]  = datetime.datetime.utcnow().isoformat()
+
+    keep = ["series_id", "series_name", "date", "value", "units",
+            "frequency", "source", "fetched_at"]
+    keep = [c for c in keep if c in df.columns]
+    df = df[keep].dropna(subset=["date", "value"])
+    return df.sort_values(["series_id", "date"]).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Crude oil imports/exports (weekly)
+# ---------------------------------------------------------------------------
+
+def fetch_crude_trade(start_date: str | None = None) -> pd.DataFrame:
+    print("Fetching weekly crude oil imports/exports (EIA petroleum/move/wkly)...")
+    rows = _fetch_paginated(
+        "petroleum/move/wkly/data/",
+        base_params={
+            "api_key":            EIA_API_KEY,
+            "data[]":             "value",
+            "frequency":          "weekly",
+            "sort[0][column]":    "period",
+            "sort[0][direction]": "asc",
+        },
+        list_params={"facets[series][]": list(CRUDE_TRADE_SERIES.keys())},
+        start_date=start_date,
+        label="crude_trade",
+    )
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={"period": "date", "series": "series_id"})
+    df["date"]        = pd.to_datetime(df["date"], errors="coerce")
+    df["value"]       = pd.to_numeric(df["value"], errors="coerce")
+    df["series_name"] = df["series_id"].map(CRUDE_TRADE_SERIES)
+    df["units"]       = df.get("units", "Thousand Barrels per Day")
+    df["frequency"]   = "weekly"
+    df["source"]      = "EIA"
+    df["fetched_at"]  = datetime.datetime.utcnow().isoformat()
+
+    keep = ["series_id", "series_name", "date", "value", "units",
+            "frequency", "source", "fetched_at"]
+    keep = [c for c in keep if c in df.columns]
+    df = df[keep].dropna(subset=["date", "value"])
+    return df.sort_values(["series_id", "date"]).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main(backfill: bool = False) -> None:
-    for d in (STOCKS_DIR, NATGAS_DIR, CRUDE_DIR):
+    for d in (STOCKS_DIR, NATGAS_DIR, CRUDE_DIR, REFINERY_DIR, TRADE_DIR):
         os.makedirs(d, exist_ok=True)
 
     now   = datetime.datetime.utcnow()
@@ -348,6 +449,40 @@ def main(backfill: bool = False) -> None:
         print(f"    {len(df_crude):,} rows | {n_series} states/regions | {d_min} to {d_max}")
     else:
         print("[!] No crude production data returned.")
+
+    time.sleep(REQUEST_INTERVAL)
+
+    # ── Refinery activity ──────────────────────────────────────────────────────
+    df_refinery = fetch_refinery_activity(start_date)
+    if not df_refinery.empty:
+        path = write_partitioned(
+            df_refinery, REFINERY_DIR,
+            f"eia_refinery_activity_{mode_tag}_{today}.parquet",
+        )
+        n_series = df_refinery["series_id"].nunique()
+        d_min    = df_refinery["date"].min().strftime("%Y-%m-%d")
+        d_max    = df_refinery["date"].max().strftime("%Y-%m-%d")
+        print(f"[+] {path}")
+        print(f"    {len(df_refinery):,} rows | {n_series} series | {d_min} to {d_max}")
+    else:
+        print("[!] No refinery activity data returned.")
+
+    time.sleep(REQUEST_INTERVAL)
+
+    # ── Crude oil imports/exports ──────────────────────────────────────────────
+    df_trade = fetch_crude_trade(start_date)
+    if not df_trade.empty:
+        path = write_partitioned(
+            df_trade, TRADE_DIR,
+            f"eia_crude_trade_{mode_tag}_{today}.parquet",
+        )
+        n_series = df_trade["series_id"].nunique()
+        d_min    = df_trade["date"].min().strftime("%Y-%m-%d")
+        d_max    = df_trade["date"].max().strftime("%Y-%m-%d")
+        print(f"[+] {path}")
+        print(f"    {len(df_trade):,} rows | {n_series} series | {d_min} to {d_max}")
+    else:
+        print("[!] No crude trade data returned.")
 
     print("\n--- COMPLETE ---")
 

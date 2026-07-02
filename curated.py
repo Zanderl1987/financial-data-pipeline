@@ -96,6 +96,11 @@ KEYS: dict[str, list[str]] = {
     # Shipping / logistics
     "shipping_gscpi":         ["date"],
     "shipping_freight_ppi":   ["series_id", "date"],
+    # EIA refinery activity / crude trade
+    "eia_refinery_activity":  ["series_id", "date"],
+    "eia_crude_trade":        ["series_id", "date"],
+    # TSA checkpoint travel volumes
+    "tsa_checkpoint":         ["date"],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw

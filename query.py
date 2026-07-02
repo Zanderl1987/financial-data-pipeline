@@ -141,6 +141,10 @@ CATALOG: dict[str, str] = {
     "eia_petroleum_stocks":    _glob("eia/petroleum_stocks/**/*.parquet"),
     "eia_natgas_storage":      _glob("eia/natgas_storage/**/*.parquet"),
     "eia_crude_production":    _glob("eia/crude_production/**/*.parquet"),
+    "eia_refinery_activity":   _glob("eia/refinery_activity/**/*.parquet"),
+    "eia_crude_trade":         _glob("eia/crude_trade/**/*.parquet"),
+    # ── TSA checkpoint travel volumes ──────────────────────────────────────────
+    "tsa_checkpoint":          _glob("tsa/**/*.parquet"),
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
     "crypto_market":           _glob("crypto/market/**/*.parquet"),
     "crypto_history":          _glob("crypto/history/**/*.parquet"),

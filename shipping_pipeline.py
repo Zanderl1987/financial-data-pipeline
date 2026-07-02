@@ -10,9 +10,11 @@ Two keyless-ish sources tracking global shipping/supply-chain pressure:
     https://www.newyorkfed.org/medialibrary/research/interactives/gscpi/downloads/gscpi_data.xlsx
 
   FRED freight PPI series (uses existing FRED_API_KEY) — deep-sea freight
-  transportation and marine cargo handling producer price indexes. These
-  substitute for the Baltic Dry Index / Freightos FBX, which require paid
-  licenses or ToS-restricted attribution for time-series use.
+  transportation and marine cargo handling producer price indexes, plus
+  the BTS Freight Transportation Services Index and rail/truck/air freight
+  PPI and diesel fuel PPI for broader multi-modal coverage. These substitute
+  for the Baltic Dry Index / Freightos FBX, which require paid licenses or
+  ToS-restricted attribution for time-series use.
 
 CLI:
   python shipping_pipeline.py             # incremental (last 90 days)
@@ -55,6 +57,12 @@ FREIGHT_SERIES = {
     "PCU483111483111": ("Deep Sea Freight Transportation PPI", "monthly", "Index"),
     "WPU301301":        ("Deep Sea Water Transportation of Freight PPI", "monthly", "Index"),
     "WPU3113":           ("Marine Cargo Handling PPI", "monthly", "Index"),
+    # Broader modal freight coverage (rail/truck/air) + composite freight volume index
+    "TSIFRGHT":          ("BTS Freight Transportation Services Index", "monthly", "Index"),
+    "WPU3011":           ("Rail Transportation of Freight and Mail PPI", "monthly", "Index"),
+    "WPU3012":           ("Truck Transportation of Freight PPI", "monthly", "Index"),
+    "WPU3014":           ("Air Transportation of Freight PPI", "monthly", "Index"),
+    "WPU057303":         ("No. 2 Diesel Fuel PPI", "monthly", "Index"),
 }
 
 

@@ -457,6 +457,18 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"value": (0, 50_000)},       # thousand barrels per day
     },
+    "eia_refinery_activity": {
+        "required":    ["series_id", "series_name", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 30_000)},       # thousand bbl/day inputs, or 0-100 percent
+    },
+    "eia_crude_trade": {
+        "required":    ["series_id", "series_name", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 20_000)},       # thousand barrels per day
+    },
     # ── USGS DS-140 critical mineral statistics ───────────────────────────────
     "usgs_minerals": {
         "required":    ["commodity", "category", "sheet", "table_title", "period", "value", "fetched_at"],
@@ -759,6 +771,13 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["series_id", "date", "value", "fetched_at"],
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
+    },
+    # ── TSA checkpoint travel volumes ─────────────────────────────────────────
+    "tsa_checkpoint": {
+        "required":    ["date", "travelers", "fetched_at"],
+        "critical_nn": ["date", "travelers"],
+        "date_col":    "date",
+        "value_ranges": {"travelers": (0, 10_000_000)},
     },
 }
 
