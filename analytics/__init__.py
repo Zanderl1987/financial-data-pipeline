@@ -7,6 +7,7 @@ from .short_interest import squeeze_candidates, short_change, ftd_pressure, shor
 from .features import feature_matrix
 from .signals import (
     signal_panel, rank_symbols, momentum, value, quality, low_volatility,
+    short_pressure, insider_flow, sentiment,
 )
 
 __all__ = [
@@ -17,6 +18,9 @@ __all__ = [
     "value",
     "quality",
     "low_volatility",
+    "short_pressure",
+    "insider_flow",
+    "sentiment",
     "yoy_growth",
     "valuation",
     "top_by_metric",

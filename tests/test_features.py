@@ -52,6 +52,25 @@ class TestAsofHelpers:
         assert pt is None or pt in {"prices", "tiingo_prices", "sector_etfs"}
 
 
+class TestAlternativeBlocks:
+    """Short-interest / insider / sentiment blocks must never drop panel rows
+    and must degrade to a no-op when their source table has no data."""
+
+    def setup_method(self):
+        self.panel = _synthetic_panel(50)
+        self.panel["date"] = pd.to_datetime(self.panel["date"])
+
+    @pytest.mark.parametrize("block", [
+        features._add_short_interest,
+        features._add_insider,
+        features._add_sentiment,
+    ])
+    def test_preserves_rows(self, block):
+        out = block(self.panel.copy())
+        assert len(out) == len(self.panel)
+        assert {"symbol", "date", "close"}.issubset(out.columns)
+
+
 class TestFeatureMatrixIntegration:
     def test_returns_dataframe(self):
         fm = feature_matrix(limit_symbols := None)  # default args

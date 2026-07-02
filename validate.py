@@ -620,6 +620,104 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
         "value_ranges": {"vessel_count": (0, 10_000)},
     },
+    # ── Stock Analysis (scraped — column set drifts with the site's HTML, so
+    #    schemas require only the columns the pipeline itself constructs) ──────
+    "sa_movers": {
+        "required":    ["symbol", "signal", "fetched_at"],
+        "critical_nn": ["symbol", "signal"],
+        "date_col":    None,
+    },
+    "sa_ipos": {
+        "required":    ["symbol", "fetched_at"],
+        "critical_nn": ["symbol"],
+        "date_col":    None,
+    },
+    "sa_ipo_calendar": {
+        "required":    ["symbol", "fetched_at"],
+        "critical_nn": ["symbol"],
+        "date_col":    None,
+    },
+    "sa_ipo_stats": {
+        "required":    ["fetched_at"],
+        "critical_nn": [],
+        "date_col":    None,
+    },
+    "sa_corporate_actions": {
+        "required":    ["action_type", "fetched_at"],
+        "critical_nn": ["action_type"],
+        "date_col":    None,
+    },
+    "sa_stock_list": {
+        "required":    ["symbol", "fetched_at"],
+        "critical_nn": ["symbol"],
+        "date_col":    None,
+    },
+    "sa_etf_list": {
+        "required":    ["symbol", "fetched_at"],
+        "critical_nn": ["symbol"],
+        "date_col":    None,
+    },
+    "sa_income": {
+        "required":    ["metric", "symbol", "period_type", "fetched_at"],
+        "critical_nn": ["metric", "symbol"],
+        "date_col":    None,
+    },
+    "sa_balance": {
+        "required":    ["metric", "symbol", "period_type", "fetched_at"],
+        "critical_nn": ["metric", "symbol"],
+        "date_col":    None,
+    },
+    "sa_cashflow": {
+        "required":    ["metric", "symbol", "period_type", "fetched_at"],
+        "critical_nn": ["metric", "symbol"],
+        "date_col":    None,
+    },
+    "sa_ratios": {
+        "required":    ["metric", "symbol", "period_type", "fetched_at"],
+        "critical_nn": ["metric", "symbol"],
+        "date_col":    None,
+    },
+    # ── Finviz (scraped — same drift caveat as Stock Analysis above) ──────────
+    "finviz_movers": {
+        "required":    ["ticker", "signal", "fetched_at"],
+        "critical_nn": ["ticker", "signal"],
+        "date_col":    None,
+    },
+    "finviz_screener": {
+        "required":    ["ticker", "fetched_at"],
+        "critical_nn": ["ticker"],
+        "date_col":    None,
+    },
+    "finviz_financials": {
+        "required":    ["ticker", "fetched_at"],
+        "critical_nn": ["ticker"],
+        "date_col":    None,
+    },
+    "finviz_insider": {
+        "required":    ["ticker", "owner", "transaction", "fetched_at"],
+        "critical_nn": ["ticker"],
+        "date_col":    None,
+    },
+    "finviz_sector_perf": {
+        "required":    ["name", "group_type", "fetched_at"],
+        "critical_nn": ["name"],
+        "date_col":    None,
+    },
+    "finviz_industry_perf": {
+        "required":    ["name", "group_type", "fetched_at"],
+        "critical_nn": ["name"],
+        "date_col":    None,
+    },
+    "finviz_country_perf": {
+        "required":    ["name", "group_type", "fetched_at"],
+        "critical_nn": ["name"],
+        "date_col":    None,
+    },
+    "finviz_group_valuation": {
+        "required":    ["name", "group_type", "fetched_at"],
+        "critical_nn": ["name", "group_type"],
+        "date_col":    None,
+    },
 }
 
 

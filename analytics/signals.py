@@ -11,11 +11,15 @@ directly into backtest.py.
 
 Factors
 -------
-- momentum  : 12-1 price momentum (trailing 12m return, skipping last month)
-- value     : earnings yield (EPS / price) — cheap stocks score high
-- quality   : return on assets blended with gross margin
-- low_vol   : inverse trailing realized volatility (low-vol anomaly)
-- growth    : YoY revenue growth (point-in-time)
+- momentum       : 12-1 price momentum (trailing 12m return, skipping last month)
+- value          : earnings yield (EPS / price) — cheap stocks score high
+- quality        : return on assets blended with gross margin
+- low_vol        : inverse trailing realized volatility (low-vol anomaly)
+- growth         : YoY revenue growth (point-in-time)
+- short_pressure : inverse days-to-cover — lightly shorted stocks score high
+                   (flip the weight sign to hunt squeeze candidates instead)
+- insider_flow   : trailing 90d net insider buying, scaled by shares outstanding
+- sentiment      : trailing 21d mean Claude-scored news sentiment
 
 Usage
 -----
@@ -39,11 +43,14 @@ from analytics.features import feature_matrix
 # Default factor weights for the composite. Only factors actually present in the
 # data contribute; weights are renormalized over the available subset per row.
 DEFAULT_WEIGHTS = {
-    "momentum": 1.0,
-    "value":    1.0,
-    "quality":  1.0,
-    "low_vol":  1.0,
-    "growth":   1.0,
+    "momentum":       1.0,
+    "value":          1.0,
+    "quality":        1.0,
+    "low_vol":        1.0,
+    "growth":         1.0,
+    "short_pressure": 1.0,
+    "insider_flow":   1.0,
+    "sentiment":      1.0,
 }
 
 _SIGNAL_COLS = list(DEFAULT_WEIGHTS)
@@ -98,6 +105,26 @@ def _raw_signals(fm: pd.DataFrame) -> pd.DataFrame:
                         ).where(df["_prior_rev"] > 0)
         df = df.drop(columns=["_lvl", "_prior_rev"])
 
+    # short_pressure — lightly shorted stocks score high. days_to_cover
+    # (shares short / avg daily volume) is the cross-sectionally comparable
+    # measure; raw shares_short is not, absent each symbol's float.
+    if "si_days_to_cover" in df:
+        df["short_pressure"] = -df["si_days_to_cover"]
+
+    # insider_flow — trailing net insider buying. Scale by shares outstanding
+    # when known so a 10k-share buy means more at a small-cap than a mega-cap;
+    # without shares outstanding, raw net shares is the only consistent unit.
+    if "insider_net_90d" in df:
+        if "fund_shares" in df and df["fund_shares"].gt(0).any():
+            df["insider_flow"] = (df["insider_net_90d"] / df["fund_shares"]
+                                  ).where(df["fund_shares"] > 0)
+        else:
+            df["insider_flow"] = df["insider_net_90d"]
+
+    # sentiment — trailing mean news score, already on a [-1, +1] scale
+    if "news_score_21d" in df:
+        df["sentiment"] = df["news_score_21d"]
+
     return df
 
 
@@ -118,7 +145,8 @@ def signal_panel(
     fm      : reuse a precomputed feature_matrix instead of rebuilding
 
     Returns DataFrame:
-        symbol | date | momentum | value | quality | low_vol | growth | composite
+        symbol | date | momentum | value | quality | low_vol | growth |
+        short_pressure | insider_flow | sentiment | composite
     (signal columns are cross-sectional z-scores; composite is their weighted mean)
     """
     if fm is None:
@@ -209,3 +237,18 @@ def quality(symbols=None, start=None, end=None, fm=None):
 def low_volatility(symbols=None, start=None, end=None, fm=None):
     """Cross-sectional low-volatility z-scores."""
     return _single_factor("low_vol", symbols, start, end, fm)
+
+
+def short_pressure(symbols=None, start=None, end=None, fm=None):
+    """Cross-sectional short-pressure z-scores (lightly shorted = high)."""
+    return _single_factor("short_pressure", symbols, start, end, fm)
+
+
+def insider_flow(symbols=None, start=None, end=None, fm=None):
+    """Cross-sectional net-insider-buying z-scores."""
+    return _single_factor("insider_flow", symbols, start, end, fm)
+
+
+def sentiment(symbols=None, start=None, end=None, fm=None):
+    """Cross-sectional news-sentiment z-scores."""
+    return _single_factor("sentiment", symbols, start, end, fm)

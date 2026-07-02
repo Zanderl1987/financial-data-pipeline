@@ -185,13 +185,16 @@ CATALOG: dict[str, str] = {
     "wikipedia_pageviews":     _glob("wikipedia/**/*.parquet"),
     "openfda_approvals":       _glob("openfda/approvals/**/*.parquet"),
     "openfda_recalls":         _glob("openfda/recalls/**/*.parquet"),
-    "treasury_tic_holders":    _glob("treasury_tic/**/*.parquet"),
-    "treasury_tic_slt":        _glob("treasury_tic/**/*.parquet"),
-    "google_trends_economic":  _glob("google_trends/**/*.parquet"),
-    "google_trends_market":    _glob("google_trends/**/*.parquet"),
-    "google_trends_sector":    _glob("google_trends/**/*.parquet"),
-    "reddit_posts":            _glob("reddit/**/*.parquet"),
-    "reddit_mentions":         _glob("reddit/**/*.parquet"),
+    # These pipelines write multiple tables into one storage directory, so the
+    # glob must match on filename prefix — a bare **/*.parquet would union
+    # mismatched schemas across sibling tables.
+    "treasury_tic_holders":    _glob("treasury_tic/**/treasury_tic_holders_*.parquet"),
+    "treasury_tic_slt":        _glob("treasury_tic/**/treasury_tic_slt_*.parquet"),
+    "google_trends_economic":  _glob("google_trends/**/google_trends_economic_*.parquet"),
+    "google_trends_market":    _glob("google_trends/**/google_trends_market_*.parquet"),
+    "google_trends_sector":    _glob("google_trends/**/google_trends_sector_*.parquet"),
+    "reddit_posts":            _glob("reddit/**/reddit_posts_*.parquet"),
+    "reddit_mentions":         _glob("reddit/**/reddit_mentions_*.parquet"),
     "ais_positions":           _glob("ais/positions/**/*.parquet"),
     "ais_zone_summary":        _glob("ais/zone_summary/**/*.parquet"),
     # ── Stock Analysis (scraped, no API key) ─────────────────────────────────

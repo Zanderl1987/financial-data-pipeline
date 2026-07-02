@@ -27,7 +27,10 @@ def _synthetic_fm():
                 "vol_21d": 0.2 + 0.05 * i,
                 "fund_eps": 5 - i, "fund_net_income": 100 - 10 * i,
                 "fund_total_assets": 1000.0, "fund_gross_profit": 400 - 20 * i,
-                "fund_revenue": 1000.0,
+                "fund_revenue": 1000.0, "fund_shares": 100.0,
+                "si_days_to_cover": 1.0 + i,
+                "insider_net_90d": 10.0 * (3 - i),
+                "news_score_21d": 0.5 - 0.2 * i,
             })
     return pd.DataFrame(rows)
 
@@ -56,6 +59,21 @@ class TestRawSignals:
 
     def test_quality_present(self):
         assert "quality" in self.raw.columns and self.raw["quality"].notna().any()
+
+    def test_short_pressure_is_negated_days_to_cover(self):
+        assert (self.raw["short_pressure"] == -self.raw["si_days_to_cover"]).all()
+
+    def test_insider_flow_scaled_by_shares(self):
+        row = self.raw.iloc[0]
+        assert row["insider_flow"] == pytest.approx(
+            row["insider_net_90d"] / row["fund_shares"])
+
+    def test_insider_flow_unscaled_without_shares(self):
+        raw = signals._raw_signals(_synthetic_fm().drop(columns=["fund_shares"]))
+        assert (raw["insider_flow"] == raw["insider_net_90d"]).all()
+
+    def test_sentiment_is_news_score(self):
+        assert (self.raw["sentiment"] == self.raw["news_score_21d"]).all()
 
 
 class TestSignalPanel:

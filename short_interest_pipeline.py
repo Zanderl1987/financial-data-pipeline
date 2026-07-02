@@ -162,7 +162,7 @@ def _candidate_settlement_dates(n: int = 6) -> list[str]:
     """
     dates = []
     today = datetime.date.today()
-    for months_back in range(3):
+    for months_back in range(4):
         year  = today.year
         month = today.month - months_back
         if month <= 0:
@@ -182,7 +182,9 @@ def _candidate_settlement_dates(n: int = 6) -> list[str]:
         while eom.weekday() >= 5:
             eom -= datetime.timedelta(days=1)
         dates.append(eom.strftime("%Y%m%d"))
-    return sorted(set(dates), reverse=True)[:n]
+    # A settlement date that hasn't happened yet can never have a file
+    cutoff = today.strftime("%Y%m%d")
+    return sorted({d for d in dates if d <= cutoff}, reverse=True)[:n]
 
 
 def _download_finra_file(date_str: str) -> pd.DataFrame | None:

@@ -79,6 +79,7 @@ KEYS: dict[str, list[str]] = {
     "institutional_holdings": ["cik", "cusip", "filed_date", "put_call"],
     "finnhub_recommendations":["symbol", "period"],
     "sec_ftd":                ["settlement_date", "cusip"],
+    "finra_short_interest":   ["symbol", "settlement_date"],
     "cot":                    ["market", "date"],
     # Options — one contract quote per symbol/expiry/strike/type/date
     "options_history":        ["symbol", "expiration_date", "strike_price", "contract_type", "date"],
@@ -86,13 +87,9 @@ KEYS: dict[str, list[str]] = {
     # Dividends
     "dividends":              ["symbol", "ex_date"],
 }
-
-# Optional SQL predicate used to *split* tables that share one storage glob into
-# distinct curated tables (fixes the catalog glob-collision bug). Filled lazily
-# as discriminator columns become known; entries here override the raw view.
-FILTERS: dict[str, str] = {
-    # e.g. "treasury_tic_holders": "record_type = 'holder'",
-}
+# NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
+# reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
+# view — and therefore each curated snapshot — already sees only its own files.
 
 
 def _curated_path(table: str) -> str:

@@ -154,6 +154,118 @@ def _asof_fundamentals(panel: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _add_short_interest(panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    Point-in-time FINRA short interest via ASOF JOIN on settlement date.
+
+    FINRA publishes each biweekly file roughly a week after settlement, so the
+    join key is settlement_date + 7 days — a row only sees short-interest data
+    that was actually public on that date.
+    """
+    if not _has_data("finra_short_interest"):
+        return panel
+
+    con = q._con()
+    con.register("_panel", panel[["symbol", "date"]])
+    try:
+        joined = con.execute("""
+            SELECT p.symbol, p.date,
+                   s.days_to_cover AS si_days_to_cover,
+                   s.shares_short  AS si_shares_short
+            FROM _panel p
+            ASOF LEFT JOIN (
+                SELECT symbol,
+                       CAST(settlement_date AS DATE) + INTERVAL 7 DAY AS public_date,
+                       MAX(days_to_cover) AS days_to_cover,
+                       MAX(shares_short)  AS shares_short
+                FROM finra_short_interest
+                WHERE settlement_date IS NOT NULL
+                GROUP BY symbol, public_date
+            ) s
+            ON p.symbol = s.symbol AND p.date >= s.public_date
+        """).df()
+    except Exception:
+        con.unregister("_panel")
+        return panel
+    con.unregister("_panel")
+    joined["date"] = pd.to_datetime(joined["date"])
+    return panel.merge(joined, on=["symbol", "date"], how="left")
+
+
+def _add_insider(panel: pd.DataFrame, days: int = 90) -> pd.DataFrame:
+    """
+    Trailing net insider share change (Finnhub Form 4 data).
+
+    Sums `change` over the previous `days` calendar days per (symbol, date).
+    Form 4 filings are due within 2 business days of the transaction, so each
+    transaction only becomes visible 3 calendar days after transaction_date.
+    Symbols with no insider coverage stay NaN (not zero) so the signal layer
+    renormalizes around them instead of treating them as neutral data points.
+    """
+    if not _has_data("insider_transactions"):
+        return panel
+
+    con = q._con()
+    con.register("_panel", panel[["symbol", "date"]])
+    try:
+        joined = con.execute(f"""
+            SELECT p.symbol, p.date, SUM(i."change") AS insider_net_{days}d
+            FROM _panel p
+            LEFT JOIN (
+                SELECT symbol,
+                       CAST(transaction_date AS DATE) + INTERVAL 3 DAY AS public_date,
+                       "change"
+                FROM insider_transactions
+                WHERE transaction_date IS NOT NULL AND "change" IS NOT NULL
+            ) i
+            ON p.symbol = i.symbol
+               AND i.public_date <= p.date
+               AND i.public_date >  p.date - INTERVAL {days} DAY
+            GROUP BY p.symbol, p.date
+        """).df()
+    except Exception:
+        con.unregister("_panel")
+        return panel
+    con.unregister("_panel")
+    joined["date"] = pd.to_datetime(joined["date"])
+    return panel.merge(joined, on=["symbol", "date"], how="left")
+
+
+def _add_sentiment(panel: pd.DataFrame, days: int = 21) -> pd.DataFrame:
+    """
+    Trailing Claude-scored news sentiment: mean score and article count over
+    the previous `days` calendar days. Article dates are publication dates, so
+    no extra lag is needed.
+    """
+    if not _has_data("news_sentiment"):
+        return panel
+
+    con = q._con()
+    con.register("_panel", panel[["symbol", "date"]])
+    try:
+        joined = con.execute(f"""
+            SELECT p.symbol, p.date,
+                   AVG(n.score)   AS news_score_{days}d,
+                   COUNT(n.score) AS news_count_{days}d
+            FROM _panel p
+            LEFT JOIN (
+                SELECT symbol, CAST(date AS DATE) AS news_date, score
+                FROM news_sentiment
+                WHERE score IS NOT NULL
+            ) n
+            ON p.symbol = n.symbol
+               AND n.news_date <= p.date
+               AND n.news_date >  p.date - INTERVAL {days} DAY
+            GROUP BY p.symbol, p.date
+        """).df()
+    except Exception:
+        con.unregister("_panel")
+        return panel
+    con.unregister("_panel")
+    joined["date"] = pd.to_datetime(joined["date"])
+    return panel.merge(joined, on=["symbol", "date"], how="left")
+
+
 def _broadcast_macro(panel: pd.DataFrame) -> pd.DataFrame:
     """ASOF-join macro series onto every row by date (cross-sectional broadcast)."""
     if not _has_data("macro"):
@@ -189,6 +301,9 @@ def feature_matrix(
     price_table: "str | None" = None,
     fundamentals: bool = True,
     macro: bool = True,
+    short_interest: bool = True,
+    insider: bool = True,
+    sentiment: bool = True,
 ) -> pd.DataFrame:
     """
     Build a point-in-time (symbol, date) feature panel.
@@ -200,10 +315,15 @@ def feature_matrix(
     price_table  : override the price source (default: auto-detect)
     fundamentals : include point-in-time SEC fundamentals (default True)
     macro        : include broadcast macro series (default True)
+    short_interest : include lagged FINRA short interest (default True)
+    insider      : include trailing net insider buying (default True)
+    sentiment    : include trailing news-sentiment score (default True)
 
     Returns a DataFrame with columns:
         symbol | date | close | ret_1d | ret_21d | ret_63d | ret_252d |
-        mom_12_1 | vol_21d | [dollar_vol_21d] | fund_* | macro_*
+        mom_12_1 | vol_21d | [dollar_vol_21d] | fund_* | macro_* |
+        si_days_to_cover | si_shares_short | insider_net_90d |
+        news_score_21d | news_count_21d
     Empty DataFrame if no price source has data.
     """
     pt = _pick_price_table(price_table)
@@ -219,6 +339,12 @@ def feature_matrix(
         panel = _asof_fundamentals(panel)
     if macro:
         panel = _broadcast_macro(panel)
+    if short_interest:
+        panel = _add_short_interest(panel)
+    if insider:
+        panel = _add_insider(panel)
+    if sentiment:
+        panel = _add_sentiment(panel)
 
     panel.attrs["price_table"] = pt
     return panel.reset_index(drop=True)

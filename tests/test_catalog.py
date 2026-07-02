@@ -184,6 +184,17 @@ class TestCatalogPaths:
         }
         assert not bad, f"CATALOG entries without .parquet extension: {bad}"
 
+    def test_no_glob_collisions(self):
+        """No two tables may share one glob — colliding globs union mismatched
+        schemas (e.g. reddit_posts and reddit_mentions) into both views."""
+        seen: dict[str, str] = {}
+        collisions = []
+        for name, path in q.CATALOG.items():
+            if path in seen:
+                collisions.append((seen[path], name, path))
+            seen[path] = name
+        assert not collisions, f"CATALOG glob collisions: {collisions}"
+
     def test_storage_dirs_exist(self):
         """Each CATALOG glob path's base (non-wildcard) directory should exist."""
         missing_dirs = []
