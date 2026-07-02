@@ -86,6 +86,16 @@ KEYS: dict[str, list[str]] = {
     "synthetic_options":      ["symbol", "expiration_date", "strike_price", "contract_type", "vol_method", "date"],
     # Dividends
     "dividends":              ["symbol", "ex_date"],
+    # Fed sentiment — one doc per RSS link
+    "fed_speeches":           ["doc_id"],
+    "fed_sentiment":          ["doc_id"],
+    # Real estate
+    "fhfa_hpi":               ["hpi_type", "hpi_flavor", "frequency", "level", "place_id", "date"],
+    "zillow_zhvi":            ["region_id", "date"],
+    "zillow_zori":            ["region_id", "date"],
+    # Shipping / logistics
+    "shipping_gscpi":         ["date"],
+    "shipping_freight_ppi":   ["series_id", "date"],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw

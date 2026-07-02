@@ -49,6 +49,9 @@ PIPELINE_MODULES = [
     "fear_greed_pipeline",
     "nasdaq_data_link_pipeline",
     "fed_soma_pipeline",
+    "fed_sentiment_pipeline",
+    "real_estate_pipeline",
+    "shipping_pipeline",
 ]
 
 

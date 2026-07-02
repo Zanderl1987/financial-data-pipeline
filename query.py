@@ -220,6 +220,16 @@ CATALOG: dict[str, str] = {
     "finviz_group_valuation":  _glob("finviz/groups/valuation/**/*.parquet"),
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
+    # ── Fed sentiment (RSS speeches/statements + Claude hawkish/dovish) ──────
+    "fed_speeches":            _glob("fed/speeches/**/*.parquet"),
+    "fed_sentiment":           _glob("fed/sentiment/**/*.parquet"),
+    # ── Real estate (FHFA HPI + Zillow ZHVI/ZORI) ────────────────────────────
+    "fhfa_hpi":                _glob("fhfa/hpi/**/*.parquet"),
+    "zillow_zhvi":             _glob("zillow/zhvi/**/*.parquet"),
+    "zillow_zori":             _glob("zillow/zori/**/*.parquet"),
+    # ── Shipping / logistics (NY Fed GSCPI + FRED freight PPI) ───────────────
+    "shipping_gscpi":          _glob("shipping/gscpi/**/*.parquet"),
+    "shipping_freight_ppi":    _glob("shipping/freight_ppi/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────

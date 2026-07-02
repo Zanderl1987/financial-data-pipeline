@@ -718,6 +718,49 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["name", "group_type"],
         "date_col":    None,
     },
+    # ── Fed sentiment (RSS scrape + Claude hawkish/dovish scoring) ───────────
+    "fed_speeches": {
+        "required":    ["doc_id", "doc_type", "title", "link", "text", "fetched_at"],
+        "critical_nn": ["doc_id", "doc_type", "text"],
+        "date_col":    "date",
+    },
+    "fed_sentiment": {
+        "required":    ["doc_id", "doc_type", "stance", "hawkish_score", "fetched_at"],
+        "critical_nn": ["doc_id", "stance", "hawkish_score"],
+        "date_col":    "date",
+        "value_ranges": {"hawkish_score": (-1.0, 1.0), "confidence": (0.0, 1.0)},
+    },
+    # ── Real estate: FHFA House Price Index ───────────────────────────────────
+    "fhfa_hpi": {
+        "required":    ["hpi_type", "level", "place_name", "date", "fetched_at"],
+        "critical_nn": ["hpi_type", "level", "place_name", "date"],
+        "date_col":    "date",
+    },
+    # ── Real estate: Zillow ZHVI / ZORI ───────────────────────────────────────
+    "zillow_zhvi": {
+        "required":    ["region_name", "region_type", "date", "zhvi", "fetched_at"],
+        "critical_nn": ["region_name", "date", "zhvi"],
+        "date_col":    "date",
+        "value_ranges": {"zhvi": (0, 20_000_000)},
+    },
+    "zillow_zori": {
+        "required":    ["region_name", "region_type", "date", "zori", "fetched_at"],
+        "critical_nn": ["region_name", "date", "zori"],
+        "date_col":    "date",
+        "value_ranges": {"zori": (0, 100_000)},
+    },
+    # ── Shipping / logistics ──────────────────────────────────────────────────
+    "shipping_gscpi": {
+        "required":    ["date", "gscpi", "fetched_at"],
+        "critical_nn": ["date", "gscpi"],
+        "date_col":    "date",
+        "value_ranges": {"gscpi": (-10, 10)},
+    },
+    "shipping_freight_ppi": {
+        "required":    ["series_id", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
 }
 
 

@@ -437,6 +437,46 @@ Financials default to DJI components + sector ETFs (~45 symbols). Requests throt
 
 ---
 
+### 11. ~~Fed Sentiment + Real Estate + Shipping Pipelines~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-02
+
+Three new sources requested to fill gaps identified in a research pass over
+Fed communications, real estate, and shipping/logistics (Baltic Dry Index and
+Freightos were ruled out — paid/ToS-restricted for time-series use).
+
+**`fed_sentiment_pipeline.py`** (federalreserve.gov RSS + Claude, no API key
+for the fetch, `ANTHROPIC_API_KEY` for scoring):
+- Pulls FOMC statements (`/feeds/press_monetary.xml`) and Fed official
+  speeches (`/feeds/speeches.xml`), scrapes full text via the `#article`
+  selector (present on both speech and press-release pages), scores
+  hawkish/dovish stance with `claude-haiku-4-5` (same pattern as
+  `news_sentiment_pipeline.py`, batches of 5 — documents are long).
+- CATALOG: `fed_speeches` (raw text), `fed_sentiment` (stance/hawkish_score/confidence/key_topics)
+- Caveat: RSS feeds only expose the ~15 most recent items each; no deeper
+  backfill is available without FRASER archive access.
+
+**`real_estate_pipeline.py`** (FHFA + Zillow, keyless):
+- FHFA HPI master file — single CSV with all geography levels (national,
+  census division, state, MSA, Puerto Rico) and both NSA/SA indexes.
+- Zillow Research ZHVI (state + metro) and ZORI (metro) — wide date-column
+  CSVs melted to long format. Requires a real browser User-Agent (default
+  `requests` UA gets blocked).
+- CATALOG: `fhfa_hpi`, `zillow_zhvi`, `zillow_zori`
+
+**`shipping_pipeline.py`** (NY Fed GSCPI + FRED, uses existing `FRED_API_KEY`):
+- GSCPI — NY Fed's composite Global Supply Chain Pressure Index, keyless
+  Excel download, monthly back to 1998.
+- FRED deep-sea freight transportation + marine cargo handling PPI series
+  (`PCU483111483111`, `WPU301301`, `WPU3113`) — substitute for the Baltic
+  Dry Index / Freightos FBX, which require paid licenses for time-series use.
+- CATALOG: `shipping_gscpi`, `shipping_freight_ppi`
+
+CATALOG expanded 78→85 tables. All 3 pipelines wired into `run_all.py` Stage 1,
+`validate.py` schemas, and `curated.py` natural keys. Test suite: 189 passed,
+15 skipped (schwabdev/anthropic still absent from conda env).
+
+---
+
 ## Candidate Improvements (Next Up)
 
 ### A. Market-Wide Gainers / Losers via Yahoo Finance Screener

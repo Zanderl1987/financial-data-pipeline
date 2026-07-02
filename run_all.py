@@ -464,6 +464,34 @@ PIPELINES: list[PipelineSpec] = [
         requires_env=["AISSTREAM_API_KEY"],
         timeout=720,   # 10-min window + buffer
     ),
+    PipelineSpec(
+        name="real_estate",
+        file="real_estate_pipeline.py",
+        desc="FHFA House Price Index + Zillow ZHVI/ZORI (keyless)",
+        stage=1,
+        tables=["fhfa_hpi", "zillow_zhvi", "zillow_zori"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="shipping",
+        file="shipping_pipeline.py",
+        desc="NY Fed GSCPI + FRED deep-sea freight/marine cargo PPI series",
+        stage=1,
+        tables=["shipping_gscpi", "shipping_freight_ppi"],
+        requires_env=["FRED_API_KEY"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="fed_sentiment",
+        file="fed_sentiment_pipeline.py",
+        desc="Fed speeches/FOMC statements (RSS) scored hawkish/dovish via Claude",
+        stage=1,
+        tables=["fed_speeches", "fed_sentiment"],
+        requires_env=["ANTHROPIC_API_KEY"],
+        timeout=600,
+    ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
         name="prices",

@@ -146,6 +146,16 @@ EXPECTED_TABLES = [
     "treasury_yield_curve",
     # NY Fed SOMA balance sheet
     "fed_soma",
+    # Fed sentiment (RSS speeches/statements + Claude hawkish/dovish)
+    "fed_speeches",
+    "fed_sentiment",
+    # Real estate (FHFA HPI + Zillow ZHVI/ZORI)
+    "fhfa_hpi",
+    "zillow_zhvi",
+    "zillow_zori",
+    # Shipping / logistics (NY Fed GSCPI + FRED freight PPI)
+    "shipping_gscpi",
+    "shipping_freight_ppi",
 ]
 
 
