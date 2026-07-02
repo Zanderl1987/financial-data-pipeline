@@ -459,10 +459,9 @@ SCHEMAS: dict[str, dict] = {
     },
     # ── USGS DS-140 critical mineral statistics ───────────────────────────────
     "usgs_minerals": {
-        "required":    ["commodity", "category", "sheet", "metric", "year", "value", "fetched_at"],
-        "critical_nn": ["commodity", "metric", "year", "value"],
+        "required":    ["commodity", "category", "sheet", "table_title", "period", "value", "fetched_at"],
+        "critical_nn": ["commodity", "table_title", "period", "value"],
         "date_col":    None,
-        "value_ranges": {"year": (1900, 2031)},
     },
     # ── Fama-French factor returns ────────────────────────────────────────────
     "ff_factors": {
