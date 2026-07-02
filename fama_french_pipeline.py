@@ -148,6 +148,7 @@ def _parse_industry_csv(text: str) -> pd.DataFrame:
     sections: list[tuple[str, str, list[str]]] = []
     current_freq = "monthly"
     current_weight = "value_weighted"
+    current_is_returns = False
     current_lines: list[str] = []
     header_cols: list[str] = []
 
@@ -157,13 +158,23 @@ def _parse_industry_csv(text: str) -> pd.DataFrame:
             continue
         lower = stripped.lower()
 
-        is_section_header = not any(c.isdigit() for c in stripped[:6]) and len(stripped) > 10
+        # Section titles (e.g. "Average Value Weighted Returns -- Monthly")
+        # are prose with few/no commas. The column-header row itself
+        # (",Agric,Food,Soda,...") also has no digits in the first 6 chars,
+        # so it must be excluded here via a comma-count check, or it gets
+        # misdetected as a section title and header_cols never gets set.
+        is_section_header = (
+            not any(c.isdigit() for c in stripped[:6])
+            and len(stripped) > 10
+            and stripped.count(",") < 3
+        )
 
         if is_section_header:
-            if current_lines and header_cols:
+            if current_lines and header_cols and current_is_returns:
                 sections.append((current_freq, current_weight, header_cols, current_lines))
             current_lines = []
             header_cols = []
+            current_is_returns = "returns" in lower
             if "annual" in lower:
                 current_freq = "annual"
             elif "daily" in lower:
@@ -176,7 +187,7 @@ def _parse_industry_csv(text: str) -> pd.DataFrame:
         else:
             current_lines.append(line)
 
-    if current_lines and header_cols:
+    if current_lines and header_cols and current_is_returns:
         sections.append((current_freq, current_weight, header_cols, current_lines))
 
     frames = []

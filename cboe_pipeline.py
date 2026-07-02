@@ -62,8 +62,10 @@ def fetch_index(name: str, filename: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(csv_text))
     df.columns = [c.strip().upper() for c in df.columns]
 
-    # Rename columns
-    col_map = {"DATE": "date", "OPEN": "open", "HIGH": "high", "LOW": "low", "CLOSE": "close"}
+    # Rename columns. VVIX/SKEW only publish a single daily value (no OHLC) —
+    # their second column is the index name itself (e.g. "VVIX"), not "CLOSE".
+    col_map = {"DATE": "date", "OPEN": "open", "HIGH": "high", "LOW": "low", "CLOSE": "close",
+               name: "close"}
     df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -71,8 +73,9 @@ def fetch_index(name: str, filename: str) -> pd.DataFrame:
     df["index_name"] = name
 
     for col in ("open", "high", "low", "close"):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col not in df.columns:
+            df[col] = pd.NA
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     return df[["date", "index_name", "open", "high", "low", "close"]]

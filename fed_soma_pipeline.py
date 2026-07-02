@@ -36,10 +36,15 @@ REQUEST_GAP = 0.4   # seconds between date requests
 
 
 def _get_dates(asset_type: str) -> list[str]:
-    """Return sorted list of available report date strings (YYYY-MM-DD)."""
-    resp = requests.get(f"{BASE_URL}/{asset_type}/get/dates.json", timeout=30)
+    """Return sorted list of available report date strings (YYYY-MM-DD).
+
+    The per-asset-type "{type}/get/dates.json" endpoint documented in the
+    module docstring returns HTTP 400 — the working endpoint is the
+    asset-type-agnostic "asOfDates/list.json".
+    """
+    resp = requests.get(f"{BASE_URL}/asOfDates/list.json", timeout=30)
     resp.raise_for_status()
-    dates = resp.json().get("soma", {}).get("dates", [])
+    dates = resp.json().get("soma", {}).get("asOfDates", [])
     return sorted(dates)
 
 

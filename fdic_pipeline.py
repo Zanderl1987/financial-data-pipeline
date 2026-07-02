@@ -57,12 +57,15 @@ def _get(endpoint: str, params: dict) -> list[dict]:
 
 
 def fetch_institutions(fetched_at: str) -> pd.DataFrame:
-    fields = "CERT,INSTNAME,CITY,STNAME,STALP,ASSET,DEP,NETINC,REPDTE,CHRTAGNT,INSTCAT,ACTIVE"
+    # NAME is the current API field; the old INSTNAME field is silently
+    # dropped from the response (no error) rather than rejected.
+    fields = "CERT,NAME,CITY,STNAME,STALP,ASSET,DEP,NETINC,REPDTE,CHRTAGNT,INSTCAT,ACTIVE"
     records = _get("institutions", {"fields": fields, "filters": "ACTIVE:1"})
     if not records:
         return pd.DataFrame()
     df = pd.DataFrame(records)
     df.columns = [c.lower() for c in df.columns]
+    df = df.rename(columns={"name": "instname"})
     df["fetched_at"] = fetched_at
     return df
 
@@ -75,9 +78,11 @@ def fetch_financials(start_date: str, end_date: str, fetched_at: str) -> pd.Data
     # REPDTE format: YYYYMMDD
     start = start_date.replace("-", "")
     end   = end_date.replace("-", "")
+    # A literal "+" between the range bounds gets percent-encoded to "%2B"
+    # by requests, which the FDIC search parser rejects; a plain space works.
     records = _get("financials", {
         "fields":  fields,
-        "filters": f"REPDTE:[{start}+TO+{end}]",
+        "filters": f"REPDTE:[{start} TO {end}]",
         "sort_by": "REPDTE",
         "sort_order": "ASC",
     })
