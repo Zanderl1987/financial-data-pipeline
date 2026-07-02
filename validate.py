@@ -334,12 +334,12 @@ SCHEMAS: dict[str, dict] = {
     },
     # ── FAO FAOSTAT ──────────────────────────────────────────────────────────
     "fao_production": {
-        "required":    ["country", "commodity", "year", "value"],
+        "required":    ["country", "commodity", "obs_year", "value"],
         "critical_nn": ["country", "commodity", "value"],
         "date_col":    None,
     },
     "fao_prices": {
-        "required":    ["country", "commodity", "year", "value"],
+        "required":    ["country", "commodity", "obs_year", "value"],
         "critical_nn": ["country", "commodity", "value"],
         "date_col":    None,
     },
@@ -357,7 +357,7 @@ SCHEMAS: dict[str, dict] = {
     },
     # ── USDA NASS crop production + fertilizer prices ─────────────────────────
     "usda_crops": {
-        "required":    ["commodity", "stat_category", "year", "value", "fetched_at"],
+        "required":    ["commodity", "stat_category", "date", "value", "fetched_at"],
         "critical_nn": ["commodity", "value"],
         "date_col":    "date",
     },
@@ -536,8 +536,8 @@ SCHEMAS: dict[str, dict] = {
     },
     # ── UN Comtrade trade flows (battery materials and components) ────────────
     "comtrade_trade": {
-        "required":    ["hs_code", "hs_name", "category", "year", "flow", "trade_value_usd", "fetched_at"],
-        "critical_nn": ["hs_code", "year", "flow"],
+        "required":    ["hs_code", "hs_name", "category", "obs_year", "flow", "trade_value_usd", "fetched_at"],
+        "critical_nn": ["hs_code", "obs_year", "flow"],
         "date_col":    None,
         "value_ranges": {"trade_value_usd": (0, 5e12)},
     },

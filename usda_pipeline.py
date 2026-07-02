@@ -172,12 +172,15 @@ def _clean_crops(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
 
-    keep = ["commodity", "stat_category", "description", "unit", "year", "date", "period", "agg_level", "value"]
+    # "year" dropped from output: DuckDB's hive_partitioning=True treats "year"
+    # as a reserved virtual column (from storage/raw/.../year=YYYY/) and would
+    # silently overwrite it with the fetch year — "date" already covers it.
+    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "agg_level", "value"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["value"])
     df["source"] = "USDA NASS QuickStats"
     df["fetched_at"] = datetime.datetime.utcnow().isoformat()
-    return df.sort_values(["commodity", "year"]).reset_index(drop=True)
+    return df.sort_values(["commodity", "date"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +257,8 @@ def _clean_fertilizers(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
 
-    keep = ["commodity", "stat_category", "description", "unit", "year", "date", "period", "frequency", "value"]
+    # "year" dropped — see note in _clean_crops above.
+    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "frequency", "value"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["value"])
     df["source"] = "USDA NASS QuickStats"

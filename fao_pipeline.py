@@ -203,7 +203,11 @@ def normalize_df(df, fetched_at):
         "item":         "commodity",
         "element_code": "element_code",
         "element":      "element",
-        "year":         "year",
+        # Renamed from "year": DuckDB's hive_partitioning=True treats "year"
+        # as a reserved virtual column (from storage/raw/.../year=YYYY/), and
+        # silently overwrites a same-named physical column with the fetch
+        # year instead of the real observation year.
+        "year":         "obs_year",
         "unit":         "unit",
         "value":        "value",
         "flag":         "flag",

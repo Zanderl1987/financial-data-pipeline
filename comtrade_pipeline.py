@@ -161,15 +161,18 @@ def _normalise(rows: list[dict], hs_code: str, hs_name: str, category: str) -> p
     df["hs_code"]   = hs_code
     df["hs_name"]   = hs_name
     df["category"]  = category
-    # Keep a clean numeric year column
+    # Keep a clean numeric year column. Named "obs_year" (not "year"): DuckDB's
+    # hive_partitioning=True treats "year" as a reserved virtual column (from
+    # storage/raw/.../year=YYYY/) and silently overwrites a same-named
+    # physical column with the fetch year instead of the real trade year.
     if "period" in df.columns:
-        df["year"] = pd.to_numeric(df["period"], errors="coerce").astype("Int64")
+        df["obs_year"] = pd.to_numeric(df["period"], errors="coerce").astype("Int64")
     # Numeric values
     for col in ("trade_value_usd", "net_weight_kg", "quantity"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     keep = [c for c in [
-        "hs_code", "hs_name", "category", "year", "period",
+        "hs_code", "hs_name", "category", "obs_year", "period",
         "reporter", "reporter_iso",
         "partner", "partner_iso",
         "flow", "flow_desc",
@@ -243,7 +246,7 @@ def main(backfill: bool = False) -> None:
     combined = (
         pd.concat(frames, ignore_index=True)
         .drop_duplicates()
-        .sort_values(["category", "hs_code", "year", "flow"])
+        .sort_values(["category", "hs_code", "obs_year", "flow"])
         .reset_index(drop=True)
     )
     combined["source"]     = "UN Comtrade"
@@ -257,11 +260,11 @@ def main(backfill: bool = False) -> None:
     )
     print(f"\n-> {path}")
     print(f"   {len(combined):,} rows | {combined['hs_code'].nunique()} HS codes "
-          f"| {combined['year'].nunique()} years")
+          f"| {combined['obs_year'].nunique()} years")
 
     if "trade_value_usd" in combined.columns and not backfill:
-        latest_year = combined["year"].max()
-        latest = combined[combined["year"] == latest_year]
+        latest_year = combined["obs_year"].max()
+        latest = combined[combined["obs_year"] == latest_year]
         total_val = latest["trade_value_usd"].sum()
         print(f"   Latest year ({latest_year}) total trade value: ${total_val/1e9:,.2f}B")
 
