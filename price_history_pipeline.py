@@ -43,12 +43,16 @@ def get_dji_symbols():
 
 
 def fetch_with_backoff(client, symbol, start_ms, end_ms):
-    """Fetch price history with retry + exponential backoff on 429."""
+    """Fetch price history with retry + exponential backoff on 429.
+
+    period is intentionally omitted: when startDate/endDate are supplied the
+    date range wins, and omitting period lets a very early startDate return
+    the full history Schwab has for the symbol (daily bars back to ~1985).
+    """
     for attempt in range(1, MAX_RETRIES + 1):
         response = client.price_history(
             symbol=symbol,
             periodType="year",
-            period=1,
             frequencyType="daily",
             frequency=1,
             startDate=start_ms,
@@ -94,7 +98,7 @@ def fetch_symbol(client, symbol, start_ms, end_ms):
     return df
 
 
-def main(backfill=False):
+def main(backfill=False, full=False, start=None, symbols=None, watchlist=False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     client = schwabdev.Client(
         app_key=API_KEY,
@@ -104,7 +108,14 @@ def main(backfill=False):
     )
 
     end_dt = datetime.datetime.utcnow()
-    if backfill:
+    if full:
+        # Everything Schwab has (daily bars typically reach back to ~1985)
+        start_dt = datetime.datetime(1970, 1, 2)
+        print("Mode: FULL HISTORY (from 1970 — Schwab returns all it has)")
+    elif start:
+        start_dt = datetime.datetime.strptime(start, "%Y-%m-%d")
+        print(f"Mode: CUSTOM START ({start})")
+    elif backfill:
         # Full year lookback for initial load
         start_dt = end_dt - datetime.timedelta(days=365)
         print("Mode: BACKFILL (365 days)")
@@ -116,7 +127,15 @@ def main(backfill=False):
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(end_dt.timestamp() * 1000)
 
-    symbols = get_dji_symbols()
+    if symbols:
+        symbols = [s.strip().upper() for s in symbols]
+        print(f"Symbol override: {len(symbols)} symbols")
+    elif watchlist:
+        from tiingo_pipeline import DEFAULT_SYMBOLS as WATCHLIST
+        symbols = WATCHLIST
+        print(f"Universe: standard watchlist ({len(symbols)} symbols)")
+    else:
+        symbols = get_dji_symbols()
     results = []
     failed = []
 
@@ -136,14 +155,18 @@ def main(backfill=False):
     combined = pd.concat(results, ignore_index=True)
 
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
-    mode_tag = "backfill" if backfill else "incremental"
+    mode_tag = "full" if (full or start) else ("backfill" if backfill else "incremental")
     filename = write_partitioned(combined, OUTPUT_DIR, f"prices_{mode_tag}_{today}.parquet")
 
     print(f"\n--- COMPLETE ---")
     print(f"Saved {len(combined)} rows for {len(results)} symbols → {filename}")
     if failed:
         print(f"Failed symbols ({len(failed)}): {', '.join(failed)}")
-    print(combined[["symbol", "date", "close", "pct_change", "log_return"]].tail(10).to_string(index=False))
+    if full or start:
+        span = combined.groupby("symbol")["date"].agg(["min", "max", "count"])
+        print(span.to_string())
+    else:
+        print(combined[["symbol", "date", "close", "pct_change", "log_return"]].tail(10).to_string(index=False))
 
 
 if __name__ == "__main__":
@@ -153,5 +176,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Fetch full 365-day history (use on first run). Default is incremental (last 7 days).",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Fetch the entire history Schwab has per symbol (daily bars back to ~1985).",
+    )
+    parser.add_argument(
+        "--start",
+        help="Custom start date YYYY-MM-DD (overrides --backfill window).",
+    )
+    parser.add_argument(
+        "--symbols", nargs="+",
+        help="Explicit symbol list (default: DJI 30 from Wikipedia).",
+    )
+    parser.add_argument(
+        "--watchlist",
+        action="store_true",
+        help="Use the standard 63-symbol watchlist instead of DJI 30.",
+    )
     args = parser.parse_args()
-    main(backfill=args.backfill)
+    main(backfill=args.backfill, full=args.full, start=args.start,
+         symbols=args.symbols, watchlist=args.watchlist)

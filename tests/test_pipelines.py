@@ -55,6 +55,9 @@ PIPELINE_MODULES = [
     "yfinance_pipeline",
     "tradingview_pipeline",
     "sec_filings_pipeline",
+    "schwab_intraday_pipeline",
+    "schwab_movers_pipeline",
+    "schwab_portfolio_pipeline",
 ]
 
 
@@ -138,7 +141,8 @@ class TestCatalogStorageDirs:
             assert os.path.isdir(path), f"Missing storage dir: {path}"
 
     def test_schwab_dirs_exist(self):
-        for sub in ("schwab/quotes", "schwab/options"):
+        for sub in ("schwab/quotes", "schwab/options", "schwab/intraday",
+                    "schwab/movers", "schwab/positions", "schwab/transactions"):
             path = os.path.join(REPO_ROOT, "storage", "raw", *sub.split("/"))
             assert os.path.isdir(path), f"Missing storage dir: {path}"
 

@@ -573,6 +573,33 @@ PIPELINES: list[PipelineSpec] = [
         tables=["options_metrics", "options_chain"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
     ),
+    PipelineSpec(
+        name="schwab_intraday",
+        file="schwab_intraday_pipeline.py",
+        desc="Schwab 5-min intraday bars (broad ETFs + megacaps)",
+        stage=2,
+        tables=["schwab_intraday"],
+        requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="schwab_movers",
+        file="schwab_movers_pipeline.py",
+        desc="Schwab top-10 movers snapshot ($SPX/$COMPX/$DJI, up/down/volume)",
+        stage=2,
+        tables=["schwab_movers"],
+        requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
+    ),
+    PipelineSpec(
+        name="schwab_portfolio",
+        file="schwab_portfolio_pipeline.py",
+        desc="Schwab account mirror — daily positions + transactions",
+        stage=2,
+        tables=["schwab_positions", "schwab_transactions"],
+        requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
+        backfill_args=["--backfill"],
+    ),
     # ── Stage 3 — Derived (depends on Stage 1/2 output) ────────────────────────
     PipelineSpec(
         name="synthetic_options",

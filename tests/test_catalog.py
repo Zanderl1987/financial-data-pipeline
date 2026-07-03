@@ -91,6 +91,11 @@ EXPECTED_TABLES = [
     "tv_ratings",
     # SEC EDGAR filing index
     "sec_filings",
+    # Schwab intraday, movers, portfolio mirror
+    "schwab_intraday",
+    "schwab_movers",
+    "schwab_positions",
+    "schwab_transactions",
     # Sentiment
     "news_sentiment",
     # IMF, metals, commodities expansions

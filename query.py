@@ -250,6 +250,11 @@ CATALOG: dict[str, str] = {
     "tv_ratings":              _glob("tradingview/**/*.parquet"),
     # ── SEC EDGAR filing index (8-K, 10-K/Q, S-1, 13D/G, proxies) ────────────
     "sec_filings":             _glob("sec_filings/**/*.parquet"),
+    # ── Schwab intraday bars, movers, and portfolio mirror ───────────────────
+    "schwab_intraday":         _glob("schwab/intraday/**/*.parquet"),
+    "schwab_movers":           _glob("schwab/movers/**/*.parquet"),
+    "schwab_positions":        _glob("schwab/positions/**/*.parquet"),
+    "schwab_transactions":     _glob("schwab/transactions/**/*.parquet"),
 }
 
 _CON: duckdb.DuckDBPyConnection | None = None

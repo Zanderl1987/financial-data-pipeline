@@ -800,6 +800,31 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["form", "cik", "filed"],
         "date_col":    "filed",
     },
+    # ── Schwab intraday bars, movers, portfolio mirror ────────────────────────
+    "schwab_intraday": {
+        "required":    ["symbol", "datetime", "date", "open", "high", "low",
+                        "close", "volume", "freq_min", "fetched_at"],
+        "critical_nn": ["symbol", "datetime", "close"],
+        "date_col":    "date",
+    },
+    "schwab_movers": {
+        "required":    ["date", "index_symbol", "sort", "rank", "symbol",
+                        "last_price", "fetched_at"],
+        "critical_nn": ["date", "index_symbol", "symbol"],
+        "date_col":    "date",
+    },
+    "schwab_positions": {
+        "required":    ["date", "account", "symbol", "asset_type",
+                        "market_value", "fetched_at"],
+        "critical_nn": ["date", "account", "symbol"],
+        "date_col":    "date",
+    },
+    "schwab_transactions": {
+        "required":    ["account", "activity_id", "date", "type",
+                        "net_amount", "fetched_at"],
+        "critical_nn": ["account", "date", "type"],
+        "date_col":    "date",
+    },
 }
 
 
