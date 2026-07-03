@@ -52,6 +52,9 @@ PIPELINE_MODULES = [
     "fed_sentiment_pipeline",
     "real_estate_pipeline",
     "shipping_pipeline",
+    "yfinance_pipeline",
+    "tradingview_pipeline",
+    "sec_filings_pipeline",
 ]
 
 

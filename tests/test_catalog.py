@@ -85,6 +85,12 @@ EXPECTED_TABLES = [
     "finnhub_price_targets",
     "finnhub_upgrades",
     "finnhub_news",
+    # Yahoo Finance deep market history
+    "market_history",
+    # TradingView technical-rating snapshots
+    "tv_ratings",
+    # SEC EDGAR filing index
+    "sec_filings",
     # Sentiment
     "news_sentiment",
     # IMF, metals, commodities expansions

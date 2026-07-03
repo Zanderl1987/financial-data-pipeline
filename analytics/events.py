@@ -194,14 +194,14 @@ def earnings_surprise(
     if df.empty:
         return df
 
-    df = df.dropna(subset=["epsActual", "epsEstimate"]).copy()
+    df = df.dropna(subset=["eps_actual", "eps_estimate"]).copy()
     df["surprise_pct"] = (
-        (df["epsActual"] - df["epsEstimate"]) / df["epsEstimate"].abs() * 100
+        (df["eps_actual"] - df["eps_estimate"]) / df["eps_estimate"].abs() * 100
     ).round(1)
 
     return (df.sort_values("date", ascending=False)
               .groupby("symbol")
               .head(n_quarters)
-              [["symbol", "date", "epsEstimate", "epsActual", "surprise_pct"]]
+              [["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
               .sort_values(["symbol", "date"])
               .reset_index(drop=True))

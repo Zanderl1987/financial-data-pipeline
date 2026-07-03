@@ -779,6 +779,27 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"travelers": (0, 10_000_000)},
     },
+    # ── Yahoo Finance market history ──────────────────────────────────────────
+    "market_history": {
+        "required":    ["symbol", "name", "asset_class", "date", "close", "fetched_at"],
+        "critical_nn": ["symbol", "date", "close"],
+        "date_col":    "date",
+    },
+    # ── TradingView technical-rating snapshots ────────────────────────────────
+    "tv_ratings": {
+        "required":    ["symbol", "date", "rating_all", "rating_ma", "rating_osc",
+                        "rating_label", "fetched_at"],
+        "critical_nn": ["symbol", "date", "rating_all"],
+        "date_col":    "date",
+        "value_ranges": {"rating_all": (-1, 1), "rating_ma": (-1, 1),
+                         "rating_osc": (-1, 1)},
+    },
+    # ── SEC EDGAR filing index ────────────────────────────────────────────────
+    "sec_filings": {
+        "required":    ["form", "company", "cik", "filed", "url", "fetched_at"],
+        "critical_nn": ["form", "cik", "filed"],
+        "date_col":    "filed",
+    },
 }
 
 

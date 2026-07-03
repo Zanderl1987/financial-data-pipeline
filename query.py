@@ -244,6 +244,12 @@ CATALOG: dict[str, str] = {
     "finnhub_price_targets":   _glob("finnhub/price_targets/**/*.parquet"),
     "finnhub_upgrades":        _glob("finnhub/upgrades/**/*.parquet"),
     "finnhub_news":            _glob("finnhub/news/**/*.parquet"),
+    # ── Yahoo Finance deep market history (indices, futures, FX, rates) ──────
+    "market_history":          _glob("yfinance/**/*.parquet"),
+    # ── TradingView technical-rating snapshots ───────────────────────────────
+    "tv_ratings":              _glob("tradingview/**/*.parquet"),
+    # ── SEC EDGAR filing index (8-K, 10-K/Q, S-1, 13D/G, proxies) ────────────
+    "sec_filings":             _glob("sec_filings/**/*.parquet"),
 }
 
 _CON: duckdb.DuckDBPyConnection | None = None

@@ -317,3 +317,43 @@ a0e1249                   Add 7 new pipelines: Fama-French, Shiller, CBOE, FDIC,
 5d37aab                   Implement canonical entity resolution layer using CIK mapping
 6b33202                   Initial commit of project files
 ```
+
+---
+
+# Session 3 — 2026-07-03 (Event Backtester, TV Rating Replica, New Sources)
+
+## For You (Summary)
+
+### What we did
+1. **3 new data sources** (sample pulls verified, fully wired):
+   - `yfinance_pipeline.py` → `market_history` — deep daily OHLCV for 25 market assets: S&P 500 **back to 1927**, VIX to 1990, WTI/Brent/gold/natgas futures to 2000, FX, TLT/HYG, BTC. Keyless.
+   - `tradingview_pipeline.py` → `tv_ratings` — TradingView's aggregate Technical Rating (Strong Buy…Strong Sell) snapshot for top-N US stocks + 20 ETFs via their free scanner endpoint. Run daily to accumulate history.
+   - `sec_filings_pipeline.py` → `sec_filings` — EDGAR daily filing index (8-K, 10-K/Q, S-1, SC 13D/G, DEF 14A), CIK→ticker mapped (~84%). Keyless (uses EDGAR_USER_AGENT).
+2. **Deep price history**: ran `tiingo_pipeline.py --backfill` for AAPL, MSFT, SPY, XOM, JPM, NVDA (52k rows, 1990→now). The pipeline always supported this — it had just never been run with `--backfill`.
+3. **`analytics/technical.py`** — full indicator library (SMA/EMA/Hull/VWMA/Ichimoku, RSI, Stoch, CCI, ADX, AO, MACD, StochRSI, W%R, Bull/Bear Power, UO, ATR) + `tv_rating()`, a local replica of TradingView's 26-signal rating. **Validated against the live scanner**: exact match on completed bars (3/5 symbols exact incl. every hard component; residual diffs were same-moment intraday artifacts on cross conditions).
+4. **`event_backtest.py`** — the event-study backtester:
+   - `event_study(events, symbols, window, benchmark, …)` — CAR curves, hit rates, t-stats, unconditional baseline ("edge vs base rate")
+   - `scenario(events, holding_days, stop_loss_pct, take_profit_pct, …)` — trade list, win rate, profit factor, equity overlay
+   - Generators: `earnings_events`, `filing_events`, `drawdown_events`, `price_move_events`, `threshold_events`, `technical_events` (golden/death cross, RSI, MACD, TV-rating transitions, or any custom lambda)
+
+### Findings from the demo runs (real data)
+- S&P down ≥5% in 5 days (178 events since 1928): more downside for ~10 sessions (CAR10 −2.3%, t=−4.9), recovery by day 63. Buying SPY next close, 21d hold, 8% stop: **61% win, +1.46% avg, PF 1.56** (54 trades).
+- VIX crossing 30 → SPY: weak short-term, +2.9% by day 63 (68% hit).
+- WTI +15% in 10 days (35 events): SPY +2.0%/21d (t=2.8), gold +1.2%, **TLT −1.4%** (rates up on oil shocks).
+- TV rating turning strong_buy (6 deep-history symbols, 1,619 trades): **60.6% win, +1.98% avg per 21d hold, PF 1.88** — the TradingView signal does look profitable historically.
+- Golden cross on the same universe: no edge vs SPY (CAR63 −4.5% vs baseline).
+
+### What to do next
+1. **Backfill Tiingo for the full watchlist** (62 symbols currently only have 90 days): `python tiingo_pipeline.py --backfill` (~1 req/symbol, fast).
+2. **Earnings event studies need more history** — earnings_calendar only holds ±6 weeks (26 events with actuals, zero overlapping our price store). Options: Finnhub earnings endpoint with historical range, or backfill prices for reporting names. 
+3. Run `python tradingview_pipeline.py` daily (added to run_all.py) to accumulate real TV-rating history to compare against the replica.
+4. `python yfinance_pipeline.py --backfill` for the remaining 19 universe assets (only 6 sampled).
+
+## For Claude (Technical Pickup Notes)
+- CATALOG now 106→109 entries: `market_history` (yfinance/), `tv_ratings` (tradingview/), `sec_filings` (sec_filings/). All in validate.py SCHEMAS, run_all.py PipelineSpecs, tests updated. **207 passed, 15 skipped.**
+- `event_backtest.load_close()` searches tiingo_prices → prices → market_history → sector_etfs and keeps the **longest** series (a shallow watchlist pull must not shadow deep history). Events snapping >10 days past a symbol's history start are dropped (no first-bar aliasing).
+- CAR convention: CAR(h) = cum return from close(day −1) through close(day h); day 0 = event-day reaction. `entry_lag=1` recommended for earnings/filings (timestamp granularity).
+- **Curated snapshots can go stale**: after a manual backfill run `python curated.py --table <t>` or q.load reads the old curated copy (bit us with tiingo_prices).
+- TV rating formula: Recommend.All = mean(rating_MA(15 signals), rating_osc(11 signals)), votes ±1/0; verified against scanner. Scanner also exposes per-indicator `Rec.*` columns — useful for future re-validation.
+- earnings_calendar columns are snake_case (`eps_actual`/`eps_estimate`); fixed stale camelCase refs in analytics/events.py `earnings_surprise()`.
+- Stooq is now behind a JS proof-of-work wall — don't bother; yfinance + Tiingo cover it.
