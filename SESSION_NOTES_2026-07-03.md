@@ -1,9 +1,9 @@
 # Session Notes — 2026-07-03 (Event Backtester, TradingView Rating, New Sources)
 
 **Repo:** `C:\Users\zande\PycharmProjects\financial-data-pipeline` (branch `master`)
-**Commit this session:** `82573d9` — committed, **NOT pushed**
+**Commits this session:** `82573d9`, `45e19e4` (pushed), `f418ab9` (Schwab expansion — **NOT pushed**, see Part 2 below)
 **Python:** `C:\ProgramData\anaconda3\python.exe`
-**Tests:** 207 passed, 15 skipped (skips = schwabdev/anthropic not installed — pre-existing)
+**Tests:** 223 passed, 5 skipped (schwabdev now installed; remaining skips = anthropic)
 
 ---
 
@@ -96,3 +96,39 @@ python sec_filings_pipeline.py --backfill        # 90 days
 
 ### If continuing interrupted work
 Nothing is half-done. All five session tasks completed. The natural continuation is the "What to run next" list above, then: historical earnings source (Finnhub `/calendar/earnings` accepts from/to ranges — extend `finnhub_events_pipeline.py` with a backfill loop), and optionally an `earnings drift` demo once coverage lands.
+
+---
+
+# Part 2 (same day) — Backfills Run + Schwab API Expansion
+
+## For You (Zander)
+
+### Backfills — ALL DONE (and pushed: `82573d9` + `45e19e4`)
+- **tiingo_prices**: all 63 watchlist symbols deep (456,069 rows, most to 1990; ETFs to inception). Curated snapshot refreshed — queries are current.
+- **market_history**: all 25 assets full history (197,192 rows; S&P to 1927, Nikkei 1965, DXY/Nasdaq 1971, commodities 2000).
+- **tv_ratings**: 2026-07-03 snapshot, 520 rows (175 buy / 145 strong_buy / 141 sell / 51 neutral / 8 strong_sell).
+- **sec_filings**: 90 business days backfilled (~300–900 filings/day). Filing event studies now feasible.
+- Remaining data gap: historical earnings (unchanged from Part 1).
+
+### Schwab expansion — 4 new capabilities (commit `f418ab9`, NOT pushed)
+Your hunch was right: the old pipeline hardcoded 1 year, but Schwab serves each stock's full listed history (daily bars to ~1985).
+
+| What | How to run | Table |
+|---|---|---|
+| Full-history daily prices | `python price_history_pipeline.py --full --watchlist` (or `--symbols A B`, `--start YYYY-MM-DD`) | `prices` |
+| Intraday minute bars | `python schwab_intraday_pipeline.py --backfill` (5-min ~9mo; `--freq 1` = 1-min ~48d) | `schwab_intraday` |
+| Top-10 movers snapshot | `python schwab_movers_pipeline.py` (daily; in run_all) | `schwab_movers` |
+| Portfolio mirror | `python schwab_portfolio_pipeline.py --backfill --years 10` | `schwab_positions`, `schwab_transactions` |
+
+**⚠ BLOCKED ON YOU — one-time OAuth.** No `tokens.json` in this clone. From the repo dir in a real terminal:
+`C:\ProgramData\anaconda3\python.exe schwab_movers_pipeline.py`
+→ open the printed URL, log in to Schwab, paste the redirected `https://127.0.0.1...` URL back. Then Claude can run sample pulls + push `f418ab9`.
+
+Full backfills deliberately NOT run yet (your call, pending storage sizing). `--full` mode prints per-symbol date-range/row-count so you can estimate size first.
+
+## For Claude — Part 2 Pickup Notes
+- `schwabdev` 3.0.4 now installed in `C:\ProgramData\anaconda3`. Client methods verified: `linked_accounts()`, `account_details_all(fields)`, `transactions(hash, start_dt, end_dt, type)` (accepts datetimes, 1-yr max span — pipeline chunks), `movers(symbol, sort)`, `price_history(...)`.
+- **price_history full-history trick**: omit `period`, pass `startDate=1970 epoch ms` — date range wins over period. Existing code passed `period=1`, which capped everything at 1 yr. NOT yet live-verified (blocked on OAuth) — verify AAPL/KO depth on first authenticated run.
+- Movers response parsed defensively (`screeners[]`, field names vary). Portfolio masks account numbers to last-4; parquet gitignored.
+- New tables wired everywhere: query.py CATALOG (113), validate.py SCHEMAS, run_all.py Stage-2 specs (`schwab_intraday`, `schwab_movers`, `schwab_portfolio`), tests/test_catalog.py, tests/test_pipelines.py. New storage dirs have `.gitkeep`.
+- After OAuth: run movers (auth trigger), then `price_history_pipeline.py --full --symbols AAPL KO GE` (depth probe + storage estimate), `schwab_intraday_pipeline.py --days 2` sample, `schwab_portfolio_pipeline.py` (30d), then validate + push.
