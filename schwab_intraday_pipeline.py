@@ -41,7 +41,7 @@ load_dotenv()
 API_KEY      = os.environ["SCHWAB_API_KEY"]
 APP_SECRET   = os.environ["SCHWAB_APP_SECRET"]
 CALLBACK_URL = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-TOKEN_PATH   = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.json")
+TOKEN_PATH   = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 
 OUTPUT_DIR = os.path.join("storage", "raw", "schwab", "intraday")
 
@@ -110,7 +110,7 @@ def main(freq=5, days=5, backfill=False, symbols=None):
         app_key=API_KEY,
         app_secret=APP_SECRET,
         callback_url=CALLBACK_URL,
-        tokens_file=TOKEN_PATH,
+        tokens_db=TOKEN_PATH,
     )
 
     if backfill:

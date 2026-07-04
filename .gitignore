@@ -1,5 +1,6 @@
 .env
 tokens.json
+tokens.db
 options_history_capture/
 __pycache__/
 *.pyc
