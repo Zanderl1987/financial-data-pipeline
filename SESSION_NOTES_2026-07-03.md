@@ -132,3 +132,55 @@ Full backfills deliberately NOT run yet (your call, pending storage sizing). `--
 - Movers response parsed defensively (`screeners[]`, field names vary). Portfolio masks account numbers to last-4; parquet gitignored.
 - New tables wired everywhere: query.py CATALOG (113), validate.py SCHEMAS, run_all.py Stage-2 specs (`schwab_intraday`, `schwab_movers`, `schwab_portfolio`), tests/test_catalog.py, tests/test_pipelines.py. New storage dirs have `.gitkeep`.
 - After OAuth: run movers (auth trigger), then `price_history_pipeline.py --full --symbols AAPL KO GE` (depth probe + storage estimate), `schwab_intraday_pipeline.py --days 2` sample, `schwab_portfolio_pipeline.py` (30d), then validate + push.
+- **Schwab OAuth still pending** as of Part 3/4 below — none of the Schwab expansion pipelines (`schwab_intraday`, `schwab_movers`, `schwab_portfolio`) have been live-run yet. Not blocking — the scanner/monitor/backtest work below runs entirely off Tiingo/yfinance data.
+
+---
+
+# Part 3 (same day) — Signal-Change Scanner + Signal Health Monitor (commit `c536691`, pushed)
+
+## For You (Zander)
+
+Two new tools on top of the event backtester, both requested this session:
+
+**1. Daily scanner — "who changed their TA rating today?"**
+```bash
+python signal_scan.py                     # today's changes, 63-symbol watchlist
+python signal_scan.py --date 2026-06-15
+python signal_scan.py --upgrades --min-step 2     # only big jumps (e.g. neutral -> strong_buy)
+python signal_scan.py --source tv                 # diff TradingView's own daily snapshots instead
+python signal_scan.py --history 30                # all changes in the last N days
+```
+Read-only — writes nothing, not in `run_all.py`. Confirmed live: 648 bucket changes found across the watchlist over the last 30 days.
+
+**2. Maintained backtest — tracks whether the signal's edge is holding up**
+```bash
+python signal_monitor.py            # re-scores tv_strong_buy/tv_buy/tv_sell/tv_strong_sell/golden_cross
+python signal_monitor.py --history 10
+```
+Writes a new **`signal_health`** table (win rate / avg return / profit factor / CAR21 per signal per trailing window: full, 3y, 1y, 180d) and flags `DEGRADED` when a signal's edge is fading. Wired into `run_all.py` so it refreshes on every full run.
+
+**Already caught something real:** the first live run flagged `tv_sell` and `tv_strong_sell` as DEGRADED — both short-side signals have a trailing-1y profit factor below 1.0 (0.55 / 0.40). Their full-history PF was already weak (0.62 / 0.65), so this reads more like "the short side of this signal never had a clean edge" than "an edge that decayed" — but exactly the kind of thing you'd want surfaced automatically rather than assumed away.
+
+## For Claude — Part 3 Pickup Notes
+- `event_backtest.rating_changes()` / `tv_snapshot_changes()` reuse `analytics.technical.rating_history()` for all indicator math — the scanner only diffs `rating_label` day-over-day. `_RATING_ORDER` gives the 0-4 ordinal used for step/direction.
+- `signal_monitor.py` calls `technical_events()` with **no** `start=` (full price history, so 200-day SMA warm-up is never truncated), then filters the resulting *events* by date per trailing window before scoring — restricting event dates, not price history, is the trick that keeps windowed runs correct.
+- **Runtime cost**: each `signal_monitor.py` run took ~15 minutes (5 signals x 63 symbols = 315 `rating_history()` calls, no caching — indicators recomputed from scratch every call). Fine for a daily cron via `run_all.py`, but worth caching per-symbol indicator results if faster ad-hoc reruns matter later.
+- CATALOG 132→133 (`signal_health`); `validate.py`/`test_catalog.py`/`test_pipelines.py` updated; 11 new tests in `test_event_backtest.py` (bucket-change detection, direction/min_step filters, date-mode isolation, empty-result shape). Full suite: **234 passed, 5 skipped.**
+- `FinancialDataPipeline_Future_Improvements.md` brought current in the same commit — documented Part 1/2 (event backtester + Schwab expansion) and Part 3 (scanner/monitor), closed out candidates A (movers — largely covered by schwab_movers/finviz_movers/sa_movers) and B (portfolio tracking — done), added candidates for historical earnings backfill and full Schwab price backfill.
+
+---
+
+# Part 4 (same day) — TV-Rating Backtest on TSLA/LMT/NVDA/KEYS/GOOG/NFLX
+
+## For You (Zander)
+
+Ran the comprehensive TV-rating backtest you asked for on this basket. Full report (tables + takeaways): https://claude.ai/code/artifact/a947fa3a-ab4a-4a53-8121-a15afe4fb395
+
+**Headline:** long side works cleanly on all 6 names (Strong Buy/Buy: ~59-60% win rate, PF ~2.0, t-stats in the 20s out to 63 days). Short side (Sell/Strong Sell) doesn't — every name's PF stays below 1 on a 21-day hold, because these are strong-drift growth/quality names that keep grinding up even after a sell signal. NVDA has the best raw payoff; KEYS/GOOG have the highest win rates but smaller moves; LMT is the weakest (still profitable) long performer, consistent with it being the lowest-beta name in the set.
+
+**Data gap found and fixed along the way:** LMT and KEYS had no price history anywhere in the store, and GOOG only existed as GOOGL (different ticker). Backfilled all three from Tiingo (`tiingo_pipeline.py --backfill --symbols LMT,KEYS,GOOG`, 15,219 rows, LMT back to 1990) and refreshed the curated snapshot before running the backtest.
+
+## For Claude — Part 4 Pickup Notes
+- Before trusting any basket-level backtest request, check `q.symbols('tiingo_prices')` (or whichever table) for coverage first — this session it silently would have run on 3/6 symbols if the gap hadn't been caught.
+- Backtest used `event_backtest.technical_events()` + `scenario()` (21d hold) + `event_study()` (CAR curve, window=(0,63)) per signal, both pooled across the basket and broken out per-symbol. No new code — pure application of the existing engine.
+- Nothing was committed for Part 4 (backfilled data is gitignored parquet; no code changed) — only the Tiingo backfill + curated refresh on disk.
