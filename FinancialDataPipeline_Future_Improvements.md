@@ -477,19 +477,128 @@ CATALOG expanded 78→85 tables. All 3 pipelines wired into `run_all.py` Stage 1
 
 ---
 
+### 12. Event-Study Backtester + TradingView Rating Replica + Schwab Expansion
+**Status:** Implemented 2026-07-03
+
+New backtesting stack and three new data sources, plus a full Schwab API
+expansion beyond the original 1-year-capped price pull.
+
+**`event_backtest.py`** (new, repo root) — event-study/scenario engine
+complementing `backtest.py`'s quantile-portfolio approach with conditional
+analysis around discrete events:
+- `event_study()` — CAR curves, cross-event t-stats, and an unconditional
+  baseline so edge can be measured against the base rate, not just eyeballed.
+- `scenario()` — turns any event stream into a trade list (entry lag, holding
+  period, stop-loss/take-profit) with win rate, profit factor, and an
+  equal-weight equity overlay.
+- Event generators: `earnings_events`, `filing_events`, `drawdown_events`,
+  `price_move_events`, `threshold_events`, `technical_events` (golden/death
+  cross, RSI, MACD, TV-rating transitions, or any custom lambda).
+- `load_close()` picks the **longest** series across price tables (tiingo_prices
+  → prices → market_history → sector_etfs) rather than the first hit — a real
+  bug caught mid-session (a shallow 90-day watchlist pull was shadowing 24
+  years of `market_history`).
+
+**`analytics/technical.py`** (new) — indicator library + TradingView Technical
+Rating replica: `tv_rating()` reproduces TV's exact 26-signal aggregate rating
+(15 MA votes + 11 oscillator votes, thresholds ±0.1/±0.5) locally from stored
+OHLCV, validated exact against TradingView's live scanner on completed bars.
+Fully backtestable over decades, unlike the live-only TV rating itself.
+
+**New pipelines** (sample-verified, wired into `run_all.py`/`validate.py`/tests):
+`yfinance_pipeline.py` (`market_history` — S&P to 1927, VIX to 1990, futures/FX/
+bond ETFs), `tradingview_pipeline.py` (`tv_ratings` — daily TA-rating snapshots,
+top-500 US stocks + 20 ETFs), `sec_filings_pipeline.py` (`sec_filings` — EDGAR
+daily filing index, ~84% ticker-mapped).
+
+**Full history backfilled:** `tiingo_prices` (all 63 watchlist symbols, most to
+1990), `market_history` (all 25 assets, S&P to 1927), `sec_filings` (90 business
+days). Demo findings: TV-rating turns Strong Buy carried real edge historically
+(60.6% win, PF 1.88, 21d hold, 1,619 trades).
+
+**Schwab API expansion** (`f418ab9`) — the old pipeline hardcoded a 1-year
+lookback; Schwab actually serves full listed history (`price_history_pipeline.py
+--full`, daily bars to ~1985 via the startDate-wins-over-period trick).
+New: `schwab_intraday_pipeline.py` (5-min/1-min bars), `schwab_movers_pipeline.py`
+(top-10 movers snapshot), `schwab_portfolio_pipeline.py` (positions +
+transactions mirror, account numbers masked to last-4). CATALOG: `schwab_intraday`,
+`schwab_movers`, `schwab_positions`, `schwab_transactions`.
+
+Test suite: 223 passed, 5 skipped (schwabdev now installed; anthropic still
+absent). CATALOG grew from 109 to 132 tables across this session's additions.
+
+---
+
+### 13. Daily TA-Rating Signal-Change Scanner + Signal Health Monitor
+**Status:** Implemented 2026-07-03
+
+Two additions on top of #12's backtesting stack, both built by reusing
+`analytics.technical.rating_history()` and `event_backtest.technical_events()`/
+`scenario()` — no new indicator or backtest math.
+
+**`event_backtest.rating_changes()`** — cross-sectional scan: which symbols
+changed their TA rating bucket (strong_sell..strong_buy) on a given day, or
+over a date range. Diffs `rating_label` day-over-day; filters by direction
+(upgrade/downgrade) and minimum bucket jump. `tv_snapshot_changes()` is a
+companion that diffs TradingView's own daily `tv_ratings` snapshots instead
+(wider universe, but needs ≥2 accumulated snapshots — raises a clear message
+until then rather than crashing).
+
+**`signal_scan.py`** (new CLI, repo root) — ASCII table of rating changes,
+no Python shell needed:
+```bash
+python signal_scan.py                     # latest day, 63-symbol watchlist
+python signal_scan.py --date 2026-06-15
+python signal_scan.py --upgrades --min-step 2
+python signal_scan.py --source tv         # diff TradingView's own snapshots
+python signal_scan.py --history 30        # all changes in the last N days
+```
+Not wired into `run_all.py` — it's a read-only analysis tool, writes nothing.
+
+**`signal_monitor.py`** + **`signal_monitor_config.json`** (new) — a maintained
+backtest that re-scores configured signals (`tv_strong_buy`, `tv_buy`, `tv_sell`,
+`tv_strong_sell`, `golden_cross` by default, all over the 63-symbol watchlist)
+across trailing windows (full/3y/1y/180d) every run, appending dated performance
+rows (win rate, avg return, profit factor, CAR21 mean + t-stat) to the new
+**`signal_health`** table. Flags `DEGRADED` when a signal's trailing-1y win rate
+drops >10pts below its full-history baseline or its trailing profit factor falls
+below 1.0 (with a minimum trade count so noise doesn't trigger it) — this is how
+declining signal accuracy gets caught over time rather than assumed away.
+`--history N` prints the stored win-rate time series so drift is visible
+run-over-run. Wired into `run_all.py` as a Stage 3 (derived) spec so the health
+row refreshes automatically on every full pipeline run.
+
+First live run flagged `tv_sell`/`tv_strong_sell` as **DEGRADED** already — both
+short-side signals have a trailing-1y profit factor below 1.0 (0.55 and 0.40
+respectively, on 1,072/448 trades — comfortably past the min-trade floor). Their
+full-history profit factor was already weak (0.62/0.65), so this reads less like
+"an edge that decayed" and more like "the short side of the TV rating never had
+a clean edge to begin with" — worth a human look before acting on it either way.
+
+CATALOG grew 132→133 tables (`signal_health`). Test suite: 234 passed, 5 skipped
+(11 new tests in `tests/test_event_backtest.py` covering bucket-change detection,
+direction/min_step filters, date-mode isolation, and empty-result shape).
+
+---
+
 ## Candidate Improvements (Next Up)
 
 ### A. Market-Wide Gainers / Losers via Yahoo Finance Screener
-**Priority: High | Effort: Low**
+**Priority: Low | Effort: Low** — largely covered
 
-Add `market_movers_pipeline.py` using `yfinance`'s built-in screener endpoint to get true market-wide top gainers/losers (not just S&P 500). Yahoo's screener returns ~25 top movers per call, no auth required. Add `market_movers()` function to `analytics/`.
+`schwab_movers` (top-10 per index, daily snapshot), `finviz_movers`, and
+`sa_movers` (stockanalysis.com, 16 gainers/losers variants incl. premarket)
+already cover this need from three different sources. The one remaining delta
+is Yahoo's screener returning true *market-wide* (not index-limited) movers —
+low priority now that three working sources exist.
 
 ---
 
 ### B. Portfolio Tracking Pipeline
-**Priority: High | Effort: Medium**
+**Status:** ✓ COMPLETED 2026-07-03 — see #12 above
 
-Import actual holdings (from a CSV or Schwab `/accounts` endpoint) and overlay against prices, dividends, options exposure, and fundamentals. Would enable P&L tracking, cost basis, and position-level risk analytics.
+`schwab_portfolio_pipeline.py` mirrors positions and transactions
+(`schwab_positions`, `schwab_transactions`), account numbers masked to last-4.
 
 ---
 
@@ -498,5 +607,28 @@ Import actual holdings (from a CSV or Schwab `/accounts` endpoint) and overlay a
 
 - Windows Task Scheduler entry to run `run_all.py` on a daily schedule with a run log
 - `python status.py` — one-command summary showing every CATALOG table's latest file date and row count in a clean table
+
+---
+
+### D. Historical Earnings Backfill
+**Priority: High | Effort: Low**
+
+`earnings_calendar` only holds a ±6-week rolling window (Finnhub's default
+calendar endpoint), so `earnings_events()` in `event_backtest.py` currently has
+zero usable events — none of the ~26 stored reporters overlap the price store's
+history. Finnhub's `/calendar/earnings` endpoint accepts explicit `from`/`to`
+date ranges; extend `finnhub_events_pipeline.py` with a backfill loop (chunked
+by year, same pattern as the Schwab transactions chunking) to unlock earnings
+drift / PEAD event studies.
+
+---
+
+### E. Full Schwab Price History Backfill
+**Priority: Medium | Effort: Low (compute), Medium (storage sizing)**
+
+`price_history_pipeline.py --full` is verified working (daily bars to ~1985 via
+the startDate-wins-over-period trick) but has deliberately not been run for the
+full watchlist — `--full` mode prints a per-symbol date-range/row-count estimate
+first so storage can be sized before committing to the pull.
 
 ---

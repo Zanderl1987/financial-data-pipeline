@@ -142,3 +142,95 @@ class TestEventGenerators:
                             lambda *a, **k: vals.rename("VIX"))
         ev = eb.threshold_events("VIX", 30, "above", min_gap_days=0)
         assert list(ev["date"]) == [dates[2], dates[7]]
+
+
+class TestRatingChanges:
+    """rating_changes() / tv_snapshot_changes() — bucket-change scanning."""
+
+    def _fake_rating_history(self, labels, scores=None):
+        dates = pd.bdate_range("2024-01-01", periods=len(labels))
+        scores = scores or [
+            {"strong_sell": -0.7, "sell": -0.3, "neutral": 0.0,
+             "buy": 0.3, "strong_buy": 0.7}[lab] for lab in labels
+        ]
+        return pd.DataFrame({"rating_label": labels, "rating_all": scores},
+                            index=dates)
+
+    def test_detects_bucket_change(self, monkeypatch):
+        # neutral -> neutral -> buy -> buy -> strong_buy
+        labels = ["neutral", "neutral", "buy", "buy", "strong_buy"]
+        df = self._fake_rating_history(labels)
+        monkeypatch.setattr("analytics.technical.rating_history",
+                            lambda sym, **k: df)
+        ev = eb.rating_changes("X", start="2024-01-01", end="2024-01-10")
+        assert list(ev["direction"]) == ["upgrade", "upgrade"]
+        assert list(ev["from_label"]) == ["neutral", "buy"]
+        assert list(ev["to_label"]) == ["buy", "strong_buy"]
+        assert (ev["step"] == 1).all()
+
+    def test_direction_filter_keeps_only_downgrades(self, monkeypatch):
+        labels = ["buy", "neutral", "strong_buy", "sell"]
+        df = self._fake_rating_history(labels)
+        monkeypatch.setattr("analytics.technical.rating_history",
+                            lambda sym, **k: df)
+        ev = eb.rating_changes("X", start="2024-01-01", end="2024-01-10",
+                               direction="down")
+        assert (ev["direction"] == "downgrade").all()
+        assert len(ev) == 2
+
+    def test_min_step_filters_small_jumps(self, monkeypatch):
+        # neutral -> buy (step 1), buy -> strong_sell (step 3)
+        labels = ["neutral", "buy", "strong_sell"]
+        df = self._fake_rating_history(labels)
+        monkeypatch.setattr("analytics.technical.rating_history",
+                            lambda sym, **k: df)
+        ev = eb.rating_changes("X", start="2024-01-01", end="2024-01-10",
+                               min_step=2)
+        assert len(ev) == 1
+        assert ev["step"].iloc[0] == 3
+
+    def test_date_mode_isolates_single_day(self, monkeypatch):
+        labels = ["neutral", "buy", "strong_buy", "strong_buy"]
+        df = self._fake_rating_history(labels)
+        target = df.index[2]
+        monkeypatch.setattr("analytics.technical.rating_history",
+                            lambda sym, **k: df)
+        ev = eb.rating_changes("X", date=target.strftime("%Y-%m-%d"))
+        assert len(ev) == 1
+        assert ev["date"].iloc[0] == target
+        assert ev["to_label"].iloc[0] == "strong_buy"
+
+    def test_no_changes_returns_empty_expected_columns(self, monkeypatch):
+        labels = ["buy"] * 5
+        df = self._fake_rating_history(labels)
+        monkeypatch.setattr("analytics.technical.rating_history",
+                            lambda sym, **k: df)
+        ev = eb.rating_changes("X", start="2024-01-01", end="2024-01-10")
+        assert ev.empty
+        assert list(ev.columns) == eb._CHANGE_COLS
+
+    def test_tv_snapshot_changes_requires_two_snapshots(self, monkeypatch):
+        single = pd.DataFrame({
+            "symbol": ["AAPL", "MSFT"],
+            "date": ["2026-07-03", "2026-07-03"],
+            "rating_label": ["buy", "neutral"],
+            "rating_all": [0.3, 0.0],
+        })
+        monkeypatch.setattr(eb.q, "load", lambda table: single)
+        with pytest.raises(RuntimeError, match="Need >= 2"):
+            eb.tv_snapshot_changes()
+
+    def test_tv_snapshot_changes_diffs_two_dates(self, monkeypatch):
+        both = pd.DataFrame({
+            "symbol":       ["AAPL", "AAPL", "MSFT", "MSFT"],
+            "date":         ["2026-07-01", "2026-07-02",
+                             "2026-07-01", "2026-07-02"],
+            "rating_label": ["neutral", "buy", "sell", "sell"],
+            "rating_all":   [0.0, 0.3, -0.3, -0.3],
+        })
+        monkeypatch.setattr(eb.q, "load", lambda table: both)
+        ev = eb.tv_snapshot_changes()
+        assert len(ev) == 1
+        assert ev["symbol"].iloc[0] == "AAPL"
+        assert ev["source"].iloc[0] == "tv_snapshot"
+        assert ev["direction"].iloc[0] == "upgrade"

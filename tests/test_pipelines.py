@@ -58,6 +58,8 @@ PIPELINE_MODULES = [
     "schwab_intraday_pipeline",
     "schwab_movers_pipeline",
     "schwab_portfolio_pipeline",
+    "signal_scan",
+    "signal_monitor",
 ]
 
 

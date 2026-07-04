@@ -825,6 +825,13 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["account", "date", "type"],
         "date_col":    "date",
     },
+    "signal_health": {
+        "required":    ["run_date", "signal", "window", "symbols_key", "n_trades",
+                        "win_rate_pct", "avg_return_pct", "profit_factor",
+                        "car21_mean_pct", "car21_tstat", "holding_days", "fetched_at"],
+        "critical_nn": ["signal", "window", "win_rate_pct"],
+        "date_col":    "run_date",
+    },
 }
 
 

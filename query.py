@@ -255,6 +255,8 @@ CATALOG: dict[str, str] = {
     "schwab_movers":           _glob("schwab/movers/**/*.parquet"),
     "schwab_positions":        _glob("schwab/positions/**/*.parquet"),
     "schwab_transactions":     _glob("schwab/transactions/**/*.parquet"),
+    # ── Signal health monitor (maintained backtest performance tracking) ─────
+    "signal_health":           _glob("signal_monitor/**/*.parquet"),
 }
 
 _CON: duckdb.DuckDBPyConnection | None = None

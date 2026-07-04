@@ -628,6 +628,14 @@ PIPELINES: list[PipelineSpec] = [
         requires_env=["ALPHA_VANTAGE_API_KEY"],
         timeout=1200,  # paced to respect 25 calls/day free tier
     ),
+    PipelineSpec(
+        name="signal_monitor",
+        file="signal_monitor.py",
+        desc="TA-rating signal health tracker — win rate/PF/CAR by window, flags decline",
+        stage=3,
+        tables=["signal_health"],
+        timeout=900,
+    ),
 ]
 
 

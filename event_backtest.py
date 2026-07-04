@@ -580,3 +580,173 @@ def technical_events(
 
 technical_events.__doc__ = technical_events.__doc__.format(
     names=sorted(_TECH_SIGNALS))
+
+
+# ------------------------------------------------- rating-change scanning
+
+_RATING_ORDER = ["strong_sell", "sell", "neutral", "buy", "strong_buy"]
+_RATING_ORD = {lab: i for i, lab in enumerate(_RATING_ORDER)}
+
+_CHANGE_COLS = ["symbol", "date", "from_label", "to_label",
+                "from_score", "to_score", "step", "direction"]
+
+
+def _apply_change_filters(ev: pd.DataFrame, direction: "str | None",
+                          min_step: int) -> pd.DataFrame:
+    if ev.empty:
+        return ev.reset_index(drop=True)
+    if min_step > 1:
+        ev = ev[ev["step"] >= min_step]
+    if direction == "up":
+        ev = ev[ev["direction"] == "upgrade"]
+    elif direction == "down":
+        ev = ev[ev["direction"] == "downgrade"]
+    return ev.sort_values(["date", "symbol"]).reset_index(drop=True)
+
+
+def rating_changes(
+    symbols: "list[str] | str",
+    date: "str | None" = None,
+    start: "str | None" = None,
+    end: "str | None" = None,
+    direction: "str | None" = None,
+    min_step: int = 1,
+    price_table: "str | None" = None,
+) -> pd.DataFrame:
+    """
+    Cross-sectional scan: which symbols changed their TA rating bucket?
+
+    Compares each day's rating_label (strong_sell..strong_buy, computed
+    locally by analytics.technical from stored OHLCV) with the previous
+    trading day's and reports the transitions.
+
+    Modes
+    -----
+      date="2026-06-20"   changes landing exactly on that trading day
+      start / end         every transition in the range — output has
+                          symbol + date columns, so it feeds straight into
+                          event_study() / scenario()
+      (neither)           each symbol's latest bar vs the one before it
+
+    direction : "up" (upgrades only) / "down" (downgrades only) / None
+    min_step  : minimum bucket jump (1 = adjacent, 2 = e.g. neutral -> strong_buy)
+
+    Columns: symbol, date, from_label, to_label, from_score, to_score,
+             step (bucket distance, positive int), direction.
+    """
+    from analytics.technical import rating_history
+    if isinstance(symbols, str):
+        symbols = [symbols]
+
+    target = pd.to_datetime(date) if date else None
+    # the 200-day SMA needs ~200 trading days of warm-up before the first
+    # valid rating — load ~320 calendar days ahead of the earliest scan date
+    warmup = pd.Timedelta(days=320)
+    if target is not None:
+        load_start = (target - warmup).strftime("%Y-%m-%d")
+        load_end = target.strftime("%Y-%m-%d")
+    elif start is not None:
+        load_start = (pd.to_datetime(start) - warmup).strftime("%Y-%m-%d")
+        load_end = end
+    elif end is not None:
+        load_start, load_end = None, end
+    else:
+        load_start = (pd.Timestamp.today().normalize() - warmup).strftime("%Y-%m-%d")
+        load_end = None
+    latest_mode = target is None and start is None and end is None
+
+    frames = []
+    for sym in dict.fromkeys(symbols):
+        d = rating_history(sym, price_table=price_table,
+                           start=load_start, end=load_end)
+        if d.empty or "rating_label" not in d.columns:
+            continue
+        lab = d["rating_label"].astype(object)
+        ordv = lab.map(_RATING_ORD)
+        sub = pd.DataFrame({
+            "symbol": sym,
+            "date": d.index,
+            "from_label": lab.shift(1),
+            "to_label": lab,
+            "from_score": d["rating_all"].shift(1).round(3),
+            "to_score": d["rating_all"].round(3),
+            "step": ordv - ordv.shift(1),
+        })
+        sub = sub[sub["step"].notna() & (sub["step"] != 0)]
+        if target is not None:
+            sub = sub[sub["date"] == target]
+        elif latest_mode:
+            sub = sub[sub["date"] == d.index.max()]
+        else:
+            if start is not None:
+                sub = sub[sub["date"] >= pd.to_datetime(start)]
+            if end is not None:
+                sub = sub[sub["date"] <= pd.to_datetime(end)]
+        if not sub.empty:
+            frames.append(sub)
+
+    if not frames:
+        return pd.DataFrame(columns=_CHANGE_COLS)
+    ev = pd.concat(frames, ignore_index=True)
+    ev["direction"] = np.where(ev["step"] > 0, "upgrade", "downgrade")
+    ev["step"] = ev["step"].abs().astype(int)
+    return _apply_change_filters(ev[_CHANGE_COLS], direction, min_step)
+
+
+def tv_snapshot_changes(
+    date: "str | None" = None,
+    prev_date: "str | None" = None,
+    direction: "str | None" = None,
+    min_step: int = 1,
+) -> pd.DataFrame:
+    """
+    Rating changes from TradingView's own published ratings (the tv_ratings
+    daily snapshots) — diffs the two most recent snapshot dates by default,
+    or date vs prev_date when given. Wider universe than the local price
+    store (top-500 stocks + ETFs) but needs >= 2 accumulated snapshots.
+
+    Columns: as rating_changes() plus source="tv_snapshot".
+    """
+    df = q.load("tv_ratings")
+    if df.empty:
+        raise RuntimeError("tv_ratings is empty — run tradingview_pipeline.py first.")
+    df["date"] = pd.to_datetime(df["date"])
+    dates = sorted(pd.unique(df["date"]))
+    if (date is None or prev_date is None) and len(dates) < 2:
+        have = ", ".join(str(pd.Timestamp(d).date()) for d in dates)
+        raise RuntimeError(
+            f"Need >= 2 tv_ratings snapshot dates to diff; have {len(dates)} "
+            f"({have}). Run tradingview_pipeline.py daily to accumulate history.")
+    d1 = pd.to_datetime(date) if date else dates[-1]
+    d0 = (pd.to_datetime(prev_date) if prev_date
+          else max([d for d in dates if d < d1], default=None))
+    if d0 is None:
+        raise RuntimeError(f"No tv_ratings snapshot earlier than {pd.Timestamp(d1).date()}.")
+
+    keep = ["symbol", "rating_label", "rating_all"]
+    cur = (df[df["date"] == d1][keep].dropna(subset=["symbol"])
+           .drop_duplicates("symbol").set_index("symbol"))
+    prv = (df[df["date"] == d0][keep].dropna(subset=["symbol"])
+           .drop_duplicates("symbol").set_index("symbol"))
+    both = cur.join(prv, lsuffix="_to", rsuffix="_from", how="inner")
+
+    # 'unknown' labels map to NaN and drop out with the step filter
+    step = (both["rating_label_to"].map(_RATING_ORD)
+            - both["rating_label_from"].map(_RATING_ORD))
+    changed = step.notna() & (step != 0)
+    ev = pd.DataFrame({
+        "symbol": both.index[changed],
+        "date": d1,
+        "from_label": both.loc[changed, "rating_label_from"].values,
+        "to_label": both.loc[changed, "rating_label_to"].values,
+        "from_score": both.loc[changed, "rating_all_from"].round(3).values,
+        "to_score": both.loc[changed, "rating_all_to"].round(3).values,
+        "step": step[changed].values,
+    })
+    if ev.empty:
+        return pd.DataFrame(columns=_CHANGE_COLS + ["source"])
+    ev["direction"] = np.where(ev["step"] > 0, "upgrade", "downgrade")
+    ev["step"] = ev["step"].abs().astype(int)
+    ev["source"] = "tv_snapshot"
+    return _apply_change_filters(ev[_CHANGE_COLS + ["source"]],
+                                 direction, min_step)

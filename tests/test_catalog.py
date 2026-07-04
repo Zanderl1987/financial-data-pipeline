@@ -167,6 +167,8 @@ EXPECTED_TABLES = [
     # Shipping / logistics (NY Fed GSCPI + FRED freight PPI)
     "shipping_gscpi",
     "shipping_freight_ppi",
+    # Signal health monitor (maintained backtest performance tracking)
+    "signal_health",
 ]
 
 

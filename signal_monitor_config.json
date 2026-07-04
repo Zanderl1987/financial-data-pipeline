@@ -1,0 +1,15 @@
+{
+  "signals": [
+    {"name": "tv_strong_buy", "symbols": "watchlist", "holding_days": 21, "side": "long"},
+    {"name": "tv_buy",        "symbols": "watchlist", "holding_days": 21, "side": "long"},
+    {"name": "tv_sell",       "symbols": "watchlist", "holding_days": 21, "side": "short"},
+    {"name": "tv_strong_sell","symbols": "watchlist", "holding_days": 21, "side": "short"},
+    {"name": "golden_cross",  "symbols": "watchlist", "holding_days": 21, "side": "long"}
+  ],
+  "windows": ["full", "3y", "1y", "180d"],
+  "decline_thresholds": {
+    "win_rate_drop_pts": 10,
+    "profit_factor_floor": 1.0,
+    "min_trades_for_flag": 10
+  }
+}
