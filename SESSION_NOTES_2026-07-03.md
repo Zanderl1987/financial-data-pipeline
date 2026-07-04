@@ -184,3 +184,27 @@ Ran the comprehensive TV-rating backtest you asked for on this basket. Full repo
 - Before trusting any basket-level backtest request, check `q.symbols('tiingo_prices')` (or whichever table) for coverage first — this session it silently would have run on 3/6 symbols if the gap hadn't been caught.
 - Backtest used `event_backtest.technical_events()` + `scenario()` (21d hold) + `event_study()` (CAR curve, window=(0,63)) per signal, both pooled across the basket and broken out per-symbol. No new code — pure application of the existing engine.
 - Nothing was committed for Part 4 (backfilled data is gitignored parquet; no code changed) — only the Tiingo backfill + curated refresh on disk.
+
+---
+
+# Part 5 (same day) — Schwab OAuth Completed + `schwabdev` 3.0.4 Compatibility Fix
+
+## For You (Zander)
+
+You ran the Schwab OAuth flow (in your own terminal, not through Claude — logging in requires your credentials/MFA). It initially failed twice:
+1. `python` wasn't found — you were typing the bare command instead of the full path; fixed by using `C:\ProgramData\anaconda3\python.exe` explicitly.
+2. `TypeError: Client.__init__() got an unexpected keyword argument 'tokens_file'` — the installed `schwabdev` (3.0.4) had switched from a JSON tokens file to a SQLite database (`tokens_db` replaces `tokens_file`) since these pipelines were originally written. Real breaking API change, not a typo — fixed across all 8 Schwab pipelines (see below).
+3. Then a redirect-code timing issue (`invalid_grant`) — Schwab's auth code expires in ~30 seconds, and routing it through chat burned that window. Fixed by doing the whole browser→paste step directly in your terminal, no detour.
+
+**OAuth is now done — `tokens.db` exists and is gitignored.** Verified live:
+- ✅ `schwab_movers_pipeline.py` — works (today's data is degraded/placeholder since 2026-07-04 is a market holiday — Schwab's `/movers` endpoint itself returns `lastPrice: 0.0`/`netPercentChange: -1.0` when markets are closed, not a bug on our end)
+- ✅ `price_history_pipeline.py --full` — **verified full history back to 1985-01-02** for AAPL/KO/GE (previously untested, was capped at 1 year before this session). Storage estimate: 3 symbols = 1.68MB → full 63-symbol watchlist ≈ **35MB**, trivial.
+- ✅ `schwab_intraday_pipeline.py --days 2` — 78 five-minute bars/symbol/day (correct for a 6.5hr session), 1,092 bars across 14 symbols.
+- ❌ `schwab_portfolio_pipeline.py` — **blocked on a Schwab-side permission**, not code: `linked_accounts()` returns `401 Client not authorized`. Movers/price-history/intraday all hit the Market Data API (working); accounts/positions/transactions hit the separate Trader API product, which isn't enabled on your registered Schwab app yet. Fix: enable "Trader API - Individual" for the app at developer.schwab.com — may need Schwab-side re-approval, not instant.
+
+## For Claude — Part 5 Pickup Notes
+- **Root cause**: `schwabdev.Client.__init__` in the installed 3.0.4 no longer accepts `tokens_file`; it now takes `tokens_db` (SQLite path, default `~/.schwabdev/tokens.db`). Source: `schwabdev/tokens.py` `Tokens.__init__` signature.
+- **Fix applied** (not yet committed as of this note): renamed `tokens_file=TOKEN_PATH` → `tokens_db=TOKEN_PATH` and changed each pipeline's `TOKEN_PATH` default from `"tokens.json"` → `"tokens.db"` in all 8 files that construct a `schwabdev.Client`: `schwab_portfolio_pipeline.py`, `schwab_movers_pipeline.py`, `schwab_intraday_pipeline.py`, `price_history_pipeline.py`, `options_chain_pipeline.py`, `schwab_options_pipeline.py`, `schwab_quotes_pipeline.py`, `sector_etf_pipeline.py`. Also updated `.env` (`SCHWAB_TOKEN_PATH=tokens.db`) and `.gitignore` (added `tokens.db` alongside the existing `tokens.json` entry — kept both since old clones/scratch scripts may still reference the json path).
+- Full test suite re-run after the fix: **234 passed, 5 skipped** — unaffected, since none of the schwab pipelines' unit tests actually construct a live `Client()`.
+- Confirmed via direct `client.movers(...)` call that the `lastPrice: 0.0`/`netPercentChange: -1.0` pattern originates in Schwab's raw JSON response itself (not our `_screener_rows()` parsing) — dated 2026-07-04, a market holiday (July 4th observed Friday 2026-07-03; today's Saturday). Re-verify movers data quality on the next trading day.
+- **Not yet committed/pushed** — the `tokens_file`→`tokens_db` fix across the 8 files, `.env`, and `.gitignore` are still local changes only.
