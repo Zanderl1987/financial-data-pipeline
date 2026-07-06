@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-News Sentiment Pipeline (Claude API):
+News Sentiment Pipeline (local VADER):
   Scores financial news headlines + summaries already stored in the
-  finnhub_news table using Claude. Runs incrementally — only articles
-  not yet scored are processed.
-
-  Uses claude-haiku-4-5 for cost efficiency (bulk classification task).
-  Articles are batched 20 per API call to minimise request count.
+  finnhub_news table using VADER (vaderSentiment) with a finance-tuned
+  lexicon. Fully offline — no API key, no cost, deterministic output.
+  Runs incrementally — only articles not yet scored are processed.
 
   Requires:
-    pip install anthropic
-    ANTHROPIC_API_KEY set in .env
+    pip install vaderSentiment
 
 CLI:
   python news_sentiment_pipeline.py              # last 3 days of news
@@ -27,97 +24,126 @@ Schema:
   sentiment : "bullish" | "bearish" | "neutral"
   score     : float -1.0 (very bearish) to +1.0 (very bullish)
   confidence: float 0.0–1.0
-  key_topics: comma-separated topic tags (e.g. "earnings,guidance,beat")
+  key_topics: comma-separated topic tags (e.g. "earnings,guidance,analyst")
 """
 
 import os
-import json
+import re
 import datetime
 import argparse
-import time
 import glob as _glob_mod
 import pandas as pd
-import anthropic
-from dotenv import load_dotenv
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from storage_utils import write_partitioned
 
-load_dotenv()
-
 OUTPUT_DIR = os.path.join("storage", "raw", "finnhub", "news_sentiment")
-MODEL      = "claude-haiku-4-5-20251001"
-BATCH_SIZE = 20       # articles per API call
-MAX_RETRIES = 3
-BACKOFF_SECONDS = 30
 
-SYSTEM_PROMPT = """\
-You are a financial news analyst. Given a list of news articles (headline + summary),
-classify each as bullish, bearish, or neutral for the associated stock.
+# Classification thresholds on the VADER compound score
+BULLISH_THRESHOLD = 0.10
+BEARISH_THRESHOLD = -0.10
 
-Return a JSON array with one object per article, in the same order as the input.
-Each object must have exactly these fields:
-  "id"         : the article id from the input (integer)
-  "sentiment"  : "bullish", "bearish", or "neutral"
-  "score"      : float from -1.0 (very bearish) to +1.0 (very bullish), 0.0 = neutral
-  "confidence" : float from 0.0 to 1.0 (how confident you are)
-  "key_topics" : comma-separated lowercase tags, max 5 (e.g. "earnings,beat,guidance")
+# Finance-specific lexicon overrides/additions (VADER valence scale: -4 .. +4).
+# VADER's base lexicon is social-media English; financial headline vocabulary
+# ("beat", "miss", "downgrade") is directional in ways it doesn't know.
+FINANCE_LEXICON = {
+    # bullish
+    "beat": 2.0, "beats": 2.0, "exceeds": 2.0, "tops": 1.8, "outperform": 2.0,
+    "outperforms": 2.0, "upgrade": 2.5, "upgraded": 2.5, "upgrades": 2.5,
+    "overweight": 1.5, "surge": 2.5, "surges": 2.5, "soar": 3.0, "soars": 3.0,
+    "rally": 2.0, "rallies": 2.0, "jumps": 2.0, "climbs": 1.5, "gains": 1.5,
+    "bullish": 2.5, "buyback": 1.5, "dividend": 1.0, "profitable": 1.8,
+    "breakout": 1.5, "raises": 1.5, "raised": 1.5, "record": 1.2,
+    "beat-and-raise": 3.0, "accretive": 1.5,
+    # bearish
+    "miss": -2.0, "misses": -2.0, "missed": -2.0, "shortfall": -2.0,
+    "downgrade": -2.5, "downgraded": -2.5, "downgrades": -2.5,
+    "underperform": -2.0, "underweight": -1.5, "plunge": -3.0, "plunges": -3.0,
+    "tumble": -2.5, "tumbles": -2.5, "slump": -2.2, "slumps": -2.2,
+    "sinks": -2.2, "slides": -1.8, "drops": -1.8, "falls": -1.5,
+    "bearish": -2.5, "selloff": -2.5, "sell-off": -2.5, "lawsuit": -2.0,
+    "probe": -2.0, "investigation": -2.0, "subpoena": -2.5, "recall": -2.0,
+    "bankruptcy": -3.5, "default": -2.5, "layoffs": -2.0, "warns": -2.0,
+    "warning": -1.8, "fraud": -3.0, "halted": -2.0, "delisting": -3.0,
+    "dilution": -1.8, "dilutive": -1.8, "writedown": -2.0, "impairment": -2.0,
+    "cuts": -1.5, "slashes": -2.2, "weak": -1.5, "weakness": -1.5,
+}
 
-Return ONLY the JSON array, no explanation or markdown fencing.
-"""
+# Topic tagging: tag -> regex matched against headline+summary (case-insensitive)
+TOPIC_PATTERNS = {
+    "earnings":    r"\bearnings?\b|\beps\b|\bquarterly results?\b|\bq[1-4]\b",
+    "guidance":    r"\bguidance\b|\boutlook\b|\bforecasts?\b",
+    "analyst":     r"\banalysts?\b|\bupgrade[ds]?\b|\bdowngrade[ds]?\b|\bprice target\b|\brating\b",
+    "merger":      r"\bmergers?\b|\bacquisitions?\b|\bacquires?\b|\btakeovers?\b|\bbuyout\b|\bdeal\b",
+    "dividend":    r"\bdividends?\b|\bpayout\b",
+    "buyback":     r"\bbuybacks?\b|\brepurchase\b",
+    "legal":       r"\blawsuits?\b|\bsettlement\b|\bsues?\b|\blitigation\b|\bprobe\b|\binvestigation\b",
+    "regulation":  r"\bsec\b|\bftc\b|\bdoj\b|\bregulat|\bantitrust\b|\btariffs?\b",
+    "insider":     r"\binsiders?\b|\bceo\b|\bcfo\b|\bexecutives?\b|\bresigns?\b|\bappoints?\b",
+    "product":     r"\blaunch(es)?\b|\bunveils?\b|\bproducts?\b|\bpatents?\b",
+    "contract":    r"\bcontracts?\b|\bpartnership\b|\bcollaborat|\bagreements?\b",
+    "macro":       r"\bfed\b|\binflation\b|\brates?\b|\brecession\b|\bgdp\b",
+    "debt":        r"\bdebt\b|\bbonds?\b|\bnotes offering\b|\brefinanc",
+    "ai":          r"\bai\b|\bartificial intelligence\b|\bmachine learning\b",
+    "short":       r"\bshort sellers?\b|\bshort interest\b|\bsqueeze\b",
+    "bankruptcy":  r"\bbankruptcy\b|\bchapter 11\b|\bdefault\b|\bdelisting\b",
+    "workforce":   r"\blayoffs?\b|\bjob cuts\b|\bhiring\b|\brestructuring\b",
+}
+_TOPIC_RE = {tag: re.compile(pat, re.IGNORECASE) for tag, pat in TOPIC_PATTERNS.items()}
+MAX_TOPICS = 5
 
-_client: anthropic.Anthropic | None = None
+_analyzer: SentimentIntensityAnalyzer | None = None
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set in environment / .env")
-        _client = anthropic.Anthropic(api_key=api_key)
-    return _client
+def _get_analyzer() -> SentimentIntensityAnalyzer:
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = SentimentIntensityAnalyzer()
+        _analyzer.lexicon.update(FINANCE_LEXICON)
+    return _analyzer
 
 
-def _score_batch(batch: list[dict]) -> list[dict] | None:
+def score_article(headline: str, summary: str = "") -> dict:
     """
-    Send a batch of articles to Claude and return parsed results.
+    Score one article locally. Returns:
+      {"sentiment": str, "score": float, "confidence": float, "key_topics": str}
 
-    Each item in batch: {"id": int, "symbol": str, "headline": str, "summary": str}
+    Headline carries the signal in financial news; the summary often repeats
+    boilerplate, so headline gets 70% weight when both are scored.
     """
-    lines = []
-    for item in batch:
-        summary = (item.get("summary") or "")[:300]  # cap summary length
-        lines.append(
-            f'{{"id": {item["id"]}, "symbol": "{item["symbol"]}", '
-            f'"headline": "{item["headline"]}", "summary": "{summary}"}}'
-        )
-    user_content = "Articles to score:\n" + "\n".join(lines)
+    analyzer = _get_analyzer()
+    text = f"{headline}. {(summary or '')[:300]}".strip()
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            msg = _get_client().messages.create(
-                model=MODEL,
-                max_tokens=1024,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_content}],
-            )
-            raw = msg.content[0].text.strip()
-            # Strip optional markdown fencing
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-            return json.loads(raw)
+    h = analyzer.polarity_scores(headline)
+    if summary:
+        s = analyzer.polarity_scores(summary[:300])
+        compound = 0.7 * h["compound"] + 0.3 * s["compound"]
+        neu = 0.7 * h["neu"] + 0.3 * s["neu"]
+    else:
+        compound, neu = h["compound"], h["neu"]
 
-        except json.JSONDecodeError as e:
-            print(f"  JSON parse error (attempt {attempt}): {e}")
-            time.sleep(BACKOFF_SECONDS)
-        except anthropic.RateLimitError:
-            wait = BACKOFF_SECONDS * attempt
-            print(f"  Rate limit hit. Backing off {wait}s (attempt {attempt}/{MAX_RETRIES}).")
-            time.sleep(wait)
-        except Exception as e:
-            print(f"  API error (attempt {attempt}): {e}")
-            time.sleep(BACKOFF_SECONDS)
+    if compound >= BULLISH_THRESHOLD:
+        sentiment = "bullish"
+    elif compound <= BEARISH_THRESHOLD:
+        sentiment = "bearish"
+    else:
+        sentiment = "neutral"
 
-    return None
+    # Confidence: for directional calls, how much of the text was sentiment-
+    # bearing (1 - neutral proportion) scaled by signal strength; for neutral,
+    # how uniformly neutral the text was.
+    if sentiment == "neutral":
+        confidence = round(neu, 3)
+    else:
+        confidence = round(min(1.0, (1.0 - neu) * 0.5 + abs(compound) * 0.5), 3)
+
+    topics = [tag for tag, rx in _TOPIC_RE.items() if rx.search(text)][:MAX_TOPICS]
+
+    return {
+        "sentiment": sentiment,
+        "score": round(compound, 4),
+        "confidence": confidence,
+        "key_topics": ",".join(topics),
+    }
 
 
 def load_news(days: int | None = None) -> pd.DataFrame:
@@ -126,11 +152,8 @@ def load_news(days: int | None = None) -> pd.DataFrame:
     if not os.path.exists(news_dir):
         return pd.DataFrame()
 
-    files = [
-        os.path.join(news_dir, f)
-        for f in os.listdir(news_dir)
-        if f.endswith(".parquet")
-    ]
+    # News is Hive-partitioned (year=YYYY/month=MM/) — search recursively
+    files = _glob_mod.glob(os.path.join(news_dir, "**", "*.parquet"), recursive=True)
     if not files:
         return pd.DataFrame()
 
@@ -158,7 +181,7 @@ def load_already_scored() -> set[str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Score news sentiment with Claude")
+    parser = argparse.ArgumentParser(description="Score news sentiment locally with VADER")
     parser.add_argument("--days", type=int, default=3,
                         help="How many days of recent news to process (default: 3)")
     parser.add_argument("--backfill", action="store_true",
@@ -184,7 +207,6 @@ def main():
         print("  Nothing new to score.")
         return
 
-    # Build article list: need symbol, headline, summary, date
     df = df.dropna(subset=["headline"]).reset_index(drop=True)
     df["_article_id"] = range(len(df))
 
@@ -194,33 +216,13 @@ def main():
     elif "date" not in df.columns:
         df["date"] = datetime.date.today().isoformat()
 
-    articles = df[["_article_id", "symbol", "headline", "summary"]].to_dict("records")
-    articles = [
-        {"id": r["_article_id"], "symbol": r.get("symbol", ""),
-         "headline": str(r["headline"]), "summary": str(r.get("summary", "") or "")}
-        for r in articles
+    print(f"  Scoring {len(df):,} articles locally (VADER + finance lexicon)...")
+    scores = [
+        score_article(str(row.headline), str(getattr(row, "summary", "") or ""))
+        for row in df.itertuples(index=False)
     ]
-
-    # Process in batches
-    results: list[dict] = []
-    total_batches = (len(articles) + BATCH_SIZE - 1) // BATCH_SIZE
-    for i in range(0, len(articles), BATCH_SIZE):
-        batch = articles[i : i + BATCH_SIZE]
-        batch_num = i // BATCH_SIZE + 1
-        print(f"  Batch {batch_num}/{total_batches} ({len(batch)} articles)...")
-        scored = _score_batch(batch)
-        if scored:
-            results.extend(scored)
-        else:
-            print(f"    Warning: batch {batch_num} returned no results.")
-
-    if not results:
-        print("  No articles scored successfully.")
-        return
-
-    # Merge scores back to original rows
-    scores_df = pd.DataFrame(results).rename(columns={"id": "_article_id"})
-    out_df = df.merge(scores_df, on="_article_id", how="inner")
+    scores_df = pd.DataFrame(scores)
+    out_df = pd.concat([df.reset_index(drop=True), scores_df], axis=1)
 
     keep_cols = [c for c in [
         "symbol", "_article_id", "headline", "date", "source",
@@ -233,7 +235,7 @@ def main():
     out_path  = write_partitioned(out_df, OUTPUT_DIR, f"news_sentiment_{mode}_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
-    print(f"Scored {len(out_df):,} articles → {out_path}")
+    print(f"Scored {len(out_df):,} articles -> {out_path}")
 
     dist = out_df["sentiment"].value_counts().to_dict()
     print(f"Sentiment distribution: {dist}")

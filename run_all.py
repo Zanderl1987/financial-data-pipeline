@@ -613,10 +613,10 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="news_sentiment",
         file="news_sentiment_pipeline.py",
-        desc="Claude API sentiment scoring of Finnhub news (requires finnhub table)",
+        desc="Local VADER sentiment scoring of Finnhub news (requires finnhub table)",
         stage=3,
         tables=["news_sentiment"],
-        requires_env=["ANTHROPIC_API_KEY"],
+        requires_env=[],
         backfill_args=["--backfill"],
     ),
     PipelineSpec(

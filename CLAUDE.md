@@ -13,8 +13,8 @@ commands below rather than trusting this line if it looks stale.
   on this machine is a broken MS Store stub.
 - Run everything from the repo root (`C:\Users\zande\PycharmProjects\financial-data-pipeline`).
 - Secrets in `.env` at repo root (gitignored). Never commit it, never print key values.
-  `anthropic` installed (user site) 2026-07-06 — sentiment pipelines only lack
-  ANTHROPIC_API_KEY in `.env`.
+  `anthropic` installed (user site) 2026-07-06 — only `fed_sentiment_pipeline.py` still
+  needs ANTHROPIC_API_KEY (news sentiment is local VADER, no key).
 - ⚠️ `C:\Users\zande` (home dir) is itself an accidental git repo — never commit there.
 
 ## Commands
@@ -97,9 +97,9 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
   `analytics/features.py` now falls back to the yfinance `short_interest` snapshot table
   (same biweekly filing, watchlist-only coverage) — keep running the pipeline daily so
   filing dates accumulate. Registering FINRA API credentials would restore full-market data.
-- `sentiment` factor blocked ONLY on ANTHROPIC_API_KEY in `.env` (1,235 finnhub_news
-  articles waiting; `anthropic` package installed). Then:
-  `python news_sentiment_pipeline.py --backfill` → `python curated.py --table news_sentiment`.
+- `sentiment` factor ACTIVE (2026-07-06): `news_sentiment_pipeline.py` rewritten to local
+  VADER + finance lexicon (no ANTHROPIC_API_KEY needed; deterministic, free). Backfilled
+  1,235 articles. `fed_sentiment_pipeline.py` still requires ANTHROPIC_API_KEY (Claude API).
 - Deep backfills pending: FDIC financials (1992+), Fed SOMA (~2002+, slow), Schwab full
   price history (deferred until storage sized).
 - Daily accumulators: `tradingview_pipeline.py`, `schwab_movers_pipeline.py` (snapshot-only
