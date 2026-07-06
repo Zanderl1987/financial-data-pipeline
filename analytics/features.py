@@ -156,24 +156,17 @@ def _asof_fundamentals(panel: pd.DataFrame) -> pd.DataFrame:
 
 def _add_short_interest(panel: pd.DataFrame) -> pd.DataFrame:
     """
-    Point-in-time FINRA short interest via ASOF JOIN on settlement date.
+    Point-in-time short interest via ASOF JOIN on settlement date.
 
-    FINRA publishes each biweekly file roughly a week after settlement, so the
-    join key is settlement_date + 7 days — a row only sees short-interest data
-    that was actually public on that date.
+    Prefers FINRA's biweekly Reg SHO table (full-market coverage); falls back
+    to the yfinance snapshot table `short_interest`, whose `filing_date` is
+    the settlement date of the same underlying biweekly filing, relayed by
+    Yahoo for watchlist symbols only. Either way the data goes public roughly
+    a week after settlement, so the join key is settlement + 7 days — a row
+    only sees short-interest data that was actually public on that date.
     """
-    if not _has_data("finra_short_interest"):
-        return panel
-
-    con = q._con()
-    con.register("_panel", panel[["symbol", "date"]])
-    try:
-        joined = con.execute("""
-            SELECT p.symbol, p.date,
-                   s.days_to_cover AS si_days_to_cover,
-                   s.shares_short  AS si_shares_short
-            FROM _panel p
-            ASOF LEFT JOIN (
+    if _has_data("finra_short_interest"):
+        source_sql = """
                 SELECT symbol,
                        CAST(settlement_date AS DATE) + INTERVAL 7 DAY AS public_date,
                        MAX(days_to_cover) AS days_to_cover,
@@ -181,6 +174,30 @@ def _add_short_interest(panel: pd.DataFrame) -> pd.DataFrame:
                 FROM finra_short_interest
                 WHERE settlement_date IS NOT NULL
                 GROUP BY symbol, public_date
+        """
+    elif _has_data("short_interest"):
+        source_sql = """
+                SELECT symbol,
+                       CAST(filing_date AS DATE) + INTERVAL 7 DAY AS public_date,
+                       MAX(days_to_cover) AS days_to_cover,
+                       MAX(shares_short)  AS shares_short
+                FROM short_interest
+                WHERE filing_date IS NOT NULL
+                GROUP BY symbol, public_date
+        """
+    else:
+        return panel
+
+    con = q._con()
+    con.register("_panel", panel[["symbol", "date"]])
+    try:
+        joined = con.execute(f"""
+            SELECT p.symbol, p.date,
+                   s.days_to_cover AS si_days_to_cover,
+                   s.shares_short  AS si_shares_short
+            FROM _panel p
+            ASOF LEFT JOIN (
+                {source_sql}
             ) s
             ON p.symbol = s.symbol AND p.date >= s.public_date
         """).df()

@@ -268,6 +268,11 @@ def run_finra() -> None:
 
     if df is None or df.empty:
         print("  Could not retrieve any FINRA short interest file.")
+        print("  NOTE (2026-07-06): cdn.finra.org returns 403 for this path — the")
+        print("  biweekly short interest dataset now requires registered FINRA Query")
+        print("  API credentials (https://developer.finra.org). Until then the")
+        print("  yfinance source's filing_date snapshots cover the watchlist, and")
+        print("  analytics/features.py falls back to them automatically.")
         return
 
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")

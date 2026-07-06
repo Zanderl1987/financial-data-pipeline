@@ -13,7 +13,8 @@ commands below rather than trusting this line if it looks stale.
   on this machine is a broken MS Store stub.
 - Run everything from the repo root (`C:\Users\zande\PycharmProjects\financial-data-pipeline`).
 - Secrets in `.env` at repo root (gitignored). Never commit it, never print key values.
-  `anthropic` is NOT installed in the conda env → sentiment pipelines skip gracefully.
+  `anthropic` installed (user site) 2026-07-06 — sentiment pipelines only lack
+  ANTHROPIC_API_KEY in `.env`.
 - ⚠️ `C:\Users\zande` (home dir) is itself an accidental git repo — never commit there.
 
 ## Commands
@@ -90,9 +91,15 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
 
 ## Open work (as of 2026-07-06)
 
-- Activate dormant factors: run `short_interest_pipeline.py --source finra` (fills
-  `finra_short_interest`) and the finnhub → `news_sentiment_pipeline.py` chain (needs
-  ANTHROPIC_API_KEY) so `short_pressure` and `sentiment` factors produce values.
+- `short_pressure` factor ACTIVE (2026-07-06): FINRA's biweekly CDN path 403s everything —
+  the dataset moved behind the FINRA Query API, which needs registered client credentials
+  from developer.finra.org (the 20-char FINRA_API_KEY in .env does NOT work for OAuth).
+  `analytics/features.py` now falls back to the yfinance `short_interest` snapshot table
+  (same biweekly filing, watchlist-only coverage) — keep running the pipeline daily so
+  filing dates accumulate. Registering FINRA API credentials would restore full-market data.
+- `sentiment` factor blocked ONLY on ANTHROPIC_API_KEY in `.env` (1,235 finnhub_news
+  articles waiting; `anthropic` package installed). Then:
+  `python news_sentiment_pipeline.py --backfill` → `python curated.py --table news_sentiment`.
 - Deep backfills pending: FDIC financials (1992+), Fed SOMA (~2002+, slow), Schwab full
   price history (deferred until storage sized).
 - Daily accumulators: `tradingview_pipeline.py`, `schwab_movers_pipeline.py` (snapshot-only
