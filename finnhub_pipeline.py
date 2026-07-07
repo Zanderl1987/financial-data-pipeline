@@ -213,12 +213,58 @@ def fetch_news(symbol, start_date, end_date):
     df["fetched_at"] = datetime.datetime.utcnow().isoformat()
     return df
 
+def news_deep_backfill(symbols, days, today_str):
+    """
+    News-only deep backfill: walk backwards in 5-day windows (Finnhub truncates
+    large responses, and busy tickers can exceed the cap in under a week),
+    dedupe on article id, and write one parquet. Free tier serves ~1 year.
+    """
+    end_dt = datetime.datetime.utcnow().date()
+    start_dt = end_dt - datetime.timedelta(days=days)
+    chunk = datetime.timedelta(days=5)
+
+    frames = []
+    total = len(symbols)
+    for i, symbol in enumerate(symbols, 1):
+        print(f"[{i}/{total}] {symbol}: news {start_dt} -> {end_dt}")
+        win_start = start_dt
+        got = 0
+        while win_start < end_dt:
+            win_end = min(win_start + chunk - datetime.timedelta(days=1), end_dt)
+            df = fetch_news(symbol, win_start.isoformat(), win_end.isoformat())
+            if df is not None and not df.empty:
+                frames.append(df)
+                got += len(df)
+            win_start = win_end + datetime.timedelta(days=1)
+        print(f"  {got} articles")
+
+    if not frames:
+        print("No news collected.")
+        return
+
+    combined = pd.concat(frames, ignore_index=True)
+    if "id" in combined.columns:
+        combined = combined.drop_duplicates(subset=["symbol", "id"])
+    combined = combined.reset_index(drop=True)
+    out_path = write_partitioned(
+        combined, DIRS["news"], f"news_deepbackfill_{today_str}.parquet")
+    print(f"\nSaved news -> {out_path} ({len(combined)} rows)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Finnhub Financial & Alternative Data Pipeline")
     parser.add_argument(
         "--backfill",
         action="store_true",
         help="Fetch longer range of history for news (30 days instead of 3 days).",
+    )
+    parser.add_argument(
+        "--news-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="News-only deep backfill: fetch N days of company news in 5-day "
+             "chunks and exit (skips all other endpoints). Free tier serves ~365.",
     )
     args = parser.parse_args()
 
@@ -232,6 +278,10 @@ def main():
 
     symbols = get_dji_symbols()
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
+
+    if args.news_days:
+        news_deep_backfill(symbols, args.news_days, today_str)
+        return
 
     # Define news date range
     end_dt = datetime.datetime.utcnow()

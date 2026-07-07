@@ -84,6 +84,8 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
 
 ## Where deeper knowledge lives
 
+- `EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
+  traps, cross-repo synergy. **Read it before planning any substantial work here.**
 - `CLAUDE_SESSION_NOTES.md` + `SESSION_NOTES_2026-07-03.md` — running session log with
   per-pipeline API quirks (SimFin v3 codes, EDGAR 13F parsing, Pink Sheet URL rotation…).
 - `docs/` — source research notes. `FinancialDataPipeline_Future_Improvements.md` — roadmap.
@@ -100,6 +102,11 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
 - `sentiment` factor ACTIVE (2026-07-06): `news_sentiment_pipeline.py` rewritten to local
   VADER + finance lexicon (no ANTHROPIC_API_KEY needed; deterministic, free). Backfilled
   1,235 articles. `fed_sentiment_pipeline.py` still requires ANTHROPIC_API_KEY (Claude API).
+- Sentiment evaluation IN PROGRESS (2026-07-06 session 2, uncommitted): `sentiment_eval.py`
+  (PIT-safe IC/spread harness) + `finnhub_pipeline.py --news-days N` (deep news backfill,
+  5-day chunks). 365-day news pull was running when notes were written — see
+  SESSION_NOTES_2026-07-06.md session 2 for the remaining steps (score → curated → eval
+  baseline → then decide FinBERT vs lexicon tuning).
 - Deep backfills pending: FDIC financials (1992+), Fed SOMA (~2002+, slow), Schwab full
   price history (deferred until storage sized).
 - Daily accumulators: `tradingview_pipeline.py`, `schwab_movers_pipeline.py` (snapshot-only

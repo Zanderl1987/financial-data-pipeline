@@ -1,0 +1,112 @@
+C:\Users\zande\AppData\Roaming\Python\Python311\site-packages\pandas\core\arrays\masked.py:56: UserWarning: Pandas requires version '1.4.2' or newer of 'bottleneck' (version '1.3.5' currently installed).
+  from pandas.core import (
+C:\ProgramData\anaconda3\Lib\site-packages\torchvision\io\image.py:13: UserWarning: Failed to load image Python extension: 'Could not find module 'C:\ProgramData\anaconda3\Lib\site-packages\torchvision\image.pyd' (or one of its dependencies). Try using the full path with constructor syntax.'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+[finbert_eval] loading news...
+[finbert_eval] scoring with FinBERT (ProsusAI/finbert)...
+  157,179 total articles, 111,426 not yet scored by FinBERT
+    64/111,426
+    1,344/111,426
+    2,624/111,426
+    3,904/111,426
+    5,184/111,426
+    6,464/111,426
+    7,744/111,426
+    9,024/111,426
+    10,304/111,426
+    11,584/111,426
+    12,864/111,426
+    14,144/111,426
+    15,424/111,426
+    16,704/111,426
+    17,984/111,426
+    19,264/111,426
+    20,544/111,426
+    21,824/111,426
+    23,104/111,426
+    24,384/111,426
+    25,664/111,426
+    26,944/111,426
+    28,224/111,426
+    29,504/111,426
+    30,784/111,426
+    32,064/111,426
+    33,344/111,426
+    34,624/111,426
+    35,904/111,426
+    37,184/111,426
+    38,464/111,426
+    39,744/111,426
+    41,024/111,426
+    42,304/111,426
+    43,584/111,426
+    44,864/111,426
+    46,144/111,426
+    47,424/111,426
+    48,704/111,426
+    49,984/111,426
+    51,264/111,426
+    52,544/111,426
+    53,824/111,426
+    55,104/111,426
+    56,384/111,426
+    57,664/111,426
+    58,944/111,426
+    60,224/111,426
+    61,504/111,426
+    62,784/111,426
+    64,064/111,426
+    65,344/111,426
+    66,624/111,426
+    67,904/111,426
+    69,184/111,426
+    70,464/111,426
+    71,744/111,426
+    73,024/111,426
+    74,304/111,426
+    75,584/111,426
+    76,864/111,426
+    78,144/111,426
+    79,424/111,426
+    80,704/111,426
+    81,984/111,426
+    83,264/111,426
+    84,544/111,426
+    85,824/111,426
+    87,104/111,426
+    88,384/111,426
+    89,664/111,426
+    90,944/111,426
+    92,224/111,426
+    93,504/111,426
+    94,784/111,426
+    96,064/111,426
+    97,344/111,426
+    98,624/111,426
+    99,904/111,426
+    101,184/111,426
+    102,464/111,426
+    103,744/111,426
+    105,024/111,426
+    106,304/111,426
+    107,584/111,426
+    108,864/111,426
+    110,144/111,426
+    111,424/111,426
+  scoring took 2377s
+  9,576 symbol-day signals | 31 symbols | 2025-07-12 -> 2026-07-06
+[finbert_eval] computing forward returns (benchmark: SPY)...
+  9,270 signals matched to prices
+
+=== FINBERT SENTIMENT PREDICTIVE POWER (excess vs SPY) ===
+  h      n  pooledIC       p  dailyIC      t  days  %pos   bull%   bear%  spread%      t
+  1   9241   -0.0042  0.6835  -0.0065  -0.58   354  51.7   0.027   0.002    0.025   0.52
+  3   9185   -0.0082  0.4294  -0.0037  -0.31   352  46.9   -0.01  -0.032    0.022   0.25
+  5   9085    0.0032  0.7622   0.0054   0.45   348  51.1   0.003  -0.147     0.15   1.29
+ 10   8880   -0.0067  0.5285  -0.0033  -0.27   340  48.8  -0.093  -0.186    0.093   0.57
+ 21   8499   -0.0019  0.8594  -0.0062  -0.51   325  50.2  -0.072  -0.224    0.152   0.64
+
+Guide: dailyIC > 0.02 with |t| > 2 = real signal; spread% should be
+positive (bullish outperforms bearish) and grow with horizon.
+
+Compare against VADER baseline in SENTIMENT_EVAL_RESULTS.txt.

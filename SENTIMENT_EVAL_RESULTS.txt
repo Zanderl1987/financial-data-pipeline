@@ -1,0 +1,59 @@
+﻿=== sentiment finish chain started 2026-07-06 23:40:07 ===
+Waiting for backfill PID 37676 to exit...
+Backfill exited at 00:06:21
+--- news_sentiment_pipeline --backfill ---
+[news_sentiment] backfill: loading news...
+  157,179 total articles, 154,879 not yet scored
+  Scoring 154,879 articles locally (VADER + finance lexicon)...
+
+--- COMPLETE ---
+Scored 154,879 articles -> storage\raw\finnhub\news_sentiment\year=2026\month=07\news_sentiment_backfill_20260707.parquet
+Sentiment distribution: {'bullish': 90220, 'neutral': 38466, 'bearish': 26193}
+symbol       date                                                                                                                    headline sentiment   score
+   MMM 2025-07-16                                                    Carlisle (CSL) to Report Q2 Results: Wall Street Expects Earnings Growth   bullish  0.4471
+   MMM 2025-07-16                                                            MMM Gears Up to Post Q2 Earnings: What Lies Ahead for the Stock?   bearish -0.1394
+   MMM 2025-07-15                                             Why 3M Company (MMM) is One of the Top Dividend Stocks in the Industrial Sector   bullish  0.4531
+   MMM 2025-07-15                                                          Insights Into 3M (MMM) Q2: Wall Street Projections for Key Metrics   bullish  0.1580
+   MMM 2025-07-14                                                                                Pre-Markets in the Red to Start a Fresh Week   bullish  0.3182
+   MMM 2025-07-14                                                                Netflix, 3M, Schlumberger are part of Zacks Earnings Preview   neutral -0.0155
+   MMM 2025-07-14                                                                             Big Week of Inflation Data, Q2 Earnings Reports   bullish  0.1349
+   MMM 2025-07-14                                                      Take the Zacks Approach to Beat the Markets: Amarin, Mogo, 3M in Focus   bullish  0.4835
+   MMM 2025-07-14 Command Brand joins forces with Tay Nakamoto, Phoebe Gates & Sophia Kianni to help curate your college aesthetic like a pro   bullish  0.6296
+   MMM 2025-07-14                                                                             Dow fights for positive ground in early trading   bullish  0.2263
+--- curated: finnhub_news ---
+Wrote C:/Users/zande/PycharmProjects/financial-data-pipeline/storage/curated/finnhub_news/finnhub_news.parquet
+--- curated: news_sentiment ---
+Wrote C:/Users/zande/PycharmProjects/financial-data-pipeline/storage/curated/news_sentiment/news_sentiment.parquet
+--- sentiment_eval (VADER baseline) ---
+[sentiment_eval] building daily signals...
+  9,958 symbol-day signals | 31 symbols | 2025-07-12 -> 2026-07-06
+[sentiment_eval] computing forward returns (benchmark: SPY)...
+  9,583 signals matched to prices
+
+=== SENTIMENT PREDICTIVE POWER (excess vs SPY) ===
+  h      n  pooledIC       p  dailyIC      t  days  %pos   bull%   bear%  spread%      t
+  1   9554    0.0086  0.4014     0.01   0.88   354  51.1   0.035   0.094   -0.059  -0.52
+  3   9497   -0.0113  0.2699  -0.0213  -1.95   352  43.8   0.005   0.313   -0.308  -1.67
+  5   9394   -0.0054   0.604  -0.0108  -0.92   348  47.4  -0.019   0.175   -0.194  -0.89
+ 10   9179    0.0175  0.0939   0.0046   0.42   340  51.8   0.009  -0.047    0.056   0.17
+ 21   8789    0.0045  0.6712  -0.0154   -1.4   325  48.3  -0.036  -0.034   -0.002  -0.01
+
+Guide: dailyIC > 0.02 with |t| > 2 = real signal; spread% should be
+positive (bullish outperforms bearish) and grow with horizon.
+--- sentiment_eval --min-articles 2 ---
+[sentiment_eval] building daily signals...
+  9,086 symbol-day signals | 31 symbols | 2025-07-12 -> 2026-07-06
+[sentiment_eval] computing forward returns (benchmark: SPY)...
+  8,817 signals matched to prices
+
+=== SENTIMENT PREDICTIVE POWER (excess vs SPY) ===
+  h      n  pooledIC       p  dailyIC      t  days  %pos   bull%   bear%  spread%      t
+  1   8788    0.0104  0.3306   0.0171    1.4   354  51.1   0.028   0.098    -0.07  -0.48
+  3   8733    -0.011  0.3062  -0.0205  -1.79   352  44.9  -0.009   0.308   -0.316  -1.38
+  5   8641   -0.0043  0.6905  -0.0048  -0.39   348  47.4  -0.013   0.285   -0.298   -1.1
+ 10   8441    0.0168  0.1222   0.0072   0.64   340  49.4    0.03  -0.059    0.089   0.23
+ 21   8069    0.0057  0.6099   -0.016  -1.39   325  47.7  -0.019  -0.111    0.092   0.17
+
+Guide: dailyIC > 0.02 with |t| > 2 = real signal; spread% should be
+positive (bullish outperforms bearish) and grow with horizon.
+=== chain finished 2026-07-07 00:07:15 ===
