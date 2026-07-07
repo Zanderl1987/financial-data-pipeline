@@ -117,3 +117,70 @@ applies them; memory index updated so they load proactively:
    investigated — load `parquet-store-audit` and clear the flag when done.
 3. **Next pipeline work per Zander's decision above:** scope the event-impact module
    (event_backtest.py generalization). Needs its own conversation before implementation.
+
+---
+
+# Session 3 (same day) — Event-impact module: scoped, built, PIT-fixed, wired
+
+**Session model:** Claude Sonnet 5
+
+## What happened
+
+Scoped and built the event-impact module (`analytics/event_impact.py`, new) per Zander's
+three decisions: oil driver only for v1, auto-select exposed symbols via
+`analytics/exposure.py`'s significance threshold (|t_ex_mkt| > 3), and build both a
+research module/CLI report AND (conditionally) a live `signal_panel()` factor.
+
+### First pass — caught two problems before trusting the result
+
+1. **Sign-mixing.** The first version pooled positively- and negatively-exposed names
+   into one event study. An oil surge should push positive-exposure names (USO, XLE, CVX)
+   up and negative-exposure names (TLT, staples, tech) down — pooling them averages the
+   effect away. Fixed by running each sign as a separate event study.
+2. **Look-ahead in symbol selection.** `exposure_map()` by default uses full-history OLS
+   betas, so a symbol's "oil-exposed" label was computed using data from *after* many of
+   the events being tested — the same class of bug `signal-eval` warns about, just at the
+   symbol-selection layer instead of the entry-timing layer. Fixed with `_rolling_grouping()`:
+   each event date gets its own exposure classification from a strictly trailing 3-year
+   window, so membership varies date to date (point-in-time, not a fixed list).
+3. **Date clustering inflates pooled significance.** Symbols sharing the same event date
+   share the same shock — they aren't independent draws. Added `_date_level_stats()`
+   (aggregate to one mean CAR per event date first, t-test across dates) as the honest
+   companion to the existing (symbol,event)-pooled stat — same fix pattern as pooled-vs-
+   daily IC in `sentiment_eval.py`.
+
+### Result (oil, ±15% over 10d, 3y trailing exposure window, both directions tested)
+
+Real, PIT-safe, economically-signed effect — much smaller than the naive full-history
+version, but genuine:
+- **Positive-exposure names** (oil/energy/materials): significant 1-3 day co-movement
+  WITH the shock in both directions (date-level t = 4.13 at h1 for the surge case,
+  t = -2.23 at h1 for the drop case). Decays to noise by ~day 5.
+- **Negative-exposure names** (bonds, staples, tech, healthcare): correctly-signed
+  reaction in both directions but inconsistent timing (significant at 21d for the surge,
+  at 1d/5d for the drop) — not trusted yet, not wired into the live factor.
+
+### Live factor: `oil_shock`, weight 0.5
+
+Wired into `analytics/signals.py`'s `_raw_signals()` — deliberately narrow: only the
+validated positive-exposure/1-3-day leg. Sparse by design (NaN except in the reaction
+window after a qualifying oil shock, ~44-46 episodes over 25 years). Merged directly by
+(symbol, date) rather than sourced from `feature_matrix()` like the other factors, since
+it's event-triggered rather than continuously observable.
+
+**Known gap:** `feature_matrix()`'s own symbol/date filtering (unrelated to this change)
+dropped every oil-exposed name (CVX, XOM, XLE, DOW, CAT) out of every test universe tried
+— only a handful of names (AAPL, GE, KO) survived whatever join `feature_matrix()` does.
+The `oil_shock` merge code is verified correct in isolation (`oil_shock_signal()` tested
+standalone and via `tests/test_event_impact.py`), but end-to-end confirmation that it
+actually populates in a real `signal_panel()` run is still open — worth checking why
+`feature_matrix()` excludes these names next time factor coverage is investigated.
+
+## Files added/changed this session
+- `analytics/event_impact.py` (new) — `_rolling_grouping()`, `driver_event_study()`,
+  `oil_shock_signal()`, `_date_level_stats()`, CLI (`python -m analytics.event_impact
+  --driver oil --pct 15 --days 10`).
+- `analytics/signals.py` — added `oil_shock` factor (weight 0.5), `oil_shock()` wrapper.
+- `tests/test_event_impact.py` (new) — synthetic-data tests for point-in-time
+  classification and the date-level stat; 5 tests, no live data required.
+- Full suite: 261 passed (was 256).
