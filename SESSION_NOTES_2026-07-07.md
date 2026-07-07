@@ -75,3 +75,45 @@ needs its own scoping conversation before implementation.
   `EXPERT_BRIEF.md`, `AUTOMATION.md`, `tests/test_exposure.py`,
   `tests/test_sentiment_eval.py`, `SENTIMENT_EVAL_RESULTS.txt`, `scripts/`.
 - Full test suite: 256 passed before commit.
+
+---
+
+# Session 2 (same day) — Post-restart triage + methodology skills
+
+**Session model:** Claude Fable 5
+**Scope:** global skill-building in `~/.claude/skills/` + cross-repo triage after the computer
+restarted. No pipeline code changed. Ran in parallel with (and initially unaware of) the Sonnet
+session above — its notes supersede anything this session said earlier about "uncommitted work."
+
+## Built 4 global methodology skills (at Zander's request)
+
+All in `~/.claude/skills/`, encoding this project's hard-won lessons so any model/session
+applies them; memory index updated so they load proactively:
+
+- **signal-eval** — PIT-safe evaluation methodology: publication-lag ASOF joins, next-close
+  entry, excess-vs-benchmark, pooled + daily IC with t-stats, skepticism defaults (|IC|<0.02 is
+  noise; sign flips across horizons = noise; suspiciously good = hunt the leak). The Sonnet
+  session above cited it during the FinBERT eval — first real use, same day.
+- **data-source-vetting** — 15-minute pre-build source spike: ToS veto first, WAF/dead-key
+  probes, rate-limit semantics (per-key vs per-IP), backfill depth; GO/NO-GO always recorded.
+- **experiment-writeup** — portfolio-ready `experiments/YYYY-MM-DD_<slug>.md` writeups (null
+  results included). First artifact exists: `experiments/2026-07-07_news-sentiment-null-result.md`
+  (untracked as of this writing — **commit it**).
+- **parquet-store-audit** — the 5 storage corruption patterns (Hive year-shadowing, raw dupes,
+  stale curated, empty-but-wired, schema drift) as an audit procedure with a verdict-table
+  deliverable.
+
+## Open items found in triage (still open as of end of session)
+
+1. **Transcript pull STALLED (custom_index_tool, 25/125, PULL_STALLED.txt raised).** Today's
+   9:00 AM run got AV quota-exhausted on BOTH keys (F78Y…, 9KPJ…) on the FIRST request despite
+   a fresh day. Working hypothesis: AV's 25/day free limit is enforced per IP, so key rotation
+   never doubled quota, and reset timing (UTC vs ET vs rolling-24h) may not align with 9 AM.
+   Undiagnosed — one manual test request would confirm. If per-IP: ~5 more daily runs to finish
+   (125−25 pulls at ~25/day). Side note: `scripts/daily_transcript_pull.ps1`'s `>>` redirection
+   appends UTF-16 to a UTF-8 log (mojibake in pull_log.txt) — add `-Encoding utf8` when editing.
+2. **Weekly quality check FAILs (QUALITY_FAIL.txt raised).** `options_history` (1 error,
+   PLTR 06-17 file) and `synthetic_options` (1 error, 06-16 file) + 60 NO DATA tables. Not
+   investigated — load `parquet-store-audit` and clear the flag when done.
+3. **Next pipeline work per Zander's decision above:** scope the event-impact module
+   (event_backtest.py generalization). Needs its own conversation before implementation.
