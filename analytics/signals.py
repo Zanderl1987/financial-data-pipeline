@@ -63,11 +63,20 @@ _SIGNAL_COLS = list(DEFAULT_WEIGHTS)
 
 
 def _zscore(s: pd.Series) -> pd.Series:
-    """Cross-sectional z-score; returns 0 where the group has no spread."""
+    """
+    Cross-sectional z-score. Returns 0 where present values have no spread,
+    but NaN stays NaN — a date where NO symbol has a value (e.g. a sparse,
+    event-triggered factor like oil_shock on a day with no event) must not
+    be silently promoted to "present, neutral", or every present-but-empty
+    factor gets counted in the composite's renormalization denominator on
+    every date, diluting the factors that actually have data that day.
+    """
+    if s.notna().sum() == 0:
+        return pd.Series(np.nan, index=s.index)
     mu = s.mean()
     sd = s.std(ddof=0)
     if not np.isfinite(sd) or sd == 0:
-        return pd.Series(0.0, index=s.index)
+        return pd.Series(np.where(s.notna(), 0.0, np.nan), index=s.index)
     return (s - mu) / sd
 
 

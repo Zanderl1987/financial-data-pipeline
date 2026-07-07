@@ -168,14 +168,6 @@ window after a qualifying oil shock, ~44-46 episodes over 25 years). Merged dire
 (symbol, date) rather than sourced from `feature_matrix()` like the other factors, since
 it's event-triggered rather than continuously observable.
 
-**Known gap:** `feature_matrix()`'s own symbol/date filtering (unrelated to this change)
-dropped every oil-exposed name (CVX, XOM, XLE, DOW, CAT) out of every test universe tried
-— only a handful of names (AAPL, GE, KO) survived whatever join `feature_matrix()` does.
-The `oil_shock` merge code is verified correct in isolation (`oil_shock_signal()` tested
-standalone and via `tests/test_event_impact.py`), but end-to-end confirmation that it
-actually populates in a real `signal_panel()` run is still open — worth checking why
-`feature_matrix()` excludes these names next time factor coverage is investigated.
-
 ## Files added/changed this session
 - `analytics/event_impact.py` (new) — `_rolling_grouping()`, `driver_event_study()`,
   `oil_shock_signal()`, `_date_level_stats()`, CLI (`python -m analytics.event_impact
@@ -184,3 +176,56 @@ actually populates in a real `signal_panel()` run is still open — worth checki
 - `tests/test_event_impact.py` (new) — synthetic-data tests for point-in-time
   classification and the date-level stat; 5 tests, no live data required.
 - Full suite: 261 passed (was 256).
+
+### Follow-up investigation (same session, after commit): the "known gap" above was real
+and root-caused, plus two more bugs surfaced while chasing it
+
+Zander chose "commit now, investigate separately" for the `feature_matrix()` gap. Digging
+in found the gap was real and, unexpectedly, a general infrastructure bug rather than
+anything specific to `oil_shock` — plus two more bugs surfaced while validating the fix.
+
+1. **`_pick_price_table()` picked "has any data" over "has the requested symbols"**
+   (`analytics/features.py`). Auto-detection preferred Schwab's `prices` table purely
+   because it had *some* rows — but `prices` is a leftover full-history depth-probe
+   (`price_history_pipeline.py --full --symbols AAPL KO GE`, only 3 symbols, 31,367 rows),
+   while `tiingo_prices` has 66 symbols / 471,288 rows. This silently starved
+   `feature_matrix()` (and therefore every factor in `signal_panel()`, not just
+   `oil_shock`) down to `['AAPL','GE','KO']` whenever no explicit `price_table` override
+   was passed — which is the common case. Fixed to pick by actual overlap with the
+   requested symbol universe (`q.symbols(table) & set(symbols)`), tie-breaking on total
+   table breadth so a narrow table covering the same names by coincidence doesn't beat a
+   much deeper source purely by being checked first. Zander confirmed via AskUserQuestion
+   ("Fix `_pick_price_table()` now").
+2. **`_zscore()` promoted "no data at all" to "present, neutral"** (`analytics/signals.py`).
+   The original degenerate-group guard (`sd == 0` → all zeros) fired even when the whole
+   group was NaN, converting a sparse factor's "nothing happened on this date" into
+   "present, contributes 0" — which got it wrongly counted in the composite's
+   renormalization denominator on every date, diluting factors that actually had data.
+   `oil_shock`'s extreme sparsity (168 of ~41K symbol-days) is what exposed this; the bug
+   affects every factor, though it's invisible for dense ones. Fixed to keep all-NaN
+   groups as NaN, while still zeroing (not NaN-ing) present-but-constant entries.
+3. **`oil_shock_raw` was a flat ±1 for every symbol tagged on the same event date**
+   (`analytics/event_impact.py`). Once (1) and (2) were fixed, an end-to-end
+   `signal_panel(start='2024-01-01')` smoke test showed `oil_shock`: 168 non-null rows
+   but all 168 exactly 0.0. Every symbol sharing an event date carried the identical raw
+   score, so the cross-sectional group was zero-spread (degenerate) and z-scored to 0 for
+   everyone — present in the panel, contributing nothing to ranking. Fixed by scaling the
+   raw score by each symbol's measured `beta_ex_mkt` from `_rolling_grouping()` instead of
+   a flat direction-only ±1. Re-ran the smoke test: 168/168 now non-zero and differentiated
+   (e.g. XLB +0.87 vs. CAT +0.33 on the same 2024-09-11 surge — larger measured exposure,
+   larger score). Added `TestOilShockSignal` to `tests/test_event_impact.py` asserting the
+   scaling (not just direction) drives the score.
+
+**Net effect:** two of the three fixes (1 and 2) are general correctness fixes to shared
+`feature_matrix()`/`signal_panel()` infrastructure, discovered only because `oil_shock`'s
+sparsity/narrow universe made them visible — every other factor was quietly affected too
+(factor coverage silently capped at 3 symbols; sparse-factor dilution in the composite).
+
+### Updated files/test count
+- `analytics/features.py` — `_pick_price_table()` fix (now takes `symbols` param).
+- `analytics/signals.py` — `_zscore()` fix.
+- `analytics/event_impact.py` — `oil_shock_signal()` scores by `beta_ex_mkt`, not flat ±1.
+- `tests/test_signals.py` — 2 new `TestZScore` cases (all-NaN stays NaN; degenerate-but-
+  present preserves missing entries).
+- `tests/test_event_impact.py` — new `TestOilShockSignal` case.
+- Full suite: 264 passed (was 261).

@@ -120,3 +120,43 @@ class TestDateLevelStats:
         dl = ei._date_level_stats(res)
         assert dl.loc[1, "n_dates"] == 1
         assert np.isnan(dl.loc[1, "t_stat"])
+
+
+class TestOilShockSignal:
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        event_date = pd.Timestamp("2024-06-03")
+        idx = pd.bdate_range("2024-05-01", periods=40)
+        events = pd.DataFrame({"date": [event_date]})
+        grouped = pd.DataFrame({
+            "date": [event_date, event_date],
+            "symbol": ["BIG", "SMALL"],
+            "sign": [1, 1],
+            "beta_ex_mkt": [0.9, 0.3],
+            "t_ex_mkt": [4.0, 3.5],
+            "n": [500, 500],
+        })
+        closes = pd.DataFrame({"BIG": 1.0, "SMALL": 1.0}, index=idx)
+
+        monkeypatch.setattr(ei, "price_move_events",
+                            lambda symbol, pct, days, start=None, min_gap_days=10:
+                                events.copy() if pct > 0 else events.iloc[0:0].copy())
+        monkeypatch.setattr(ei, "_rolling_grouping",
+                            lambda driver, event_dates, universe=None, min_t=3.0,
+                                   lookback_years=3, end=None: grouped)
+        monkeypatch.setattr(ei, "load_close_matrix",
+                            lambda symbols, start=None, end=None: closes[
+                                [s for s in symbols if s in closes.columns]])
+        return event_date
+
+    def test_scales_by_beta_ex_mkt_not_flat(self, patched):
+        event_date = patched
+        out = ei.oil_shock_signal(symbols=["BIG", "SMALL"], reaction_days=2)
+        assert not out.empty
+        big = out.loc[out["symbol"] == "BIG", "oil_shock_raw"].iloc[0]
+        small = out.loc[out["symbol"] == "SMALL", "oil_shock_raw"].iloc[0]
+        # same event, same direction (+1) -> both positive, but NOT identical:
+        # BIG's larger measured exposure (0.9 vs 0.3) must carry a larger score
+        assert big > small > 0
+        assert big == pytest.approx(0.9)
+        assert small == pytest.approx(0.3)

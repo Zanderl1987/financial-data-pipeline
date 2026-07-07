@@ -45,6 +45,21 @@ class TestZScore:
         assert z.mean() == pytest.approx(0.0, abs=1e-9)
         assert z.std(ddof=0) == pytest.approx(1.0, abs=1e-9)
 
+    def test_all_nan_group_stays_nan(self):
+        # A sparse, event-triggered factor (e.g. oil_shock) with no event on
+        # this date must NOT be promoted to "present, neutral" — that would
+        # get it counted in the composite's renormalization denominator on
+        # every date, diluting factors that actually have data that day.
+        z = signals._zscore(pd.Series([np.nan, np.nan, np.nan]))
+        assert z.isna().all()
+
+    def test_degenerate_group_preserves_missing_entries(self):
+        # constant value for present symbols, but one symbol has no value at
+        # all — that symbol must stay NaN, not get pulled in as a 0
+        z = signals._zscore(pd.Series([5.0, 5.0, np.nan]))
+        assert list(z.iloc[:2]) == [0.0, 0.0]
+        assert np.isnan(z.iloc[2])
+
 
 class TestRawSignals:
     def setup_method(self):

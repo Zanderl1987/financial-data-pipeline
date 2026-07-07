@@ -70,13 +70,31 @@ def _has_data(table: str) -> bool:
         return False
 
 
-def _pick_price_table(price_table: "str | None") -> "str | None":
+def _pick_price_table(price_table: "str | None", symbols=None) -> "str | None":
+    """
+    Auto-detect picks by actual SYMBOL COVERAGE, not just "has any rows at
+    all" — a table with one probe symbol's worth of data would otherwise
+    win over a table with the full watchlist just by existing first (this
+    silently starved feature_matrix() down to 3 symbols when Schwab's
+    `prices` table had only a leftover depth-probe sample in it).
+    """
     if price_table:
         return price_table if _has_data(price_table) else None
+    if isinstance(symbols, str):
+        symbols = [symbols]
+    best, best_key = None, (-1, -1)
     for cand in ("prices", "tiingo_prices", "sector_etfs"):
-        if _has_data(cand):
-            return cand
-    return None
+        syms = set(q.symbols(cand))
+        if not syms:
+            continue
+        overlap = len(syms & set(symbols)) if symbols else len(syms)
+        # tie-break on total breadth, so a table that merely happens to
+        # cover the same handful of requested symbols doesn't beat a much
+        # deeper source purely by being checked first
+        key = (overlap, len(syms))
+        if key > best_key:
+            best, best_key = cand, key
+    return best
 
 
 def _price_panel(price_table: str, symbols, start, end) -> pd.DataFrame:
@@ -343,7 +361,7 @@ def feature_matrix(
         news_score_21d | news_count_21d
     Empty DataFrame if no price source has data.
     """
-    pt = _pick_price_table(price_table)
+    pt = _pick_price_table(price_table, symbols)
     if pt is None:
         return pd.DataFrame()
 

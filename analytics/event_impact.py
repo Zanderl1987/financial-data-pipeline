@@ -150,9 +150,15 @@ def oil_shock_signal(symbols=None,
                      min_gap_days: int = 10) -> pd.DataFrame:
     """
     Sparse (symbol, date) factor panel for analytics/signals.py: a directional
-    tilt (+1 = go with the shock) for POSITIVELY oil-exposed names, active
-    only on the `reaction_days` trading days after a qualifying oil shock
-    (surge or drop). NaN/absent everywhere else.
+    tilt, scaled by each symbol's measured exposure strength (beta_ex_mkt),
+    for POSITIVELY oil-exposed names, active only on the `reaction_days`
+    trading days after a qualifying oil shock (surge or drop). NaN/absent
+    everywhere else. Scaling by exposure strength (rather than a flat +-1
+    for every qualifying symbol) matters here specifically: every symbol
+    tagged on the same event date would otherwise carry the IDENTICAL raw
+    value, which cross-sectional z-scoring treats as a zero-spread (fully
+    degenerate) group and reduces to 0 for everyone — present in the
+    panel but contributing nothing to the ranking.
 
     Scoped deliberately narrow: only the positive-exposure leg's short
     (1-3 day) co-movement held up under a point-in-time, date-clustering-
@@ -162,7 +168,9 @@ def oil_shock_signal(symbols=None,
     horizon moved between the surge test (21d) and the drop test (1d/5d) —
     inconsistent enough not to trust yet, so it is NOT included here.
 
-    Returns columns: symbol, date, oil_shock_raw (float, +1/-1).
+    Returns columns: symbol, date, oil_shock_raw (float, signed by shock
+    direction and scaled by the symbol's measured beta_ex_mkt — magnitude
+    is not bounded to +-1, only the sign is driven by shock direction).
     """
     trigger_symbol = DRIVERS["oil"][1]
     syms = list(symbols) if symbols is not None else list(DEFAULT_SYMBOLS)
@@ -181,7 +189,7 @@ def oil_shock_signal(symbols=None,
 
     grouped = _rolling_grouping("oil", events["date"], universe=syms, min_t=min_t,
                                 lookback_years=lookback_years, end=end)
-    pos = grouped.loc[grouped["sign"] == 1, ["date", "symbol"]]
+    pos = grouped.loc[grouped["sign"] == 1, ["date", "symbol", "beta_ex_mkt"]]
     if pos.empty:
         return pd.DataFrame(columns=["symbol", "date", "oil_shock_raw"])
     pos = pos.merge(events[["date", "direction"]], on="date", how="left")
@@ -194,10 +202,11 @@ def oil_shock_signal(symbols=None,
     rows = []
     for r in pos.itertuples(index=False):
         loc = idx.searchsorted(r.date, side="left")
+        score = float(r.direction) * float(r.beta_ex_mkt)
         for k in range(1, reaction_days + 1):
             if loc + k < len(idx):
                 rows.append({"symbol": r.symbol, "date": idx[loc + k],
-                            "oil_shock_raw": float(r.direction)})
+                            "oil_shock_raw": score})
     out = pd.DataFrame(rows)
     if out.empty:
         return out
