@@ -3,6 +3,9 @@
 **Branch:** master (uncommitted work from 07-06 finished and committed this session)
 **Session model:** Claude Sonnet 5
 
+**Full writeup:** `experiments/2026-07-07_news-sentiment-null-result.md` — this section
+is a summary; the experiment file has the complete method/results/limitations.
+
 ## What happened
 
 Picked up the sentiment-evaluation groundwork from 07-06 session 2. The overnight
