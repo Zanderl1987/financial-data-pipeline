@@ -111,6 +111,10 @@ class TestDateLevelStats:
         per_date_means = [0.02, -0.02]
         expected_mean = np.mean(per_date_means)
         assert dl.loc[1, "mean_pct"] == pytest.approx(round(100 * expected_mean, 2))
+        # per-date means cancel exactly (t=0) -> two-tailed p-value is 1.0,
+        # and with only one horizon here the BH adjustment is a no-op
+        assert dl.loc[1, "p_value"] == pytest.approx(1.0)
+        assert dl.loc[1, "p_adj"] == pytest.approx(1.0)
 
     def test_single_date_gives_nan_t_stat(self):
         events = pd.DataFrame({"date": pd.to_datetime(["2024-01-01", "2024-01-01"])})
@@ -120,6 +124,47 @@ class TestDateLevelStats:
         dl = ei._date_level_stats(res)
         assert dl.loc[1, "n_dates"] == 1
         assert np.isnan(dl.loc[1, "t_stat"])
+        assert np.isnan(dl.loc[1, "p_value"])
+        assert np.isnan(dl.loc[1, "p_adj"])
+
+    def test_multiple_horizons_get_bh_adjusted_together(self):
+        # 3 independent dates, 2 horizons. Horizon 1 has a real, consistent
+        # effect (should stay significant-ish); horizon 5 is pure noise
+        # (mean ~0). The raw p-values should differ from the BH-adjusted
+        # ones once more than one horizon is on the table.
+        events = pd.DataFrame({"date": pd.to_datetime(
+            ["2024-01-01", "2024-02-01", "2024-03-01"])})
+        car = pd.DataFrame({1: [0.05, 0.04, 0.06], 5: [0.01, -0.01, 0.005]})
+        horizons = pd.DataFrame(index=[1, 5])
+        res = _FakeEventStudyResult(car=car, events=events, horizons=horizons)
+        dl = ei._date_level_stats(res)
+        assert dl.loc[1, "p_value"] < dl.loc[5, "p_value"]
+        # BH adjustment across 2 horizons can only make p's larger or equal
+        assert dl.loc[1, "p_adj"] >= dl.loc[1, "p_value"]
+        assert dl.loc[5, "p_adj"] >= dl.loc[5, "p_value"]
+
+
+class TestBHAdjust:
+    def test_matches_manual_bh_stepup(self):
+        # classic non-monotonic-candidate example, worked by hand:
+        # sorted ascending p's are 0.006, 0.007, 0.02, 0.045, 0.09 (ranks 1-5);
+        # p*m/rank gives 0.03, 0.0175, 0.0333, 0.05625, 0.09 — NOT monotone
+        # (rank1's 0.03 > rank2's 0.0175) so the step-up cummin must fix it.
+        pvals = pd.Series([0.007, 0.045, 0.02, 0.006, 0.09])
+        adj = ei._bh_adjust(pvals)
+        expected = [0.0175, 0.05625, 0.02 * 5 / 3, 0.0175, 0.09]
+        assert list(adj) == pytest.approx(expected)
+
+    def test_nan_entries_pass_through_and_excluded_from_ranking(self):
+        pvals = pd.Series([0.01, np.nan, 0.02])
+        adj = ei._bh_adjust(pvals)
+        assert np.isnan(adj.iloc[1])
+        assert adj.iloc[0] == pytest.approx(0.01 * 2 / 1)
+        assert adj.iloc[2] == pytest.approx(0.02 * 2 / 2)
+
+    def test_all_nan_returns_all_nan(self):
+        adj = ei._bh_adjust(pd.Series([np.nan, np.nan]))
+        assert adj.isna().all()
 
 
 class TestOilShockSignal:

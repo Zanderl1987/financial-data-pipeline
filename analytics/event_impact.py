@@ -31,6 +31,7 @@ import os
 import sys
 
 import pandas as pd
+from scipy import stats
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analytics.exposure import DRIVERS, MARKET_DRIVER, MIN_OBS, compute_exposure, load_driver_returns
@@ -217,6 +218,28 @@ def oil_shock_signal(symbols=None,
                .reset_index(drop=True))
 
 
+def _bh_adjust(pvals: pd.Series) -> pd.Series:
+    """
+    Benjamini-Hochberg FDR-adjusted p-values across the horizons tested
+    together in one _date_level_stats() call. Scanning multiple reaction
+    horizons for the same event set inflates the chance of a spuriously
+    significant t-stat (see signal-eval skill: "5 horizons x several
+    stats — one marginal t=2 among 15 numbers is expected by chance").
+    NaN inputs (too few independent dates to test) stay NaN and are
+    excluded from the ranking.
+    """
+    valid = pvals.dropna().sort_values()
+    m = len(valid)
+    result = pd.Series(float("nan"), index=pvals.index)
+    if m == 0:
+        return result
+    ranks = pd.Series(range(1, m + 1), index=valid.index)
+    adj = (valid * m / ranks).clip(upper=1.0)
+    adj = adj.iloc[::-1].cummin().iloc[::-1]  # standard BH step-up monotonicity
+    result.loc[adj.index] = adj
+    return result
+
+
 def _date_level_stats(res) -> pd.DataFrame:
     """
     Symbols on the same event date share the same driver shock, so they are
@@ -226,6 +249,11 @@ def _date_level_stats(res) -> pd.DataFrame:
     re-aggregates to one mean CAR per event DATE first, then t-tests across
     dates — the honest, conservative version of the same stat. Restricted
     to the same horizons already reported in res.horizons.
+
+    Adds a two-tailed p-value per horizon (t-distribution, df = n_dates-1)
+    plus a Benjamini-Hochberg-adjusted p-value across the horizons tested
+    here, since checking several horizons at once is itself a multiple-
+    comparisons problem.
     """
     events = res.events[["date"]].reset_index(drop=True)
     car = res.car.reset_index(drop=True)
@@ -238,8 +266,13 @@ def _date_level_stats(res) -> pd.DataFrame:
         n = len(per_date)
         mean, sd = float(per_date.mean()), float(per_date.std(ddof=1))
         t = mean / (sd / math.sqrt(n)) if n > 1 and sd > 0 else float("nan")
-        rows[h] = {"n_dates": n, "mean_pct": round(100 * mean, 2), "t_stat": round(t, 2)}
-    return pd.DataFrame.from_dict(rows, orient="index")
+        p = 2 * stats.t.sf(abs(t), df=n - 1) if n > 1 and sd > 0 else float("nan")
+        rows[h] = {"n_dates": n, "mean_pct": round(100 * mean, 2), "t_stat": round(t, 2),
+                  "p_value": p}
+    out = pd.DataFrame.from_dict(rows, orient="index")
+    if not out.empty:
+        out["p_adj"] = _bh_adjust(out["p_value"])
+    return out
 
 
 def _print_horizons(label: str, res):
@@ -252,8 +285,9 @@ def _print_horizons(label: str, res):
               f"{r['edge_pct']:>6}")
     dl = _date_level_stats(res)
     print(f"  date-level (honest, {dl['n_dates'].iloc[0] if not dl.empty else 0} "
-          f"independent dates): " +
-          " | ".join(f"h{h}: mean={r['mean_pct']}% t={r['t_stat']}"
+          f"independent dates, BH-adjusted across {len(dl)} horizons): " +
+          " | ".join(f"h{h}: mean={r['mean_pct']}% t={r['t_stat']} "
+                    f"p={r['p_value']:.4f} p_adj={r['p_adj']:.4f}"
                     for h, r in dl.iterrows()))
 
 
@@ -288,6 +322,8 @@ def print_report(driver: str, pct: float, days: int, pos_res, neg_res, grouped: 
 
     print("\nGuide: |t| > 2 over enough events = a real event-conditional effect;")
     print("edge% is mean CAR minus the unconditional base rate for the same symbols.")
+    print("Trust p_adj (BH-adjusted across horizons), not the raw p, before calling")
+    print("anything significant — the raw p is inflated by scanning several horizons.")
     print("A real effect should show OPPOSITE-signed CAR between the two groups —")
     print("same-signed or only-one-group significance is more likely confounding.")
     print("This is a RESEARCH result only — not wired into signal_panel() yet.")
