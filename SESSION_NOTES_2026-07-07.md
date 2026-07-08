@@ -252,3 +252,39 @@ p-value metric. Two additions, both requested and confirmed live before committi
 
 Full suite: 271 passed (was 264 after the fixes above).
 - Full suite: 264 passed (was 261).
+
+### entry_lag look-ahead bug found and fixed — oil_shock reversed to null, pulled from signal_panel()
+
+Zander asked to tackle the entry_lag weak spot flagged in the robustness review
+above before moving to other expansion ideas (more drivers, visualizations,
+trading-execution layer).
+
+`price_move_events()` defines an event's date as the day the trailing %-move
+reading itself CLOSES past the threshold, so `event_study(entry_lag=0)` (the
+default `driver_event_study()` was silently using) traded on same-day
+information — same-day entry is the exact look-ahead pattern `signal-eval`
+warns about most. Added an `entry_lag` param (default 1, next-close) to
+`driver_event_study()` and `sensitivity_check()`, plus `--entry-lag` on the
+CLI. Commit `6f31510`.
+
+**Rerunning with the fix reversed the earlier "validated" result.** The
+positive-exposure h1 effect (t=4.13, p_adj=0.0008 at entry_lag=0) drops to
+t=-1.25, p_adj=0.476 at entry_lag=1 — gone at every horizon, both exposure
+groups, both shock directions, and 0/9 (was 9/9) sensitivity-grid combinations.
+Full details and numbers: `experiments/2026-07-07_oil-shock-null-result.md`.
+
+**Decision (Zander, 2026-07-07):** pull `oil_shock` from `signal_panel()`.
+Removed from `analytics/signals.py`'s `DEFAULT_WEIGHTS`, `_raw_signals()`'s
+merge block, and the `oil_shock()` wrapper. `analytics/event_impact.py` itself
+is untouched and still usable as a research tool with the corrected default —
+any future driver must be validated with `entry_lag>=1` before being
+considered for the live panel.
+
+Full suite: 273 passed throughout (15 tests in `test_event_impact.py`, 2 new
+covering the entry_lag default and forwarding).
+
+**Next up (per Zander):** more drivers (gold/t10y/etc. via the same
+framework), interactive visualizations (no plotting library currently
+installed — likely plotly, self-contained HTML), and scoping a trading-
+execution layer (nothing in the repo places orders yet; Schwab Trader API is
+registered but not enabled).

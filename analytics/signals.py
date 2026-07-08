@@ -20,9 +20,12 @@ Factors
                    (flip the weight sign to hunt squeeze candidates instead)
 - insider_flow   : trailing 90d net insider buying, scaled by shares outstanding
 - sentiment      : trailing 21d mean Claude-scored news sentiment
-- oil_shock      : sparse 1-3 day tilt for positively oil-exposed names right
-                   after an oil price shock (see analytics/event_impact.py) —
-                   near-always NaN; only active in the days after a shock
+
+(oil_shock, a sparse post-shock tilt from analytics/event_impact.py, was
+tried and pulled 2026-07-07: its "significant" reaction turned out to be a
+same-day entry_lag=0 artifact — see event_impact.py's driver_event_study()
+docstring and experiments/2026-07-07_oil-shock-null-result.md. Retest a
+driver here only after validating with entry_lag>=1.)
 
 Usage
 -----
@@ -54,9 +57,6 @@ DEFAULT_WEIGHTS = {
     "short_pressure": 1.0,
     "insider_flow":   1.0,
     "sentiment":      1.0,
-    # Lighter weight: validated on only ~44 independent oil-shock episodes
-    # (one driver, one short horizon) vs. years of daily data for the rest.
-    "oil_shock":      0.5,
 }
 
 _SIGNAL_COLS = list(DEFAULT_WEIGHTS)
@@ -66,10 +66,10 @@ def _zscore(s: pd.Series) -> pd.Series:
     """
     Cross-sectional z-score. Returns 0 where present values have no spread,
     but NaN stays NaN — a date where NO symbol has a value (e.g. a sparse,
-    event-triggered factor like oil_shock on a day with no event) must not
-    be silently promoted to "present, neutral", or every present-but-empty
-    factor gets counted in the composite's renormalization denominator on
-    every date, diluting the factors that actually have data that day.
+    event-triggered factor) must not be silently promoted to "present,
+    neutral", or every present-but-empty factor gets counted in the
+    composite's renormalization denominator on every date, diluting the
+    factors that actually have data that day.
     """
     if s.notna().sum() == 0:
         return pd.Series(np.nan, index=s.index)
@@ -139,21 +139,6 @@ def _raw_signals(fm: pd.DataFrame) -> pd.DataFrame:
     # sentiment — trailing mean news score, already on a [-1, +1] scale
     if "news_score_21d" in df:
         df["sentiment"] = df["news_score_21d"]
-
-    # oil_shock — sparse directional tilt merged in directly (not sourced
-    # from the feature matrix like the other factors); NaN except in the
-    # 1-3 trading days after a qualifying oil shock for the positively-
-    # exposed leg. See analytics/event_impact.oil_shock_signal().
-    try:
-        from analytics.event_impact import oil_shock_signal
-        shock = oil_shock_signal(symbols=df["symbol"].unique().tolist(),
-                                 start=df["date"].min(), end=df["date"].max())
-    except Exception:
-        shock = pd.DataFrame(columns=["symbol", "date", "oil_shock_raw"])
-    if not shock.empty:
-        df = df.merge(shock, on=["symbol", "date"], how="left")
-        df["oil_shock"] = df["oil_shock_raw"]
-        df = df.drop(columns=["oil_shock_raw"])
 
     return df
 
@@ -282,8 +267,3 @@ def insider_flow(symbols=None, start=None, end=None, fm=None):
 def sentiment(symbols=None, start=None, end=None, fm=None):
     """Cross-sectional news-sentiment z-scores."""
     return _single_factor("sentiment", symbols, start, end, fm)
-
-
-def oil_shock(symbols=None, start=None, end=None, fm=None):
-    """Sparse oil-shock-reaction z-scores (NaN outside a shock's reaction window)."""
-    return _single_factor("oil_shock", symbols, start, end, fm)
