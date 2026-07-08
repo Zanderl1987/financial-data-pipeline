@@ -329,6 +329,92 @@ def print_report(driver: str, pct: float, days: int, pos_res, neg_res, grouped: 
     print("This is a RESEARCH result only — not wired into signal_panel() yet.")
 
 
+def sensitivity_check(driver: str,
+                      pct: float,
+                      days: int = 10,
+                      window: "tuple[int, int]" = (-10, 40),
+                      benchmark: "str | None" = "SPY",
+                      universe=None,
+                      start: "str | None" = None,
+                      min_gap_days: int = 10,
+                      min_t_grid=(2.5, 3.0, 3.5),
+                      lookback_years_grid=(2, 3, 5),
+                      horizon: int = REACTION_DAYS) -> pd.DataFrame:
+    """
+    Reruns driver_event_study()'s POSITIVE-exposure leg across a grid of
+    (min_t, lookback_years) classification-threshold choices and reports
+    the date-level stat at `horizon` for each combination. An effect that
+    is only significant for one specific threshold choice was likely
+    tuned to this result by the choice of threshold, not validated by it
+    — the classification parameters should be picked before looking at
+    the outcome, and a robust effect should survive nearby choices too.
+
+    Returns tidy df: min_t, lookback_years, n_pos_symbols, n_dates,
+    mean_pct, t_stat, p_value, p_adj, sign_stable (True if this row's
+    mean CAR sign matches the majority sign across the whole grid — a
+    row can be individually "significant" and still flagged unstable if
+    it's the only one with that sign).
+    """
+    rows = []
+    for min_t in min_t_grid:
+        for lookback_years in lookback_years_grid:
+            try:
+                pos_res, _, grouped = driver_event_study(
+                    driver, pct=pct, days=days, window=window, min_t=min_t,
+                    benchmark=benchmark, universe=universe, start=start,
+                    min_gap_days=min_gap_days, lookback_years=lookback_years)
+            except RuntimeError:
+                continue
+            n_pos_sym = (grouped.loc[grouped["sign"] == 1, "symbol"].nunique()
+                        if not grouped.empty else 0)
+            row = {"min_t": min_t, "lookback_years": lookback_years,
+                  "n_pos_symbols": n_pos_sym, "n_dates": 0,
+                  "mean_pct": float("nan"), "t_stat": float("nan"),
+                  "p_value": float("nan"), "p_adj": float("nan")}
+            if pos_res is not None:
+                dl = _date_level_stats(pos_res)
+                if horizon in dl.index:
+                    r = dl.loc[horizon]
+                    row.update({"n_dates": int(r["n_dates"]), "mean_pct": r["mean_pct"],
+                               "t_stat": r["t_stat"], "p_value": r["p_value"],
+                               "p_adj": r["p_adj"]})
+            rows.append(row)
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    present = out["mean_pct"].dropna()
+    if present.empty:
+        out["sign_stable"] = False
+        return out
+    signed = present.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    majority_sign = signed.value_counts().idxmax()
+    out["sign_stable"] = out["mean_pct"].apply(
+        lambda x: not pd.isna(x) and (1 if x > 0 else (-1 if x < 0 else 0)) == majority_sign)
+    return out
+
+
+def print_sensitivity_report(driver: str, pct: float, horizon: int, df: pd.DataFrame):
+    direction = "surge" if pct > 0 else "drop"
+    print(f"\n=== SENSITIVITY: {driver} {direction} positive-exposure leg, "
+          f"h{horizon}, across {len(df)} (min_t, lookback_years) combinations ===")
+    if df.empty:
+        print("No combination produced a positive-exposure result.")
+        return
+    print("min_t  lookback  n_sym  n_dates   mean%     t     p_adj  sign_stable")
+    for _, r in df.iterrows():
+        print(f"{r['min_t']:>5}  {r['lookback_years']:>8}  {r['n_pos_symbols']:>5}  "
+              f"{r['n_dates']:>7}  {r['mean_pct']:>7}  {r['t_stat']:>5}  "
+              f"{r['p_adj']:>7.4f}  {str(bool(r['sign_stable'])):>5}")
+    n_stable = int(df["sign_stable"].sum())
+    n_sig = int((df["p_adj"] < 0.05).sum())
+    print(f"\n{n_stable}/{len(df)} combinations agree on the majority sign; "
+          f"{n_sig}/{len(df)} still clear p_adj < 0.05.")
+    print("A robust effect should show sign_stable across nearly all combinations —")
+    print("if significance only survives at one specific threshold choice, that")
+    print("choice was likely tuned to this result rather than validated by it.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Point-in-time event-conditional reaction of driver-exposed symbols")
@@ -341,6 +427,9 @@ def main():
     parser.add_argument("--benchmark", default="SPY")
     parser.add_argument("--start", default=None)
     parser.add_argument("--lookback-years", type=int, default=LOOKBACK_YEARS)
+    parser.add_argument("--sensitivity", action="store_true",
+                        help="Also rerun the positive-exposure leg across a "
+                             "(min_t, lookback_years) grid to check robustness")
     args = parser.parse_args()
 
     pos_res, neg_res, grouped = driver_event_study(
@@ -349,6 +438,12 @@ def main():
         benchmark=args.benchmark, start=args.start,
         lookback_years=args.lookback_years)
     print_report(args.driver, args.pct, args.days, pos_res, neg_res, grouped)
+
+    if args.sensitivity:
+        sens = sensitivity_check(args.driver, pct=args.pct, days=args.days,
+                                 window=tuple(args.window), benchmark=args.benchmark,
+                                 start=args.start)
+        print_sensitivity_report(args.driver, args.pct, REACTION_DAYS, sens)
 
 
 if __name__ == "__main__":

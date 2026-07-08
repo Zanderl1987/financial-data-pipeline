@@ -205,3 +205,63 @@ class TestOilShockSignal:
         assert big > small > 0
         assert big == pytest.approx(0.9)
         assert small == pytest.approx(0.3)
+
+
+class TestSensitivityCheck:
+    def _fake_driver_event_study(self, sign_by_lookback):
+        event_dates = pd.to_datetime(["2024-01-10", "2024-01-20", "2024-01-30"])
+        grouped = pd.DataFrame({
+            "date": event_dates, "symbol": ["SYM"] * 3, "sign": [1, 1, 1],
+            "beta_ex_mkt": [0.5] * 3, "t_ex_mkt": [4.0] * 3, "n": [500] * 3,
+        })
+        events = pd.DataFrame({"date": event_dates})
+        horizons = pd.DataFrame(index=[3])
+
+        def fake(driver, pct, days, window=None, min_t=3.0, benchmark=None,
+                universe=None, start=None, min_gap_days=10, lookback_years=3):
+            sign = sign_by_lookback(lookback_years)
+            car = pd.DataFrame({3: [sign * 0.02, sign * 0.03, sign * 0.01]})
+            res = _FakeEventStudyResult(car=car, events=events, horizons=horizons)
+            return res, None, grouped
+
+        return fake
+
+    def test_flags_sign_instability(self, monkeypatch):
+        # every (min_t, lookback_years) combo finds the same classified
+        # group, but lookback_years=2's measured CAR happens to be the
+        # opposite sign from the other two -- a reader must see that one
+        # flagged, not just an "all significant" summary.
+        combos_seen = []
+
+        def sign_by_lookback(lookback_years):
+            combos_seen.append(lookback_years)
+            return -1 if lookback_years == 2 else 1
+
+        monkeypatch.setattr(ei, "driver_event_study",
+                            self._fake_driver_event_study(sign_by_lookback))
+        out = ei.sensitivity_check("oil", pct=15, days=10,
+                                   min_t_grid=(3.0,), lookback_years_grid=(2, 3, 5),
+                                   horizon=3)
+        assert sorted(combos_seen) == [2, 3, 5]
+        assert len(out) == 3
+        stable = out.set_index("lookback_years")["sign_stable"]
+        assert not stable.loc[2]
+        assert stable.loc[3] and stable.loc[5]
+
+    def test_handles_no_positive_exposure_group(self, monkeypatch):
+        monkeypatch.setattr(ei, "driver_event_study",
+                            lambda *a, **kw: (None, None, pd.DataFrame()))
+        out = ei.sensitivity_check("oil", pct=15, min_t_grid=(3.0,),
+                                   lookback_years_grid=(2,), horizon=3)
+        assert len(out) == 1
+        assert out.iloc[0]["n_dates"] == 0
+        assert np.isnan(out.iloc[0]["mean_pct"])
+        assert out.iloc[0]["sign_stable"] == False
+
+    def test_all_combos_raise_returns_empty(self, monkeypatch):
+        def always_raises(*a, **kw):
+            raise RuntimeError("no events found")
+        monkeypatch.setattr(ei, "driver_event_study", always_raises)
+        out = ei.sensitivity_check("oil", pct=15, min_t_grid=(3.0,),
+                                   lookback_years_grid=(2,), horizon=3)
+        assert out.empty
