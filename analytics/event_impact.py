@@ -104,7 +104,8 @@ def driver_event_study(driver: str,
                        universe=None,
                        start: "str | None" = None,
                        min_gap_days: int = 10,
-                       lookback_years: int = LOOKBACK_YEARS):
+                       lookback_years: int = LOOKBACK_YEARS,
+                       entry_lag: int = 1):
     """
     Point-in-time event study of `driver`'s own X%-over-N-days shocks:
     for each shock episode, only symbols whose TRAILING `lookback_years`
@@ -112,6 +113,15 @@ def driver_event_study(driver: str,
     included, split into positive- and negative-exposure groups and run
     as separate event studies (pooling opposite-signed reactions would
     average away the effect being tested).
+
+    entry_lag defaults to 1 (trade at the NEXT close, not the event day's
+    own close) because price_move_events() defines the event date as the
+    day the trailing %-move reading itself CLOSES past the threshold —
+    you cannot know that day is the qualifying one until after its close,
+    so entry_lag=0 silently trades on same-day information (see
+    signal-eval skill: "same-day entry is the single most common
+    look-ahead bug"). Pass entry_lag=0 only to reproduce that biased
+    version for comparison.
 
     Returns (pos_result, neg_result, grouped) — grouped is the tidy
     per-event-date classification table from _rolling_grouping(); either
@@ -128,14 +138,16 @@ def driver_event_study(driver: str,
                                 min_t=min_t, lookback_years=lookback_years)
     if grouped.empty:
         res = event_study(events, symbols=[trigger_symbol], window=window,
-                          benchmark=benchmark, min_gap_days=0)
+                          benchmark=benchmark, entry_lag=entry_lag, min_gap_days=0)
         return res, None, grouped
 
     pos_events = grouped.loc[grouped["sign"] == 1, ["date", "symbol"]]
     neg_events = grouped.loc[grouped["sign"] == -1, ["date", "symbol"]]
-    pos_res = (event_study(pos_events, window=window, benchmark=benchmark, min_gap_days=0)
+    pos_res = (event_study(pos_events, window=window, benchmark=benchmark,
+                           entry_lag=entry_lag, min_gap_days=0)
                if not pos_events.empty else None)
-    neg_res = (event_study(neg_events, window=window, benchmark=benchmark, min_gap_days=0)
+    neg_res = (event_study(neg_events, window=window, benchmark=benchmark,
+                           entry_lag=entry_lag, min_gap_days=0)
                if not neg_events.empty else None)
     return pos_res, neg_res, grouped
 
@@ -160,6 +172,10 @@ def oil_shock_signal(symbols=None,
     value, which cross-sectional z-scoring treats as a zero-spread (fully
     degenerate) group and reduces to 0 for everyone — present in the
     panel but contributing nothing to the ranking.
+
+    Scoring already starts at the event day's own close + 1 trading day
+    (loc + 1 below), i.e. entry_lag=1 in driver_event_study() terms — this
+    factor was never same-day-biased, even before that default was fixed.
 
     Scoped deliberately narrow: only the positive-exposure leg's short
     (1-3 day) co-movement held up under a point-in-time, date-clustering-
@@ -291,10 +307,14 @@ def _print_horizons(label: str, res):
                     for h, r in dl.iterrows()))
 
 
-def print_report(driver: str, pct: float, days: int, pos_res, neg_res, grouped: pd.DataFrame):
+def print_report(driver: str, pct: float, days: int, pos_res, neg_res, grouped: pd.DataFrame,
+                 entry_lag: int = 1):
     direction = "surge" if pct > 0 else "drop"
+    lag_note = ("next-close entry, point-in-time honest" if entry_lag >= 1
+               else "SAME-DAY entry — look-ahead-biased, see driver_event_study() docstring")
     print(f"\n=== EVENT IMPACT: {driver} {direction} ({pct}% over {days}d, "
-          f"point-in-time exposure, {LOOKBACK_YEARS}y trailing window) ===")
+          f"point-in-time exposure, {LOOKBACK_YEARS}y trailing window, "
+          f"entry_lag={entry_lag} [{lag_note}]) ===")
 
     if grouped.empty:
         print(f"\nNo (date, symbol) pair ever cleared |t_ex_mkt| > {T_SIGNIFICANT} "
@@ -339,7 +359,8 @@ def sensitivity_check(driver: str,
                       min_gap_days: int = 10,
                       min_t_grid=(2.5, 3.0, 3.5),
                       lookback_years_grid=(2, 3, 5),
-                      horizon: int = REACTION_DAYS) -> pd.DataFrame:
+                      horizon: int = REACTION_DAYS,
+                      entry_lag: int = 1) -> pd.DataFrame:
     """
     Reruns driver_event_study()'s POSITIVE-exposure leg across a grid of
     (min_t, lookback_years) classification-threshold choices and reports
@@ -348,6 +369,9 @@ def sensitivity_check(driver: str,
     tuned to this result by the choice of threshold, not validated by it
     — the classification parameters should be picked before looking at
     the outcome, and a robust effect should survive nearby choices too.
+
+    entry_lag is forwarded to driver_event_study() (default 1 — see its
+    docstring for why same-day entry is look-ahead-biased here).
 
     Returns tidy df: min_t, lookback_years, n_pos_symbols, n_dates,
     mean_pct, t_stat, p_value, p_adj, sign_stable (True if this row's
@@ -362,7 +386,8 @@ def sensitivity_check(driver: str,
                 pos_res, _, grouped = driver_event_study(
                     driver, pct=pct, days=days, window=window, min_t=min_t,
                     benchmark=benchmark, universe=universe, start=start,
-                    min_gap_days=min_gap_days, lookback_years=lookback_years)
+                    min_gap_days=min_gap_days, lookback_years=lookback_years,
+                    entry_lag=entry_lag)
             except RuntimeError:
                 continue
             n_pos_sym = (grouped.loc[grouped["sign"] == 1, "symbol"].nunique()
@@ -427,6 +452,10 @@ def main():
     parser.add_argument("--benchmark", default="SPY")
     parser.add_argument("--start", default=None)
     parser.add_argument("--lookback-years", type=int, default=LOOKBACK_YEARS)
+    parser.add_argument("--entry-lag", type=int, default=1,
+                        help="Trading days after the event date to enter (default 1 = "
+                             "next close, point-in-time honest; 0 = same-day, "
+                             "look-ahead-biased, for comparison only)")
     parser.add_argument("--sensitivity", action="store_true",
                         help="Also rerun the positive-exposure leg across a "
                              "(min_t, lookback_years) grid to check robustness")
@@ -436,13 +465,14 @@ def main():
         args.driver, pct=args.pct, days=args.days,
         window=tuple(args.window), min_t=args.min_t,
         benchmark=args.benchmark, start=args.start,
-        lookback_years=args.lookback_years)
-    print_report(args.driver, args.pct, args.days, pos_res, neg_res, grouped)
+        lookback_years=args.lookback_years, entry_lag=args.entry_lag)
+    print_report(args.driver, args.pct, args.days, pos_res, neg_res, grouped,
+                entry_lag=args.entry_lag)
 
     if args.sensitivity:
         sens = sensitivity_check(args.driver, pct=args.pct, days=args.days,
                                  window=tuple(args.window), benchmark=args.benchmark,
-                                 start=args.start)
+                                 start=args.start, entry_lag=args.entry_lag)
         print_sensitivity_report(args.driver, args.pct, REACTION_DAYS, sens)
 
 

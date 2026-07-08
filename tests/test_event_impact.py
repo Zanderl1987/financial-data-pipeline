@@ -94,6 +94,49 @@ class _FakeEventStudyResult:
     params: dict = field(default_factory=dict)
 
 
+class TestDriverEventStudyEntryLag:
+    # price_move_events() marks the event date using that same day's own
+    # closing price (the day the trailing move CLOSES past the threshold),
+    # so entry_lag=0 would trade on information not knowable until after
+    # that close. driver_event_study() must default to entry_lag=1 and
+    # forward whatever the caller passes through to event_study().
+
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        event_date = pd.Timestamp("2024-06-03")
+        events = pd.DataFrame({"date": [event_date], "trigger_symbol": ["USO"],
+                               "move_pct": [15.0]})
+        grouped = pd.DataFrame({
+            "date": [event_date], "symbol": ["SYM"], "sign": [1],
+            "beta_ex_mkt": [0.5], "t_ex_mkt": [4.0], "n": [500],
+        })
+        calls = []
+
+        def fake_event_study(events, window=None, benchmark=None, entry_lag=0,
+                             min_gap_days=0, symbols=None):
+            calls.append(entry_lag)
+            return _FakeEventStudyResult(car=pd.DataFrame({1: [0.01]}),
+                                         events=events, horizons=pd.DataFrame(index=[1]))
+
+        monkeypatch.setattr(ei, "price_move_events",
+                            lambda symbol, pct, days, start=None, min_gap_days=10: events)
+        monkeypatch.setattr(ei, "_rolling_grouping",
+                            lambda driver, event_dates, universe=None, min_t=3.0,
+                                   lookback_years=3: grouped)
+        monkeypatch.setattr(ei, "event_study", fake_event_study)
+        return calls
+
+    def test_defaults_to_entry_lag_1(self, patched):
+        calls = patched
+        ei.driver_event_study("oil", pct=15, days=10)
+        assert calls == [1]   # only the positive-exposure leg fires (no neg rows)
+
+    def test_forwards_explicit_entry_lag(self, patched):
+        calls = patched
+        ei.driver_event_study("oil", pct=15, days=10, entry_lag=0)
+        assert calls == [0]
+
+
 class TestDateLevelStats:
     def test_matches_manual_across_dates_not_rows(self):
         # 2 dates x 2 symbols each = 4 rows, but only 2 INDEPENDENT dates.
@@ -218,7 +261,8 @@ class TestSensitivityCheck:
         horizons = pd.DataFrame(index=[3])
 
         def fake(driver, pct, days, window=None, min_t=3.0, benchmark=None,
-                universe=None, start=None, min_gap_days=10, lookback_years=3):
+                universe=None, start=None, min_gap_days=10, lookback_years=3,
+                entry_lag=1):
             sign = sign_by_lookback(lookback_years)
             car = pd.DataFrame({3: [sign * 0.02, sign * 0.03, sign * 0.01]})
             res = _FakeEventStudyResult(car=car, events=events, horizons=horizons)
