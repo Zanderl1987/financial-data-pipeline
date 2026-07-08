@@ -228,4 +228,27 @@ sparsity/narrow universe made them visible — every other factor was quietly af
 - `tests/test_signals.py` — 2 new `TestZScore` cases (all-NaN stays NaN; degenerate-but-
   present preserves missing entries).
 - `tests/test_event_impact.py` — new `TestOilShockSignal` case.
+
+### Robustness follow-up (same session): p-values, multiple-comparisons, sensitivity grid
+Zander asked what would make `event_impact.py` more robust and specifically requested a
+p-value metric. Two additions, both requested and confirmed live before committing:
+
+1. **p-value + Benjamini-Hochberg correction** (`_date_level_stats()`, `analytics/event_impact.py`).
+   The date-level t-stat had no accompanying p-value, and the module scans ~5 horizons x 2
+   exposure groups x (surge, drop) per run without correcting for it — a raw p<0.05 among
+   ~20 looks is expected by chance alone. Added a two-tailed p-value (t-distribution,
+   df = n_dates-1) plus a new `_bh_adjust()` helper (standard BH step-up) applied across the
+   horizons tested in each `_date_level_stats()` call. CLI report now prints both and tells
+   the reader to trust `p_adj`. Commit `5d2d43b`.
+2. **Sensitivity grid across classification thresholds** (`sensitivity_check()`, same file).
+   A single `(min_t, lookback_years)` choice can look significant purely because it was
+   picked after seeing the result. `sensitivity_check()` reruns the positive-exposure leg
+   across a grid of threshold choices and flags whether the CAR sign and `p_adj` actually
+   hold up nearby, not just at the one threshold used in the headline run. Wired into the
+   CLI as `--sensitivity`. Live check on `--driver oil --pct 15 --days 10`: **9/9**
+   `(min_t, lookback_years)` combinations agree on sign and clear `p_adj < 0.05` — the
+   oil_shock positive-exposure effect is robust to this threshold, not an artifact of one
+   specific choice. Commit `5cf08dd`.
+
+Full suite: 271 passed (was 264 after the fixes above).
 - Full suite: 264 passed (was 261).
