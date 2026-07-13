@@ -45,7 +45,34 @@ FAILs: `options_history`, `synthetic_options`). All four steps done and verified
 
 ## State
 
-Uncommitted (also includes pre-session modifications to CLAUDE.md and
-SESSION_NOTES_2026-07-07.md from an earlier session): `curated.py`, `validate.py`,
-`query.py`, `yahoo_options_pipeline.py`, `tests/test_catalog.py`, this file.
-The raw-file backups can be deleted once a couple of clean weekly checks pass.
+All of the above committed as `8e1d461` (also picked up pre-session modifications to
+CLAUDE.md and SESSION_NOTES_2026-07-07.md from an earlier session): `curated.py`,
+`validate.py`, `query.py`, `yahoo_options_pipeline.py`, `tests/test_catalog.py`.
+The raw-file backups (`storage/backup/options_history_pre_symbol_rename/`) can be
+deleted once a couple of clean weekly checks pass. Branch is ~12 commits ahead of
+origin — push is Zander's call.
+
+## Session 2 — analytics/options.py repair design (same day)
+
+Brainstormed the repair via superpowers:brainstorming. Zander's scope choice:
+**"Make it honest + working"** — repair both functions against data that exists,
+no new pipelines (explicitly rejected promoting the `storage/tmp` contract CSVs to
+a table).
+
+Approved design (spec committed as `9c743c0` at
+`docs/superpowers/specs/2026-07-12-analytics-options-repair-design.md`):
+
+- `put_call_ratio` → **volume**-based from `options_history` (the only options table
+  with data; no OI exists there). Output: `symbol | date | call_volume | put_volume |
+  put_call_ratio`, NaN on zero call volume. Docstring states the OI→volume semantics
+  change and points at `options_metrics.put_call_ratio_oi` for the OI version
+  post-OAuth.
+- `iv_summary` → source preference `schwab_options` (implied_volatility) then
+  `options_chain` (volatility), internal column normalizer (`put_call`↔`contract_type`,
+  `strike`↔`strike_price`); `schwab_options` has **no `date` column** — derive from
+  `fetched_at[:10]`, filter date in pandas. Returns empty until Schwab OAuth lands
+  chain data.
+- Signatures/exports unchanged (pinned by tests); behavior tests with monkeypatched
+  `q.load` synthetic frames replace signature-only coverage.
+
+**Next step:** Zander reviews the spec → then superpowers:writing-plans → implement.
