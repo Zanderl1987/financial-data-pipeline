@@ -4,7 +4,7 @@ Free/public-source financial data pipelines → partitioned Parquet → DuckDB q
 analytics/factor signals → event backtesting. Owner: Zander (GitHub `Zanderl1987`, private,
 default branch `master`).
 
-**133 CATALOG tables, 234 tests passing (5 skipped)** as of 2026-07-06. Verify with the
+**133 CATALOG tables, 273 tests passing** as of 2026-07-07. Verify with the
 commands below rather than trusting this line if it looks stale.
 
 ## Environment
@@ -15,7 +15,8 @@ commands below rather than trusting this line if it looks stale.
 - Secrets in `.env` at repo root (gitignored). Never commit it, never print key values.
   `anthropic` installed (user site) 2026-07-06 — only `fed_sentiment_pipeline.py` still
   needs ANTHROPIC_API_KEY (news sentiment is local VADER, no key).
-- ⚠️ `C:\Users\zande` (home dir) is itself an accidental git repo — never commit there.
+- (The old warning about `C:\Users\zande` being an accidental git repo is resolved —
+  the vestigial empty `.git` was removed 2026-07-11.)
 
 ## Commands
 
@@ -113,3 +114,11 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
   sources — history only exists if run daily; both in run_all.py).
 - Earnings event studies blocked: `earnings_calendar` holds ±6 weeks only; needs historical
   earnings + matching price backfills.
+- `analytics/options.py` UNUSABLE (found 2026-07-12): written against camelCase yfinance
+  columns (`expirationDate`/`optionType`/`impliedVolatility`/`openInterest`) that
+  `options_history` never had — and the table has no IV/OI columns at all. Repair needs
+  design calls: put_call_ratio on volume (semantics change), iv_summary needs a source
+  with IV (`options_chain`/`schwab_options`, both currently NO DATA). See
+  SESSION_NOTES_2026-07-12.md. (The 2026-07-06 weekly-check FAILs themselves are FIXED:
+  `underlying`→`symbol` rename + raw migration w/ backup, synthetic_options curated key
+  now includes `model`, validator schema `bsm_price`→`theo_price`.)

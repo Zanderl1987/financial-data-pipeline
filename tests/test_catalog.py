@@ -169,6 +169,52 @@ EXPECTED_TABLES = [
     "shipping_freight_ppi",
     # Signal health monitor (maintained backtest performance tracking)
     "signal_health",
+    # EIA refinery + crude trade (oil/transportation depth batch)
+    "eia_refinery_activity",
+    "eia_crude_trade",
+    # TSA checkpoint travel volumes
+    "tsa_checkpoint",
+    # Open-Meteo weather
+    "open_meteo_weather",
+    # Wikipedia pageviews
+    "wikipedia_pageviews",
+    # openFDA drug approvals + recalls
+    "openfda_approvals",
+    "openfda_recalls",
+    # Treasury TIC foreign holdings
+    "treasury_tic_holders",
+    "treasury_tic_slt",
+    # Google Trends
+    "google_trends_economic",
+    "google_trends_market",
+    "google_trends_sector",
+    # Reddit finance posts + ticker mentions
+    "reddit_posts",
+    "reddit_mentions",
+    # AIS vessel positions
+    "ais_positions",
+    "ais_zone_summary",
+    # StockAnalysis.com scrapes
+    "sa_movers",
+    "sa_ipos",
+    "sa_ipo_calendar",
+    "sa_ipo_stats",
+    "sa_corporate_actions",
+    "sa_stock_list",
+    "sa_etf_list",
+    "sa_income",
+    "sa_balance",
+    "sa_cashflow",
+    "sa_ratios",
+    # Finviz scrapes
+    "finviz_movers",
+    "finviz_screener",
+    "finviz_financials",
+    "finviz_insider",
+    "finviz_sector_perf",
+    "finviz_industry_perf",
+    "finviz_country_perf",
+    "finviz_group_valuation",
 ]
 
 
@@ -178,10 +224,15 @@ class TestCatalogCompleteness:
         assert not missing, f"Missing from CATALOG: {missing}"
 
     def test_no_extra_surprise_tables(self):
-        """Warn (not fail) if new tables appear that aren't in our expected list."""
+        """Fail if new tables appear that aren't in our expected list.
+
+        Keeping EXPECTED_TABLES current is part of the new-pipeline wiring
+        checklist (CLAUDE.md); this guard is what catches a skipped step.
+        (The old ``pytest.warns(None)`` no-op became a TypeError on pytest 8,
+        which is how 35 unlisted tables went unnoticed until 2026-07-12.)
+        """
         extra = [t for t in q.CATALOG if t not in EXPECTED_TABLES]
-        if extra:
-            pytest.warns(None)  # non-fatal; just surfaces unexpected additions
+        assert not extra, f"CATALOG tables missing from EXPECTED_TABLES: {extra}"
 
     def test_catalog_count(self):
         assert len(q.CATALOG) >= len(EXPECTED_TABLES), (

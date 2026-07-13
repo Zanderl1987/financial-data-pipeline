@@ -122,8 +122,8 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "synthetic_options": {
-        "required":    ["symbol", "date", "strike_price", "expiration_date", "bsm_price"],
-        "critical_nn": ["symbol", "date", "bsm_price"],
+        "required":    ["symbol", "date", "strike_price", "expiration_date", "theo_price"],
+        "critical_nn": ["symbol", "date", "theo_price"],
         "date_col":    "date",
     },
     "fundamentals_annual": {

@@ -83,7 +83,7 @@ KEYS: dict[str, list[str]] = {
     "cot":                    ["market", "date"],
     # Options — one contract quote per symbol/expiry/strike/type/date
     "options_history":        ["symbol", "expiration_date", "strike_price", "contract_type", "date"],
-    "synthetic_options":      ["symbol", "expiration_date", "strike_price", "contract_type", "vol_method", "date"],
+    "synthetic_options":      ["symbol", "expiration_date", "strike_price", "contract_type", "vol_method", "model", "date"],
     # Dividends
     "dividends":              ["symbol", "ex_date"],
     # Fed sentiment — one doc per RSS link

@@ -288,3 +288,28 @@ framework), interactive visualizations (no plotting library currently
 installed — likely plotly, self-contained HTML), and scoping a trading-
 execution layer (nothing in the repo places orders yet; Schwab Trader API is
 registered but not enabled).
+
+## Next tasks (queued, not yet started, as of end of 2026-07-07)
+
+Pick up one at a time; each needs `entry_lag>=1` validation (see
+`experiments/2026-07-07_oil-shock-null-result.md`) before anything gets wired
+into `signal_panel()`.
+
+1. **Expand driver coverage.** `analytics/exposure.py`'s `DRIVERS` dict already
+   supports gold, natgas, copper, t10y, eur, vix — only oil has been event-
+   tested so far (and reversed to null). Run
+   `python -m analytics.event_impact --driver <name> --pct <X> --days <N>`
+   for each candidate driver, both shock directions, with the corrected
+   `entry_lag=1` default from the start (no need to re-discover the bug).
+   Only wire a factor into `signals.py` if it survives p_adj + sensitivity grid.
+2. **Interactive visualizations.** No plotting library installed anywhere in
+   the repo yet. Plan: add `plotly` (self-contained HTML output, no server
+   needed) and build charts for event-study CARs, signal_panel factor
+   distributions, and backtest quantile-portfolio equity curves. Needs its own
+   scoping pass (which views first, where output files live).
+3. **Trading-execution layer scoping.** Nothing in the repo currently places
+   orders. Schwab Trader API (positions/transactions/orders) is registered but
+   still 401s — needs enabling at developer.schwab.com (interactive step,
+   Zander must do this). This is a distinct, higher-stakes scope decision
+   (real money risk) — needs an explicit design conversation before any code,
+   not just a "next feature" pickup.

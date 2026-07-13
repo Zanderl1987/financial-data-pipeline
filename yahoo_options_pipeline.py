@@ -18,7 +18,7 @@ Outputs
 
   storage/raw/options_history/options_history_{SYMBOL}_{YYYYMMDD}.parquet
       Daily OHLCV bars for every contract that had any trade history.
-      Schema: contract_symbol, underlying, contract_type, strike_price, expiration_date,
+      Schema: contract_symbol, symbol, contract_type, strike_price, expiration_date,
               date, open, high, low, close, volume, fetched_at
 
 Usage
@@ -66,7 +66,7 @@ MAX_RETRIES      = 3
 BACKOFF_SECONDS  = 30
 
 HISTORY_COLS = [
-    "contract_symbol", "underlying", "contract_type", "strike_price",
+    "contract_symbol", "symbol", "contract_type", "strike_price",
     "expiration_date", "date", "open", "high", "low", "close", "volume", "fetched_at",
 ]
 
@@ -160,7 +160,7 @@ def _parse_option_block(block: dict, underlying: str, fetched_at: str) -> list[d
         for c in block.get(side, []):
             rows.append({
                 "contract_symbol":    c.get("contractSymbol"),
-                "underlying":         underlying,
+                "symbol":             underlying,
                 "contract_type":      ctype,
                 "strike_price":       c.get("strike"),
                 "expiration_date":    exp_date,
@@ -300,7 +300,7 @@ def fetch_all_histories(contracts: list[dict], symbol: str, range_str: str, toda
         df = fetch_contract_history(csym, range_str)
         if not df.empty:
             df["contract_symbol"] = csym
-            df["underlying"]      = c["underlying"]
+            df["symbol"]          = c["symbol"]
             df["contract_type"]   = c["contract_type"]
             df["strike_price"]    = c["strike_price"]
             df["expiration_date"] = c["expiration_date"]
@@ -362,7 +362,9 @@ def main():
     if args.resume:
         print(f"Resuming from: {args.resume}")
         df = pd.read_csv(args.resume)
-        for symbol, grp in df.groupby("underlying"):
+        # Contract CSVs written before 2026-07 used "underlying" for the ticker column
+        df = df.rename(columns={"underlying": "symbol"})
+        for symbol, grp in df.groupby("symbol"):
             print(f"\n{'='*60}\n[{symbol}] {len(grp):,} contracts")
             fetch_all_histories(grp.to_dict("records"), symbol, args.range_str, today,
                                 min_oi=args.min_oi)

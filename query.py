@@ -14,11 +14,11 @@ Usage
 
     # Raw SQL — table names match the keys in CATALOG
     df = q.sql(\"\"\"
-        SELECT s.symbol, s.date, s.strike_price, s.bsm_price, f.value AS revenue
+        SELECT s.symbol, s.date, s.strike_price, s.theo_price, f.value AS revenue
         FROM synthetic_options s
         JOIN fundamentals_annual f
           ON s.symbol = f.symbol AND f.metric = 'revenue'
-        WHERE s.vol_method = 'cc' AND s.symbol = 'NVDA'
+        WHERE s.vol_method = 'cc' AND s.model = 'bsm' AND s.symbol = 'NVDA'
     \"\"\")
 
     # Discovery
