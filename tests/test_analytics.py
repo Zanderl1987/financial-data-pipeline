@@ -190,3 +190,151 @@ class TestEmptyDataBehavior:
         from analytics import sector_performance
         result = sector_performance()
         assert isinstance(result, pd.DataFrame)
+
+    def test_put_call_ratio_empty_returns_df(self):
+        from analytics import put_call_ratio
+        result = put_call_ratio()
+        assert isinstance(result, pd.DataFrame)
+
+    def test_iv_summary_empty_returns_df(self):
+        from analytics import iv_summary
+        result = iv_summary("AAPL")
+        assert isinstance(result, pd.DataFrame)
+
+
+# ── Options behaviour tests (monkeypatched q.load) ────────────────────────────
+
+class TestPutCallRatioBehaviour:
+    """put_call_ratio: volume-based PCR from options_history."""
+
+    def _make_df(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_basic_volume_ratio(self, monkeypatch):
+        import analytics.options as mod
+
+        df = self._make_df([
+            {"symbol": "X", "date": "2026-01-01", "contract_type": "CALL", "volume": 100},
+            {"symbol": "X", "date": "2026-01-01", "contract_type": "PUT",  "volume": 50},
+            {"symbol": "X", "date": "2026-01-02", "contract_type": "CALL", "volume": 80},
+            {"symbol": "X", "date": "2026-01-02", "contract_type": "PUT",  "volume": 120},
+        ])
+        monkeypatch.setattr(mod.q, "load", lambda *a, **kw: df)
+
+        result = mod.put_call_ratio("X")
+        assert list(result.columns) == ["symbol", "date", "call_volume", "put_volume", "put_call_ratio"]
+        assert len(result) == 2
+        row1 = result[result["date"] == "2026-01-01"].iloc[0]
+        assert row1["call_volume"] == 100
+        assert row1["put_volume"] == 50
+        assert row1["put_call_ratio"] == 0.5
+        row2 = result[result["date"] == "2026-01-02"].iloc[0]
+        assert row2["put_call_ratio"] == 1.5
+
+    def test_zero_call_volume_nan(self, monkeypatch):
+        import analytics.options as mod
+
+        df = self._make_df([
+            {"symbol": "X", "date": "2026-01-01", "contract_type": "CALL", "volume": 0},
+            {"symbol": "X", "date": "2026-01-01", "contract_type": "PUT",  "volume": 50},
+        ])
+        monkeypatch.setattr(mod.q, "load", lambda *a, **kw: df)
+
+        result = mod.put_call_ratio("X")
+        assert pd.isna(result.iloc[0]["put_call_ratio"])
+
+    def test_only_calls_no_puts(self, monkeypatch):
+        import analytics.options as mod
+
+        df = self._make_df([
+            {"symbol": "X", "date": "2026-01-01", "contract_type": "CALL", "volume": 100},
+        ])
+        monkeypatch.setattr(mod.q, "load", lambda *a, **kw: df)
+
+        result = mod.put_call_ratio("X")
+        assert result.iloc[0]["put_volume"] == 0
+        assert result.iloc[0]["call_volume"] == 100
+        assert result.iloc[0]["put_call_ratio"] == 0.0
+
+
+class TestIvSummaryBehaviour:
+    """iv_summary: schwab_options preferred, options_chain fallback, normaliser tested."""
+
+    def _make_df(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_schwab_options_source(self, monkeypatch):
+        import analytics.options as mod
+
+        schwab = self._make_df([
+            {"symbol": "Y", "put_call": "call", "expiration_date": "2026-06-20",
+             "strike": 150, "implied_volatility": 0.30, "fetched_at": "2026-06-18T10:00:00"},
+            {"symbol": "Y", "put_call": "call", "expiration_date": "2026-06-20",
+             "strike": 155, "implied_volatility": 0.35, "fetched_at": "2026-06-18T10:00:00"},
+            {"symbol": "Y", "put_call": "put", "expiration_date": "2026-06-20",
+             "strike": 150, "implied_volatility": 0.32, "fetched_at": "2026-06-18T10:00:00"},
+        ])
+
+        def fake_load(table, symbol=None, **kw):
+            if table == "schwab_options":
+                return schwab
+            return pd.DataFrame()
+
+        monkeypatch.setattr(mod.q, "load", fake_load)
+
+        result = mod.iv_summary("Y")
+        assert len(result) == 2
+        assert list(result.columns) == ["expiration_date", "contract_type", "avg_iv", "min_iv", "max_iv", "n_contracts"]
+        call_row = result[result["contract_type"] == "CALL"].iloc[0]
+        assert call_row["avg_iv"] == 0.325
+        assert call_row["n_contracts"] == 2
+
+    def test_options_chain_fallback(self, monkeypatch):
+        import analytics.options as mod
+
+        chain = self._make_df([
+            {"symbol": "Y", "contract_type": "call", "strike_price": 150,
+             "expiration_date": "2026-06-20", "volatility": 0.28, "date": "2026-06-18"},
+            {"symbol": "Y", "contract_type": "put", "strike_price": 150,
+             "expiration_date": "2026-06-20", "volatility": 0.31, "date": "2026-06-18"},
+        ])
+
+        def fake_load(table, symbol=None, **kw):
+            if table == "schwab_options":
+                return pd.DataFrame()
+            if table == "options_chain":
+                return chain
+            return pd.DataFrame()
+
+        monkeypatch.setattr(mod.q, "load", fake_load)
+
+        result = mod.iv_summary("Y")
+        assert len(result) == 2
+        assert result.iloc[0]["avg_iv"] > 0
+
+    def test_fallback_order_schwab_first(self, monkeypatch):
+        import analytics.options as mod
+
+        schwab = self._make_df([
+            {"symbol": "Y", "put_call": "call", "expiration_date": "2026-06-20",
+             "strike": 150, "implied_volatility": 0.40, "fetched_at": "2026-06-18T10:00:00"},
+        ])
+
+        def fake_load(table, symbol=None, **kw):
+            if table == "schwab_options":
+                return schwab
+            return pd.DataFrame()
+
+        monkeypatch.setattr(mod.q, "load", fake_load)
+
+        result = mod.iv_summary("Y")
+        assert result.iloc[0]["avg_iv"] == 0.40
+
+    def test_all_sources_empty(self, monkeypatch):
+        import analytics.options as mod
+
+        monkeypatch.setattr(mod.q, "load", lambda *a, **kw: pd.DataFrame())
+
+        result = mod.iv_summary("Y")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty

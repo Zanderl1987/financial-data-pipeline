@@ -114,11 +114,8 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
   sources — history only exists if run daily; both in run_all.py).
 - Earnings event studies blocked: `earnings_calendar` holds ±6 weeks only; needs historical
   earnings + matching price backfills.
-- `analytics/options.py` UNUSABLE (found 2026-07-12): written against camelCase yfinance
-  columns (`expirationDate`/`optionType`/`impliedVolatility`/`openInterest`) that
-  `options_history` never had — and the table has no IV/OI columns at all. Repair needs
-  design calls: put_call_ratio on volume (semantics change), iv_summary needs a source
-  with IV (`options_chain`/`schwab_options`, both currently NO DATA). See
-  SESSION_NOTES_2026-07-12.md. (The 2026-07-06 weekly-check FAILs themselves are FIXED:
-  `underlying`→`symbol` rename + raw migration w/ backup, synthetic_options curated key
-  now includes `model`, validator schema `bsm_price`→`theo_price`.)
+- `analytics/options.py` REPAIRED (2026-07-16): `put_call_ratio` now volume-based from
+  `options_history`; `iv_summary` sources `schwab_options` → `options_chain` with column
+  normalizer. Both return empty gracefully when no data. `iv_summary` will return results
+  once Schwab OAuth lands chain data with `implied_volatility`. See
+  SESSION_NOTES_2026-07-12.md (design) and SESSION_NOTES_2026-07-16.md (implementation).
