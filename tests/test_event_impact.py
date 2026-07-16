@@ -304,8 +304,18 @@ class TestSensitivityCheck:
 
     def test_all_combos_raise_returns_empty(self, monkeypatch):
         def always_raises(*a, **kw):
-            raise RuntimeError("no events found")
+            raise ei.NoQualifyingEventsError("no events found")
         monkeypatch.setattr(ei, "driver_event_study", always_raises)
         out = ei.sensitivity_check("oil", pct=15, min_t_grid=(3.0,),
                                    lookback_years_grid=(2,), horizon=3)
         assert out.empty
+
+    def test_other_runtime_errors_propagate(self, monkeypatch):
+        """A genuine failure (e.g. missing price data) must not be masked as
+        a benign 'no events' grid cell."""
+        def always_raises(*a, **kw):
+            raise RuntimeError("No price data found for any event symbol.")
+        monkeypatch.setattr(ei, "driver_event_study", always_raises)
+        with pytest.raises(RuntimeError):
+            ei.sensitivity_check("oil", pct=15, min_t_grid=(3.0,),
+                                 lookback_years_grid=(2,), horizon=3)

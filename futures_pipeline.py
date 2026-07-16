@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Futures pipeline:
-  - Continuous front-month OHLCV for 28 contracts via yfinance (free, no key required)
+  - Continuous front-month OHLCV for 30 contracts via yfinance (free, no key required)
   - CFTC Commitments of Traders weekly positioning data (free, no key required)
 
 Outputs:
@@ -51,6 +51,9 @@ FUTURES = {
     "KC=F":  ("Coffee",                 "agriculture"),
     "SB=F":  ("Sugar",                  "agriculture"),
     "CT=F":  ("Cotton",                 "agriculture"),
+    # Industrial materials
+    "LBR=F":  ("Random Length Lumber",   "industrial"),
+    "HRC=F":  ("HRC Steel",             "industrial"),
     # Equity index futures
     "ES=F":  ("S&P 500 E-mini",         "equity_index"),
     "NQ=F":  ("NASDAQ 100 E-mini",      "equity_index"),

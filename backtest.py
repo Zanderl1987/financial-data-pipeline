@@ -163,7 +163,7 @@ def backtest(
         sig = sig[sig["date"] <= pd.Timestamp(end)]
     symbols = sig["symbol"].unique()
 
-    pt = price_table or _pick_price_table(None)
+    pt = price_table or _pick_price_table(None, symbols=symbols)
     if pt is None:
         raise RuntimeError("No price table with data available for backtesting.")
 

@@ -47,7 +47,7 @@ class TestPureHelpers:
 
 def _price_backed_signal(monkeypatch, returns: pd.DataFrame, signal_long: pd.DataFrame):
     """Patch the price-return matrix so backtest() runs on synthetic prices."""
-    monkeypatch.setattr(bt, "_pick_price_table", lambda _: "synthetic")
+    monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
     monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: returns)
     return signal_long
 
@@ -69,7 +69,7 @@ class TestLookAheadSafety:
         oracle = self._to_long(self.R.shift(-1))   # tomorrow's return, known today
         anti = oracle.copy(); anti["composite"] *= -1
 
-        monkeypatch.setattr(bt, "_pick_price_table", lambda _: "synthetic")
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
         monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: self.R)
         r_pos = bt.backtest(oracle, rebalance="D", quantiles=3, long_short=True)
 
@@ -82,7 +82,7 @@ class TestLookAheadSafety:
 
     def test_metrics_keys_present(self, monkeypatch):
         sig = self._to_long(self.R.shift(-1))
-        monkeypatch.setattr(bt, "_pick_price_table", lambda _: "synthetic")
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
         monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: self.R)
         res = bt.backtest(sig, rebalance="W")
         for key in ("cagr_pct", "sharpe", "max_drawdown_pct", "hit_rate_pct",

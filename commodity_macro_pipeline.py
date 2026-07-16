@@ -48,6 +48,34 @@ SERIES = {
     "PPALAUSDM":      ("Palladium",                    "monthly",  "USD/troy oz",  "metals"),
     "PPLATINUMUSDM":  ("Platinum",                     "monthly",  "USD/troy oz",  "metals"),
 
+    # --- Lumber (PPI) ---
+    "WPU081":         ("Lumber PPI",                   "monthly",  "Index 1982=100", "lumber"),
+    "WPU0811":        ("Softwood Lumber PPI",          "monthly",  "Index 1982=100", "lumber"),
+    "WPU0812":        ("Hardwood Lumber PPI",          "monthly",  "Index 1982=100", "lumber"),
+    "WPUSI012011":    ("Construction Materials Index",  "monthly",  "Index",          "lumber"),
+
+    # --- Steel (PPI) ---
+    "WPU101":         ("Iron & Steel PPI",             "monthly",  "Index 1982=100", "steel"),
+    "WPU1017":        ("Steel Mill Products PPI",      "monthly",  "Index 1982=100", "steel"),
+    "WPU1019A2S":     ("Carbon Steel Scrap PPI",       "monthly",  "Index 1982=100", "steel"),
+    "PCU3259103259101": ("Iron/Steel Scrap Mfg (NAICS 325910)", "monthly", "Index Dec1980=100", "steel"),
+    "PCU3311103311101": ("Iron/Steel Mills (NAICS 331110)",     "monthly", "Index Dec1980=100", "steel"),
+    "PCU3312223312221": ("Steel Product Mfg (NAICS 331222)",     "monthly", "Index Dec1980=100", "steel"),
+
+    # --- Plastics / Resin (PPI) ---
+    "WPU066":         ("Plastic Resins & Materials PPI","monthly",  "Index 1982=100", "plastics"),
+    "WPU0662":        ("Thermoplastic Resins PPI",     "monthly",  "Index 1982=100", "plastics"),
+    "PCU325211325211": ("Plastics Material & Resin Mfg (NAICS 325211)", "monthly", "Index Dec1980=100", "plastics"),
+    "WPU0653":        ("Plastic Products PPI",         "monthly",  "Index 1982=100", "plastics"),
+    "WPU06":          ("Chemicals & Allied Products PPI","monthly", "Index 1982=100", "plastics"),
+
+    # --- Glass (PPI) ---
+    "PCU3272132721":  ("Glass & Glass Products Mfg (NAICS 32721)", "monthly", "Index Dec1980=100", "glass"),
+    "PCU3272133272131": ("Flat Glass Mfg (NAICS 327213)",        "monthly", "Index Dec1980=100", "glass"),
+    "PCU3272143272141": ("Glass Container Mfg (NAICS 327214)",   "monthly", "Index Dec1980=100", "glass"),
+    "WPU0619":        ("Specialty Glass PPI",           "monthly",  "Index 1982=100", "glass"),
+    "PCU3272153272151": ("Glass Fiber Mfg (NAICS 327215)",       "monthly", "Index Dec1980=100", "glass"),
+
     # --- Macro ---
     "CPIAUCSL":       ("CPI All Urban Consumers",      "monthly",  "Index",        "macro"),
     "PPIACO":         ("PPI All Commodities",          "monthly",  "Index",        "macro"),

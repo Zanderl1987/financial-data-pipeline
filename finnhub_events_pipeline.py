@@ -62,7 +62,12 @@ EARNINGS_RENAME = {
     "epsEstimate": "eps_estimate",
     "revenueActual": "revenue_actual",
     "revenueEstimate": "revenue_estimate",
-    # date, symbol, hour, quarter, year already lowercase
+    # "year" renamed: DuckDB's hive_partitioning=True treats "year" as a
+    # reserved virtual column derived from the directory path (year=YYYY).
+    # If the DataFrame also has a "year" column, DuckDB silently overwrites
+    # the data values with the partition value — corrupting fiscal-year data.
+    "year": "obs_year",
+    # date, symbol, hour, quarter already lowercase
 }
 INSIDER_RENAME = {
     "filingDate": "filing_date",

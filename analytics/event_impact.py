@@ -43,6 +43,16 @@ LOOKBACK_YEARS = 3      # trailing window used to classify exposure as of each e
 REACTION_DAYS = 3       # only the positive-exposure leg's 1-3 day co-movement validated so far
 
 
+class NoQualifyingEventsError(RuntimeError):
+    """Raised when a driver/pct/days combination has no shock episodes at all.
+
+    Distinct from the other RuntimeErrors event_study()/driver_event_study()
+    can raise (missing price data, missing benchmark, etc.) so callers like
+    sensitivity_check() can skip this one benign case without masking real
+    failures under the same except clause.
+    """
+
+
 def _rolling_grouping(driver: str,
                       event_dates,
                       universe=None,
@@ -131,7 +141,7 @@ def driver_event_study(driver: str,
     events = price_move_events(trigger_symbol, pct=pct, days=days,
                                start=start, min_gap_days=min_gap_days)
     if events.empty:
-        raise RuntimeError(
+        raise NoQualifyingEventsError(
             f"No '{driver}' ({trigger_symbol}) moves of {pct}% over {days}d found.")
 
     grouped = _rolling_grouping(driver, events["date"], universe=universe,
@@ -388,7 +398,7 @@ def sensitivity_check(driver: str,
                     benchmark=benchmark, universe=universe, start=start,
                     min_gap_days=min_gap_days, lookback_years=lookback_years,
                     entry_lag=entry_lag)
-            except RuntimeError:
+            except NoQualifyingEventsError:
                 continue
             n_pos_sym = (grouped.loc[grouped["sign"] == 1, "symbol"].nunique()
                         if not grouped.empty else 0)

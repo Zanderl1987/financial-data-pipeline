@@ -1,6 +1,91 @@
-# Session Notes — 2026-06-29
+# Session Notes — running log
 
-## What We Built This Session
+## 2026-07-16 — analytics/options.py repair (implemented)
+
+Both functions in `analytics/options.py` were completely broken (KeyError on
+camelCase yfinance columns). Rewrote per approved spec from 07-12:
+
+- `put_call_ratio` → volume-based from `options_history` (was open-interest-based).
+- `iv_summary` → sources `schwab_options` (preferred) → `options_chain` (fallback),
+  with column normalizer. Returns empty today (no Schwab OAuth data).
+- 10 new behavior tests, all passing. Full suite 309/310 (1 pre-existing fail).
+- Live verified: `put_call_ratio("PLTR")` returns 441 rows of real data.
+
+Files: `analytics/options.py`, `tests/test_analytics.py`.
+Status: uncommitted, ready for review.
+Detail: `SESSION_NOTES_2026-07-16.md`.
+
+## 2026-07-16 — options analytics expansion design (session 2)
+
+Designed comprehensive options analytics suite: 19 new functions expanding
+`analytics/options.py` from 2 to 21 functions. Group I (13 functions, works NOW)
+covers volume analytics, structural metrics, realized vol, Greeks. Group II
+(6 functions, activates on Schwab OAuth) covers IV surface, skew, term structure.
+Spec at `docs/superpowers/specs/2026-07-16-options-analytics-expansion-design.md`.
+
+## 2026-07-16 — options analytics expansion: staging implementation (session 3)
+
+Zander approved implementation with staging-only workflow: all code written to
+`E:\AI_Projects\FinancialPipelineStagingUpdates\` — nothing touched C: drive repo.
+
+**Group I (13 functions) — implemented in staging:**
+Volume: volume_skew, unusual_volume, volume_by_strike, term_structure_volume,
+volume_concentration, weighted_average_strike.
+Structural: max_pain, put_call_parity.
+Realized vol: realized_volatility, vol_regime.
+Greeks: portfolio_greeks, gamma_exposure, theo_vs_market.
+
+**Group II (6 functions) — implemented in staging:**
+iv_surface, iv_skew, iv_term_structure, iv_rv_spread, unusual_activity,
+vertical_spread_pricing. All return empty DataFrame today (Schwab OAuth pending);
+tests use monkeypatched schwab_options data to verify logic.
+
+**Staging files:**
+- `E:\AI_Projects\FinancialPipelineStagingUpdates\analytics\options.py` — 1500 lines, 19 functions
+- `E:\AI_Projects\FinancialPipelineStagingUpdates\analytics\__init__.py` — 74 lines, all 19 exports
+- `E:\AI_Projects\FinancialPipelineStagingUpdates\tests\test_analytics.py` — 1355 lines, full test suite
+- All files syntax-verified.
+
+**Commit history this session:**
+- `e52c6e0` — Fix analytics/options.py: rewrite put_call_ratio + iv_summary (repair)
+- Expansion (Group I + II) pending Zander review, then merge into main repo.
+
+## 2026-07-16 — commodity data source research + build (lumber, plastics, glass, steel)
+
+Deep web research on free data sources for lumber, plastics, glass, and steel,
+followed by implementation. Full audit of FRED API, yfinance, Commodities-API.com,
+Metals-API, Investing.com, USGS, Trading Economics, PlasticPortal, Resintel,
+ChemOrbis, Barchart, and IndexMundi.
+
+**FRED API (best source — already wired):** 25 PPI series added to existing `SERIES`
+dict in `commodity_macro_pipeline.py`. Lumber: WPU081, WPU0811, WPU0812, WPUSI012011.
+Steel: WPU101, WPU1017, WPU1019A2S, PCU3259103259101, PCU3311103311101,
+PCU3312223312221. Plastics: WPU066, WPU0662, PCU325211325211, WPU0653, WPU06.
+Glass: PCU3272132721, PCU3272133272131, PCU3272143272141, WPU0619,
+PCU3272153272151. All monthly, back 20-100 years. Zero friction.
+
+**yfinance (added to futures_pipeline.py):** LBR=F (CME Lumber Futures),
+HRC=F (CME HRC Steel Futures). Daily OHLCV, free. Added to existing FUTURES dict
+as "industrial" category (28 → 30 contracts). No direct tickers for plastics or glass.
+
+**Wiring:** No new table entries needed — FRED series flow into existing `commodities`
+table, yfinance tickers flow into existing `futures` table. All 6 wiring files
+(query.py, validate.py, run_all.py, curated.py, test_catalog.py, test_pipelines.py)
+already cover these tables.
+
+**Secondary sources (need sign-up, not built):**
+- Commodities-API.com: LUMBER, SCRAP-HM, IRON_ORE symbols. Free 100 req/mo.
+- Metals-API: LME Steel Rebar/Scrap/HRC. Free tier.
+- USGS Mineral Commodity Summaries: Annual iron/steel stats. Free CSV/PDF.
+
+**Glass gap:** No free spot price API exists for glass. No traded futures market.
+PPI indices from FRED are the best freely available data.
+
+**Tests:** 290/291 pass (1 pre-existing `eia_hourly_grid` fail). No regressions.
+
+Files: `commodity_macro_pipeline.py`, `futures_pipeline.py`.
+
+## 2026-06-29 — alternative data pipelines build
 
 ### 7 new alternative data pipelines (all Stage 1, free/keyless unless noted)
 

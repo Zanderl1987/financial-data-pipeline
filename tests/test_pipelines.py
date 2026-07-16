@@ -60,6 +60,21 @@ PIPELINE_MODULES = [
     "schwab_portfolio_pipeline",
     "signal_scan",
     "signal_monitor",
+    "fred_macro_pipeline",
+    "fred_rates_gdp_pipeline",
+    "alpha_vantage_fundamentals_pipeline",
+    "coingecko_expansion_pipeline",
+    "sec_edgar_pipeline",
+    "bls_expansion_pipeline",
+    "bls_oes_qcew_pipeline",
+    "eia_expansion_pipeline",
+    "eia_petng_prices_pipeline",
+    "eia_hourly_grid_pipeline",
+    "finnhub_expansion_pipeline",
+    "finnhub_fundamentals_pipeline",
+    "tiingo_corporate_actions_pipeline",
+    "tiingo_fundamentals_pipeline",
+    "treasury_fiscal_pipeline",
 ]
 
 

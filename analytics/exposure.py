@@ -158,7 +158,7 @@ def compute_exposure(stock_ret: pd.Series,
         resid = y - X @ coef
         dof = len(y) - X.shape[1]
         sigma2 = float(resid @ resid) / dof
-        cov = sigma2 * np.linalg.inv(X.T @ X)
+        cov = sigma2 * np.linalg.pinv(X.T @ X)
         t = coef / np.sqrt(np.diag(cov))
         ss_tot = float(((y - y.mean()) ** 2).sum())
         r2 = 1.0 - float(resid @ resid) / ss_tot if ss_tot > 0 else 0.0

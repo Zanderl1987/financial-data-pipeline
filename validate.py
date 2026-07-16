@@ -832,6 +832,471 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["signal", "window", "win_rate_pct"],
         "date_col":    "run_date",
     },
+    "fred_macro_housing": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_macro_sentiment": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_macro_industrial": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_macro_consumer": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_macro_trade": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_interest_rates": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_money_supply": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_gdp": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_inflation": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_mortgage": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_commodities": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_exchange_rates": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_markets": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "fred_rates_gdp_federal_debt": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "alpha_vantage_overview": {
+        "required":    ['Symbol', 'fetched_at'],
+        "critical_nn": ['Symbol'],
+        "date_col":    "fetched_at",
+    },
+    "alpha_vantage_income_statement": {
+        "required":    ['ticker', 'fiscalDateEnding', 'report_type', 'totalRevenue', 'fetched_at'],
+        "critical_nn": ['ticker', 'fiscalDateEnding', 'report_type'],
+        "date_col":    "fiscalDateEnding",
+    },
+    "alpha_vantage_balance_sheet": {
+        "required":    ['ticker', 'fiscalDateEnding', 'report_type', 'totalAssets', 'fetched_at'],
+        "critical_nn": ['ticker', 'fiscalDateEnding', 'report_type'],
+        "date_col":    "fiscalDateEnding",
+    },
+    "alpha_vantage_cash_flow": {
+        "required":    ['ticker', 'fiscalDateEnding', 'report_type', 'operatingCashflow', 'fetched_at'],
+        "critical_nn": ['ticker', 'fiscalDateEnding', 'report_type'],
+        "date_col":    "fiscalDateEnding",
+    },
+    "alpha_vantage_earnings": {
+        "required":    ['ticker', 'fiscalDateEnding', 'report_type', 'reportedEPS', 'fetched_at'],
+        "critical_nn": ['ticker', 'fiscalDateEnding', 'report_type'],
+        "date_col":    "fiscalDateEnding",
+    },
+    "alpha_vantage_earnings_calendar": {
+        "required":    ['symbol', 'reportDate', 'fiscalDateEnding', 'fetched_at'],
+        "critical_nn": ['symbol', 'reportDate'],
+        "date_col":    "reportDate",
+    },
+    "alpha_vantage_dividends": {
+        "required":    ['ticker', 'ex_dividend_date', 'amount', 'fetched_at'],
+        "critical_nn": ['ticker', 'ex_dividend_date'],
+        "date_col":    "ex_dividend_date",
+    },
+    "alpha_vantage_insider_transactions": {
+        "required":    ['ticker', 'transaction_date', 'executive', 'shares', 'fetched_at'],
+        "critical_nn": ['ticker', 'transaction_date', 'executive'],
+        "date_col":    "transaction_date",
+    },
+    "alpha_vantage_news_sentiment": {
+        "required":    ['url', 'time_published', 'overall_sentiment_score', 'fetched_at'],
+        "critical_nn": ['url'],
+        "date_col":    "time_published",
+    },
+    "alpha_vantage_top_gainers_losers": {
+        "required":    ['category', 'ticker', 'price', 'fetched_at'],
+        "critical_nn": ['category', 'ticker'],
+        "date_col":    "fetched_at",
+    },
+    "coingecko_global_market": {
+        "required":    ['snapshot_date', 'total_market_cap_usd', 'fetched_at'],
+        "critical_nn": ['snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "coingecko_coins_markets": {
+        "required":    ['coin_id', 'snapshot_date', 'current_price_usd', 'fetched_at'],
+        "critical_nn": ['coin_id', 'snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "coingecko_trending": {
+        "required":    ['type', 'name', 'snapshot_date', 'fetched_at'],
+        "critical_nn": ['type', 'name', 'snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "coingecko_categories": {
+        "required":    ['category_id', 'snapshot_date', 'market_cap_usd', 'fetched_at'],
+        "critical_nn": ['category_id', 'snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "coingecko_derivatives": {
+        "required":    ['symbol', 'exchange_name', 'snapshot_date', 'price', 'fetched_at'],
+        "critical_nn": ['symbol', 'exchange_name', 'snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "coingecko_exchange_rates": {
+        "required":    ['currency', 'snapshot_date', 'value', 'fetched_at'],
+        "critical_nn": ['currency', 'snapshot_date'],
+        "date_col":    "snapshot_date",
+    },
+    "sec_edgar_submissions": {
+        "required":    ['cik', 'accession_number', 'form_type', 'filing_date', 'fetched_at'],
+        "critical_nn": ['cik', 'accession_number'],
+        "date_col":    "filing_date",
+    },
+    "sec_edgar_xbrl_fundamentals": {
+        "required":    ['cik', 'concept', 'end_date', 'value', 'unit', 'fetched_at'],
+        "critical_nn": ['cik', 'concept', 'end_date'],
+        "date_col":    "end_date",
+    },
+    "sec_edgar_efts_search": {
+        "required":    ['search_query', 'accession_number', 'filing_date', 'fetched_at'],
+        "critical_nn": ['search_query', 'accession_number'],
+        "date_col":    "filing_date",
+    },
+    "bls_import_export_prices": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_eci": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_productivity": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_oes": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_qcew": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_ecec": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "bls_cps_demographics": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
+    "eia_electricity_generation": {
+        "required":    ['date', 'fuel_code', 'state', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'fuel_code', 'state'],
+        "date_col":    "date",
+    },
+    "eia_electricity_sales": {
+        "required":    ['date', 'stateid', 'sector_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'stateid', 'sector_code'],
+        "date_col":    "date",
+    },
+    "eia_nuclear_outages": {
+        "required":    ['date', 'value', 'fetched_at'],
+        "critical_nn": ['date'],
+        "date_col":    "date",
+    },
+    "eia_coal_production": {
+        "required":    ['date', 'rank_code', 'mine_type', 'state', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'rank_code', 'mine_type', 'state'],
+        "date_col":    "date",
+    },
+    "eia_coal_trade": {
+        "required":    ['date', 'destination', 'origin', 'coal_rank', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'destination', 'origin', 'coal_rank'],
+        "date_col":    "date",
+    },
+    "eia_international": {
+        "required":    ['date', 'activity_code', 'product_code', 'country_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'activity_code', 'product_code', 'country_code'],
+        "date_col":    "date",
+    },
+    "eia_seds": {
+        "required":    ['date', 'state_code', 'fuel_code', 'sector_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'state_code', 'fuel_code', 'sector_code'],
+        "date_col":    "date",
+    },
+    "eia_petroleum_spot_prices": {
+        "required":    ['date', 'product_code', 'location_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'product_code', 'location_code'],
+        "date_col":    "date",
+    },
+    "eia_petroleum_futures": {
+        "required":    ['date', 'product_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'product_code'],
+        "date_col":    "date",
+    },
+    "eia_refiner_margins": {
+        "required":    ['date', 'series_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'series_code'],
+        "date_col":    "date",
+    },
+    "eia_petroleum_supply_demand": {
+        "required":    ['date', 'process_code', 'product_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'process_code', 'product_code'],
+        "date_col":    "date",
+    },
+    "eia_natural_gas_consumption": {
+        "required":    ['date', 'sector_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'sector_code'],
+        "date_col":    "date",
+    },
+    "eia_natural_gas_prices": {
+        "required":    ['date', 'series_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'series_code'],
+        "date_col":    "date",
+    },
+    "eia_natural_gas_production": {
+        "required":    ['date', 'series_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'series_code'],
+        "date_col":    "date",
+    },
+    "eia_lng_flows": {
+        "required":    ['date', 'region_code', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'region_code'],
+        "date_col":    "date",
+    },
+    "eia_hourly_grid": {
+        "required":    ['region_code', 'metric_type', 'value', 'fetched_at'],
+        "critical_nn": ['region_code', 'metric_type', 'value'],
+        "date_col":    "timestamp_utc",
+    },
+    "finnhub_esg": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_congressional_trading": {
+        "required":    ['symbol', 'member_name', 'transaction_date', 'fetched_at'],
+        "critical_nn": ['symbol', 'member_name', 'transaction_date'],
+        "date_col":    "transaction_date",
+    },
+    "finnhub_supply_chain": {
+        "required":    ['symbol', 'side', 'fetched_at'],
+        "critical_nn": ['symbol', 'side'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_insider_sentiment": {
+        "required":    ['symbol', 'obs_year', 'obs_month', 'mspr', 'fetched_at'],
+        "critical_nn": ['symbol', 'obs_year', 'obs_month'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_social_sentiment": {
+        "required":    ['symbol', 'timestamp', 'fetched_at'],
+        "critical_nn": ['symbol', 'timestamp'],
+        "date_col":    "timestamp",
+    },
+    "finnhub_sec_filings": {
+        "required":    ['symbol', 'filing_date', 'form_type', 'fetched_at'],
+        "critical_nn": ['symbol', 'filing_date', 'form_type'],
+        "date_col":    "filing_date",
+    },
+    "finnhub_earnings_quality": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_lobbying": {
+        "required":    ['symbol', 'start_date', 'lobbying_firm', 'fetched_at'],
+        "critical_nn": ['symbol', 'start_date', 'lobbying_firm'],
+        "date_col":    "start_date",
+    },
+    "finnhub_usa_spending": {
+        "required":    ['symbol', 'start_date', 'awarding_agency', 'fetched_at'],
+        "critical_nn": ['symbol', 'start_date', 'awarding_agency'],
+        "date_col":    "start_date",
+    },
+    "finnhub_uspto_patents": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_visa_applications": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_economic_calendar": {
+        "required":    ['fetched_at'],
+        "critical_nn": [],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_earnings_history": {
+        "required":    ['symbol', 'obs_year', 'quarter', 'actual', 'fetched_at'],
+        "critical_nn": ['symbol', 'obs_year', 'quarter'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_eps_estimates": {
+        "required":    ['symbol', 'date', 'freq', 'eps_estimate', 'fetched_at'],
+        "critical_nn": ['symbol', 'date', 'freq'],
+        "date_col":    "date",
+    },
+    "finnhub_revenue_estimates": {
+        "required":    ['symbol', 'date', 'freq', 'revenue_estimate', 'fetched_at'],
+        "critical_nn": ['symbol', 'date', 'freq'],
+        "date_col":    "date",
+    },
+    "finnhub_ownership": {
+        "required":    ['symbol', 'holder_name', 'shares_held', 'fetched_at'],
+        "critical_nn": ['symbol', 'holder_name'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_splits": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_peers": {
+        "required":    ['symbol', 'peer', 'fetched_at'],
+        "critical_nn": ['symbol', 'peer'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_executives": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_filing_sentiment": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_transcripts": {
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "finnhub_company_news_sentiment": {
+        "required":    ['symbol', 'buzz', 'sentiment', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "fetched_at",
+    },
+    "tiingo_corporate_actions_dividends": {
+        "required":    ['symbol', 'ex_date', 'amount', 'fetched_at'],
+        "critical_nn": ['symbol', 'ex_date'],
+        "date_col":    "ex_date",
+    },
+    "tiingo_corporate_actions_splits": {
+        "required":    ['symbol', 'ex_date', 'split_factor', 'fetched_at'],
+        "critical_nn": ['symbol', 'ex_date'],
+        "date_col":    "ex_date",
+    },
+    "tiingo_corporate_actions_yield": {
+        "required":    ['symbol', 'date', 'distribution_yield', 'fetched_at'],
+        "critical_nn": ['symbol', 'date'],
+        "date_col":    "date",
+    },
+    "tiingo_fundamentals_daily": {
+        "required":    ['symbol', 'date', 'market_cap', 'fetched_at'],
+        "critical_nn": ['symbol', 'date'],
+        "date_col":    "date",
+    },
+    "tiingo_fundamentals_statements": {
+        "required":    ['symbol', 'date', 'statement_type', 'data_code', 'value', 'fetched_at'],
+        "critical_nn": ['symbol', 'date', 'statement_type', 'data_code'],
+        "date_col":    "date",
+    },
+    "treasury_debt_to_penny": {
+        "required":    ['record_date', 'tot_pub_debt_out_amt', 'fetched_at'],
+        "critical_nn": ['record_date'],
+        "date_col":    "record_date",
+    },
+    "treasury_avg_interest_rates": {
+        "required":    ['record_date', 'security_desc', 'avg_interest_rate_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'security_desc'],
+        "date_col":    "record_date",
+    },
+    "treasury_interest_expense": {
+        "required":    ['record_date', 'expense_catg_desc', 'expense_type_desc', 'fytd_expense_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'expense_catg_desc', 'expense_type_desc'],
+        "date_col":    "record_date",
+    },
+    "treasury_auctions_detail": {
+        "required":    ['cusip', 'auction_date', 'security_type', 'high_yield', 'fetched_at'],
+        "critical_nn": ['cusip', 'auction_date'],
+        "date_col":    "auction_date",
+    },
+    "treasury_exchange_rates": {
+        "required":    ['record_date', 'country', 'currency', 'exchange_rate', 'fetched_at'],
+        "critical_nn": ['record_date', 'country', 'currency'],
+        "date_col":    "record_date",
+    },
+    "treasury_savings_bonds": {
+        "required":    ['record_date', 'series_cd', 'bonds_out_cnt', 'fetched_at'],
+        "critical_nn": ['record_date', 'series_cd'],
+        "date_col":    "record_date",
+    },
+    "treasury_mts_receipts_outlays": {
+        "required":    ['record_date', 'line_code_nbr', 'classification_desc', 'current_month_rcpt_outly_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'line_code_nbr'],
+        "date_col":    "record_date",
+    },
+    "treasury_mts_outlays_by_agency": {
+        "required":    ['record_date', 'line_code_nbr', 'current_month_net_outly_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'line_code_nbr'],
+        "date_col":    "record_date",
+    },
+    "treasury_dts_operating_cash": {
+        "required":    ['record_date', 'src_line_nbr', 'transaction_today_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'src_line_nbr'],
+        "date_col":    "record_date",
+    },
+    "treasury_mts_budget_comparison": {
+        "required":    ['record_date', 'line_code_nbr', 'current_month_dfct_sur_amt', 'fetched_at'],
+        "critical_nn": ['record_date', 'line_code_nbr'],
+        "date_col":    "record_date",
+    },
 }
 
 
