@@ -333,3 +333,71 @@ def simulate_trades(cache: "dict[str, pd.DataFrame]",
             next_free = exit_i + 1
 
     return pd.DataFrame(rows, columns=_TRADE_COLS)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Evaluate the TV rating replica vs forward returns")
+    parser.add_argument("--symbols", default=None,
+                        help="Comma-separated symbol subset (default: full "
+                             "tiingo_prices universe)")
+    parser.add_argument("--start", default="1990-01-01")
+    parser.add_argument("--end", default=None)
+    parser.add_argument("--benchmark", default=BENCHMARK)
+    parser.add_argument("--min-names", type=int, default=5)
+    args = parser.parse_args()
+
+    syms = args.symbols.split(",") if args.symbols else universe()
+    print(f"[tv_rating_eval] building signal cache for {len(syms)} symbols...")
+    cache = build_signal_cache(syms, start=args.start, end=args.end)
+    print(f"  {len(cache)} symbols had usable price history")
+    if not cache:
+        print("No usable symbols. Check price_table / date range.")
+        return
+
+    print("[tv_rating_eval] building return panel...")
+    panel = build_return_panel(cache, benchmark=args.benchmark)
+    print(f"  {len(panel):,} symbol-day rows")
+
+    print("[tv_rating_eval] level-IC evaluation...")
+    level_ic = {sig: evaluate_signal(panel, sig, min_names=args.min_names)
+               for sig in SIGNALS}
+    for sig, results in level_ic.items():
+        print(f"\n=== {sig} ===")
+        hdr = (f"{'h':>3} {'n':>6} {'pooledIC':>9} {'p':>7} {'dailyIC':>8} "
+              f"{'t':>6} {'days':>5} {'bull%':>7} {'bear%':>7} {'spread%':>8} {'t':>6}")
+        print(hdr)
+        for h, r in results.items():
+            print(f"{h:>3} {r['n']:>6} {r.get('pooled_ic', float('nan')):>9} "
+                  f"{r.get('pooled_p', float('nan')):>7} "
+                  f"{str(r.get('mean_daily_ic', '-')):>8} {str(r.get('ic_t_stat', '-')):>6} "
+                  f"{str(r.get('ic_days', '-')):>5} "
+                  f"{str(r.get('bull_mean_pct', '-')):>7} {str(r.get('bear_mean_pct', '-')):>7} "
+                  f"{str(r.get('spread_pct', '-')):>8} {str(r.get('spread_t', '-')):>6}")
+
+    print("\n[tv_rating_eval] transition study...")
+    paths, transition_summary = run_transition_study(
+        syms, start=args.start, end=args.end, benchmark=args.benchmark)
+    print(f"  {len(transition_summary)} transition types qualified")
+
+    print("[tv_rating_eval] trade simulation...")
+    trades = simulate_trades(cache)
+    if len(trades):
+        win_rate = 100 * (trades["pnl_dollars"] > 0).mean()
+        print(f"  {len(trades)} realized trades | win rate {win_rate:.1f}%")
+    else:
+        print("  0 realized trades")
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with open(os.path.join(OUT_DIR, "ic_stats.json"), "w") as f:
+        json.dump({"level_ic": level_ic, "transition_stats": transition_summary}, f,
+                  indent=2, default=str)
+    panel.to_parquet(os.path.join(OUT_DIR, "panel.parquet"), index=False)
+    paths.to_parquet(os.path.join(OUT_DIR, "transitions.parquet"), index=False)
+    trades.to_parquet(os.path.join(OUT_DIR, "trades.parquet"), index=False)
+    print(f"\n-> wrote artifacts to {OUT_DIR}/")
+
+    print("\nGuide: |IC| < 0.02 = noise; 0.02-0.05 weak-but-real if t>=2; "
+         ">0.05 on daily data is suspicious (hunt for a leak). Need t-stat >= 2 "
+         "across >= ~250 days to call anything significant. Sign flips across "
+         "horizons = noise, not momentum-then-reversal.")

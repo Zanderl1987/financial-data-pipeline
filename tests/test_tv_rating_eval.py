@@ -245,3 +245,37 @@ class TestSimulateTrades:
         cache = {"X": pd.DataFrame({"rating_all": rating, "close": close}, index=dates)}
         trades = tve.simulate_trades(cache)
         assert trades.empty
+
+
+class TestMainArtifacts:
+    def test_writes_all_four_artifacts(self, tmp_path, monkeypatch):
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        rng = np.random.default_rng(1)
+
+        def make(seed, drift):
+            close = 100 * np.exp(np.cumsum(rng.normal(drift, 0.01, 40)))
+            rating = np.clip(np.cumsum(rng.normal(0, 0.1, 40)), -1, 1)
+            label = pd.cut(rating, bins=[-1.01, -0.5, -0.1, 0.1, 0.5, 1.01],
+                           labels=["strong_sell", "sell", "neutral", "buy", "strong_buy"])
+            return pd.DataFrame({"close": close, "rating_all": rating,
+                                 "rating_ma": rating, "rating_osc": rating,
+                                 "rating_label": label}, index=dates)
+
+        fake_cache = {"AAPL": make(1, 0.001), "MSFT": make(2, -0.001),
+                     "SPY": make(3, 0.0005)}
+        monkeypatch.setattr(tve, "universe", lambda: ["AAPL", "MSFT", "SPY"])
+        monkeypatch.setattr(tve, "build_signal_cache", lambda *a, **k: fake_cache)
+        monkeypatch.setattr(tve.eb, "rating_changes",
+                            lambda *a, **k: pd.DataFrame(columns=eb._CHANGE_COLS))
+        monkeypatch.setattr(tve, "OUT_DIR", str(tmp_path))
+        monkeypatch.setattr(sys, "argv", ["tv_rating_eval.py"])
+
+        tve.main()
+
+        for fname in ("ic_stats.json", "panel.parquet", "transitions.parquet",
+                     "trades.parquet"):
+            assert (tmp_path / fname).exists(), fname
+        with open(tmp_path / "ic_stats.json") as f:
+            stats_json = json.load(f)
+        assert "level_ic" in stats_json
+        assert "transition_stats" in stats_json
