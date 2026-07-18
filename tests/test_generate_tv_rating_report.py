@@ -84,3 +84,63 @@ class TestSymbolTable:
         assert out.empty
         assert list(out.columns) == ["symbol", "n_signals", "best_horizon",
                                      "best_ic", "worst_horizon", "worst_ic"]
+
+
+class TestICBarChart:
+    def test_three_signal_traces(self):
+        ic_stats = {"level_ic": {sig: {"1": {"mean_daily_ic": 0.03, "ic_t_stat": 2.0,
+                    "ic_se": 0.015, "ic_days": 100}} for sig in gr.COLOR_SERIES}}
+        fig = gr.build_ic_bar_chart(ic_stats)
+        assert len(fig.data) == 3
+        assert {tr.name for tr in fig.data} == set(gr.COLOR_SERIES)
+
+
+class TestSpreadChart:
+    def test_three_subplots_no_legend(self):
+        ic_stats = {"level_ic": {sig: {"1": {"spread_pct": 0.5}}
+                    for sig in gr.COLOR_SERIES}}
+        fig = gr.build_spread_chart(ic_stats)
+        assert len(fig.data) == 3
+        assert all(tr.showlegend is False for tr in fig.data)
+
+
+class TestScatterSection:
+    def test_dropdown_has_one_button_per_combo(self):
+        dates = pd.bdate_range("2024-01-01", periods=20)
+        panel = pd.DataFrame({
+            "symbol": "X", "date": dates, "rating_all": np.linspace(-1, 1, 20),
+            "rating_ma": np.linspace(-1, 1, 20), "rating_osc": np.linspace(-1, 1, 20),
+            **{f"fwd_{h}d": np.linspace(-0.05, 0.05, 20) for h in gr.HORIZONS},
+        })
+        fig = gr.build_scatter_section(panel)
+        assert len(fig.data) == len(gr.SIGNALS) * len(gr.HORIZONS)
+        assert len(fig.layout.updatemenus[0].buttons) == len(gr.SIGNALS) * len(gr.HORIZONS)
+        assert fig.data[0].visible is True
+        assert fig.data[1].visible is False
+
+
+class TestPriceTradesChart:
+    def test_visibility_toggles_per_symbol(self):
+        dates = pd.bdate_range("2024-01-01", periods=5)
+        panel = pd.DataFrame({"symbol": ["A"] * 5 + ["B"] * 5,
+                              "date": list(dates) * 2,
+                              "close": [10, 11, 12, 13, 14, 20, 21, 22, 23, 24]})
+        trades = pd.DataFrame(columns=["symbol", "side", "entry_date", "entry_price",
+                                       "exit_date", "exit_price", "pnl_dollars", "pnl_pct"])
+        fig = gr.build_price_trades_chart(panel, trades, symbols=["A", "B"])
+        assert len(fig.data) == 10          # 5 traces x 2 symbols
+        assert len(fig.layout.updatemenus[0].buttons) == 2
+        vis0 = fig.layout.updatemenus[0].buttons[0].args[0]["visible"]
+        assert vis0 == [True] * 5 + [False] * 5
+
+
+class TestCumulativePnlChart:
+    def test_cumulative_sum_matches_manual(self):
+        trades = pd.DataFrame({
+            "symbol": ["A", "B"], "side": ["long", "short"],
+            "exit_date": pd.to_datetime(["2024-01-05", "2024-01-03"]),
+            "pnl_dollars": [200.0, -50.0], "pnl_pct": [2.0, -0.5],
+        })
+        fig = gr.build_cumulative_pnl_chart(trades)
+        y = list(fig.data[0].y)
+        assert y == [-50.0, 150.0]     # sorted by exit_date: B(-50) then A(+200)
