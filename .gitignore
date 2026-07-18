@@ -16,6 +16,7 @@ storage/**/*.csv
 storage/**/cik_map.json
 storage/dividend_research_cache.json
 storage/quality_reports/
+storage/reports/
 
 # cot_reports library dumps temp files to working directory
 Com95_16.txt
