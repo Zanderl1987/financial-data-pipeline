@@ -401,3 +401,7 @@ def main():
          ">0.05 on daily data is suspicious (hunt for a leak). Need t-stat >= 2 "
          "across >= ~250 days to call anything significant. Sign flips across "
          "horizons = noise, not momentum-then-reversal.")
+
+
+if __name__ == "__main__":
+    main()
