@@ -194,3 +194,54 @@ class TestTransitionStudy:
         monkeypatch.setattr(tve.eb, "rating_changes", fake_rating_changes)
         tve.run_transition_study(["A"])
         assert captured["start"] is not None
+
+
+class TestSimulateTrades:
+    def _cache(self):
+        dates = pd.bdate_range("2024-01-01", periods=12)
+        rating = [0.0, 0.6, 0.6, 0.05, 0.05, -0.6, -0.6, -0.6, -0.05, -0.05, 0.0, 0.0]
+        close = [100, 101, 102, 103, 104, 105, 90, 91, 92, 93, 94, 95]
+        d = pd.DataFrame({"rating_all": rating, "close": close}, index=dates)
+        return {"X": d}, dates
+
+    def test_long_and_short_trade_pnl(self):
+        cache, dates = self._cache()
+        trades = tve.simulate_trades(cache)
+        assert len(trades) == 2
+
+        long_t = trades.iloc[0]
+        assert long_t["side"] == "long"
+        assert long_t["entry_price"] == 102
+        assert long_t["exit_price"] == 104
+        assert long_t["days_held"] == 2
+        assert long_t["pnl_pct"] == pytest.approx(100 * (104 / 102 - 1), abs=1e-3)
+        assert long_t["pnl_dollars"] == pytest.approx(10000 * (104 / 102 - 1), abs=0.5)
+
+        short_t = trades.iloc[1]
+        assert short_t["side"] == "short"
+        assert short_t["entry_price"] == 90
+        assert short_t["exit_price"] == 93
+        assert short_t["pnl_pct"] == pytest.approx(100 * (1 - 93 / 90), abs=1e-3)
+        assert short_t["pnl_dollars"] < 0
+
+    def test_entry_executes_next_close_not_same_day(self):
+        cache, dates = self._cache()
+        trades = tve.simulate_trades(cache)
+        assert trades.iloc[0]["entry_signal_date"] == dates[1]
+        assert trades.iloc[0]["entry_date"] == dates[2]
+
+    def test_signal_while_in_position_is_ignored(self):
+        dates = pd.bdate_range("2024-01-01", periods=6)
+        rating = [0.0, 0.6, 0.4, 0.6, 0.05, 0.05]   # re-crosses 0.5 while still long
+        close = [100, 101, 102, 103, 104, 105]
+        cache = {"X": pd.DataFrame({"rating_all": rating, "close": close}, index=dates)}
+        trades = tve.simulate_trades(cache)
+        assert len(trades) == 1
+
+    def test_unresolved_position_produces_no_trade(self):
+        dates = pd.bdate_range("2024-01-01", periods=5)
+        rating = [0.0, 0.6, 0.6, 0.6, 0.6]           # never drops back below 0.1
+        close = [100, 101, 102, 103, 104]
+        cache = {"X": pd.DataFrame({"rating_all": rating, "close": close}, index=dates)}
+        trades = tve.simulate_trades(cache)
+        assert trades.empty

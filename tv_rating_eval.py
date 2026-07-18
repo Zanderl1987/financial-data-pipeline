@@ -238,3 +238,98 @@ def run_transition_study(symbols, start: str = "1990-01-01",
     paths = pd.DataFrame(path_rows, columns=["from_label", "to_label", "rel_day",
                                              "mean_car_pct", "n"])
     return paths, summary
+
+
+def _crossed_up(s: pd.Series, level: float) -> pd.Series:
+    return (s >= level) & (s.shift(1) < level)
+
+
+def _crossed_down(s: pd.Series, level: float) -> pd.Series:
+    return (s <= level) & (s.shift(1) > level)
+
+
+_TRADE_COLS = ["symbol", "side", "entry_signal_date", "entry_date", "entry_price",
+              "exit_signal_date", "exit_date", "exit_price", "days_held",
+              "pnl_dollars", "pnl_pct"]
+
+
+def simulate_trades(cache: "dict[str, pd.DataFrame]",
+                    notional: float = NOTIONAL) -> pd.DataFrame:
+    """
+    Rule-based long/short simulation on rating_all, one position per symbol
+    at a time (no pyramiding; an entry signal while already in a position
+    is ignored -- a position only closes via its own exit condition, and a
+    new entry cannot start before the day after the previous trade's exit
+    execution):
+
+      long entry:  rating_all crosses UP through BULL_MIN (+0.5)
+      long exit:   first later day rating_all < EXIT_LONG_MAX (+0.1)
+      short entry: rating_all crosses DOWN through BEAR_MAX (-0.5)
+      short exit:  first later day rating_all > EXIT_SHORT_MIN (-0.1)
+
+    Both entry and exit execute at the NEXT trading day's close after the
+    signal is observed (no same-day action). A position with no qualifying
+    exit before the data ends is dropped (still open, not a realized P&L) --
+    and blocks any further entries for that symbol, since it's still
+    (unrealizedly) open.
+
+    Returns one row per realized trade -- see _TRADE_COLS.
+    """
+    rows = []
+    for sym, d in cache.items():
+        rating = d["rating_all"]
+        close = d["close"]
+        n = len(d)
+
+        long_entries = _crossed_up(rating, BULL_MIN).to_numpy()
+        short_entries = _crossed_down(rating, BEAR_MAX).to_numpy()
+        exit_long_cond = (rating < EXIT_LONG_MAX).to_numpy()
+        exit_short_cond = (rating > EXIT_SHORT_MIN).to_numpy()
+
+        entry_positions = sorted(
+            [(i, "long") for i in np.flatnonzero(long_entries)] +
+            [(i, "short") for i in np.flatnonzero(short_entries)]
+        )
+
+        next_free = 0
+        for sig_i, side in entry_positions:
+            if sig_i < next_free:
+                continue                       # already in a position
+            entry_i = sig_i + 1
+            if entry_i >= n:
+                continue                       # no next close to enter at
+            entry_price = close.iloc[entry_i]
+            if not np.isfinite(entry_price) or entry_price <= 0:
+                continue
+
+            exit_cond = exit_long_cond if side == "long" else exit_short_cond
+            exit_sig_i = None
+            for j in range(entry_i + 1, n):
+                if exit_cond[j]:
+                    exit_sig_i = j
+                    break
+            if exit_sig_i is None:
+                next_free = n                  # rest of history: still open
+                continue
+            exit_i = exit_sig_i + 1
+            if exit_i >= n:
+                next_free = n
+                continue
+            exit_price = close.iloc[exit_i]
+            if not np.isfinite(exit_price) or exit_price <= 0:
+                next_free = exit_i + 1
+                continue
+
+            pct = (exit_price / entry_price - 1.0) if side == "long" else \
+                  (1.0 - exit_price / entry_price)
+            rows.append({
+                "symbol": sym, "side": side,
+                "entry_signal_date": d.index[sig_i], "entry_date": d.index[entry_i],
+                "entry_price": float(entry_price),
+                "exit_signal_date": d.index[exit_sig_i], "exit_date": d.index[exit_i],
+                "exit_price": float(exit_price), "days_held": exit_i - entry_i,
+                "pnl_dollars": round(notional * pct, 2), "pnl_pct": round(100 * pct, 3),
+            })
+            next_free = exit_i + 1
+
+    return pd.DataFrame(rows, columns=_TRADE_COLS)
