@@ -1035,12 +1035,18 @@ class TestHeadlineRows:
 
 class TestSymbolTable:
     def test_best_worst_horizon_identified(self):
+        # NOTE: fwd_1d/fwd_5d must NOT both be clean positive-scalar multiples
+        # of rating_all -- Spearman rho is scale-invariant, so two such columns
+        # tie at rho=1.0 exactly and "best horizon" becomes undecidable. fwd_1d
+        # gets heavy noise (weak relation); fwd_5d stays a clean transform
+        # (rho=1.0) so the two are unambiguously, deterministically different.
         dates = pd.bdate_range("2024-01-01", periods=60)
-        rng_signal = np.linspace(-1, 1, 60)
+        rng = np.random.default_rng(3)
+        signal = np.linspace(-1, 1, 60)
         panel = pd.DataFrame({
-            "symbol": "X", "date": dates, "rating_all": rng_signal,
-            "fwd_1d": rng_signal * 0.001,     # weak relation
-            "fwd_5d": rng_signal * 0.05,      # strong relation
+            "symbol": "X", "date": dates, "rating_all": signal,
+            "fwd_1d": signal * 0.001 + rng.normal(0, 0.5, 60),  # weak relation
+            "fwd_5d": signal * 0.05,                            # strong relation
         })
         out = gr.build_symbol_table(panel, signal="rating_all", horizons=(1, 5))
         row = out.iloc[0]
