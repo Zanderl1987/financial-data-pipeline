@@ -189,3 +189,52 @@ def evaluate_signal(panel: pd.DataFrame, signal_col: str, horizons=HORIZONS,
             res["spread_p"] = round(float(p2), 4)
         out[h] = res
     return out
+
+
+def run_transition_study(symbols, start: str = "1990-01-01",
+                         end: "str | None" = None,
+                         benchmark: "str | None" = BENCHMARK,
+                         window: "tuple[int, int]" = (0, 21),
+                         entry_lag: int = 1, min_events: int = 5,
+                         price_table: str = PRICE_TABLE):
+    """
+    For every distinct (from_label, to_label) rating transition seen across
+    `symbols`' full history, compute the average cumulative-return path via
+    event_backtest.event_study(). Transition types with fewer than
+    `min_events` occurrences are skipped (too little data to trust a mean).
+
+    `start` defaults to "1990-01-01" (NOT None) deliberately:
+    event_backtest.rating_changes() only scans full history when at least
+    one of date/start/end is given: passing all-None triggers its
+    "latest transition only" mode, which would silently return one row per
+    symbol instead of the full transition history this study needs.
+
+    Returns (paths, summary):
+      paths   -- tidy DataFrame: from_label, to_label, rel_day, mean_car_pct, n
+      summary -- {"from_label->to_label": {horizon_str: {...event_study
+                 horizons row...}}}
+    """
+    changes = eb.rating_changes(symbols, start=start, end=end, price_table=price_table)
+    path_rows = []
+    summary = {}
+    if changes.empty:
+        return pd.DataFrame(columns=["from_label", "to_label", "rel_day",
+                                     "mean_car_pct", "n"]), summary
+
+    for (frm, to), grp in changes.groupby(["from_label", "to_label"]):
+        if len(grp) < min_events:
+            continue
+        res = eb.event_study(grp[["symbol", "date"]], window=window,
+                             benchmark=benchmark, entry_lag=entry_lag,
+                             price_table=price_table)
+        key = f"{frm}->{to}"
+        for rel_day, val in res.mean_car.items():
+            path_rows.append({"from_label": frm, "to_label": to,
+                              "rel_day": int(rel_day),
+                              "mean_car_pct": round(100 * float(val), 3),
+                              "n": res.n_events})
+        summary[key] = {str(h): row.to_dict() for h, row in res.horizons.iterrows()}
+
+    paths = pd.DataFrame(path_rows, columns=["from_label", "to_label", "rel_day",
+                                             "mean_car_pct", "n"])
+    return paths, summary

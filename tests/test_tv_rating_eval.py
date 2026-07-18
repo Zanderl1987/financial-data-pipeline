@@ -143,3 +143,54 @@ class TestEvaluateSignal:
         panel = _synthetic_panel().rename(columns={"rating_all": "rating_osc"})
         res = tve.evaluate_signal(panel, "rating_osc", horizons=(1,))
         assert res[1]["pooled_ic"] > 0.9
+
+
+class TestTransitionStudy:
+    def test_skips_groups_below_min_events(self, monkeypatch):
+        changes = pd.DataFrame({
+            "symbol": ["A", "B", "C"],
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "from_label": ["neutral", "neutral", "buy"],
+            "to_label": ["buy", "buy", "strong_buy"],
+            "from_score": [0.0, 0.0, 0.3], "to_score": [0.3, 0.3, 0.6],
+            "step": [1, 1, 1], "direction": ["upgrade"] * 3,
+        })
+        monkeypatch.setattr(tve.eb, "rating_changes", lambda *a, **k: changes)
+
+        called = {}
+
+        def fake_event_study(events, **kw):
+            called["n"] = len(events)
+            return eb.EventStudyResult(
+                car=pd.DataFrame(), mean_car=pd.Series({0: 0.0, 21: 0.01}),
+                horizons=pd.DataFrame({"n": [len(events)], "mean_pct": [1.0],
+                                      "median_pct": [1.0], "hit_rate_pct": [60.0],
+                                      "t_stat": [2.5], "baseline_pct": [0.5],
+                                      "edge_pct": [0.5]}, index=[21]),
+                events=events, baseline=pd.Series(dtype=float), params={})
+
+        monkeypatch.setattr(tve.eb, "event_study", fake_event_study)
+
+        paths, summary = tve.run_transition_study(["A", "B", "C"], min_events=2)
+        assert called["n"] == 2                       # only neutral->buy qualifies
+        assert "neutral->buy" in summary
+        assert "buy->strong_buy" not in summary        # only 1 event, below min_events
+        assert set(paths["from_label"]) == {"neutral"}
+
+    def test_empty_changes_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(tve.eb, "rating_changes",
+                            lambda *a, **k: pd.DataFrame(columns=eb._CHANGE_COLS))
+        paths, summary = tve.run_transition_study(["A"])
+        assert paths.empty
+        assert summary == {}
+
+    def test_always_passes_explicit_start(self, monkeypatch):
+        captured = {}
+
+        def fake_rating_changes(symbols, start=None, end=None, price_table=None):
+            captured["start"] = start
+            return pd.DataFrame(columns=eb._CHANGE_COLS)
+
+        monkeypatch.setattr(tve.eb, "rating_changes", fake_rating_changes)
+        tve.run_transition_study(["A"])
+        assert captured["start"] is not None
