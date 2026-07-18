@@ -1259,6 +1259,23 @@ class TestScatterSection:
         assert fig.data[1].visible is False
 
 
+class TestTransitionChart:
+    def test_one_trace_per_transition_type(self):
+        df = pd.DataFrame({
+            "from_label": ["neutral", "neutral", "buy"],
+            "to_label": ["buy", "buy", "strong_buy"],
+            "rel_day": [0, 21, 0], "mean_car_pct": [0.0, 1.5, 0.0],
+            "n": [2, 2, 1],
+        })
+        fig = gr.build_transition_chart(df)
+        assert len(fig.data) == 2   # 2 distinct (from_label, to_label) groups
+
+    def test_empty_input_no_crash(self):
+        fig = gr.build_transition_chart(pd.DataFrame(
+            columns=["from_label", "to_label", "rel_day", "mean_car_pct", "n"]))
+        assert len(fig.data) == 0
+
+
 class TestPriceTradesChart:
     def test_visibility_toggles_per_symbol(self):
         dates = pd.bdate_range("2024-01-01", periods=5)
