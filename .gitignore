@@ -7,6 +7,7 @@ __pycache__/
 *.parquet
 .idea/
 .worktrees/
+.superpowers/
 
 # Storage (data files — not tracked in git, but keep directory structure)
 storage/**/*.parquet
