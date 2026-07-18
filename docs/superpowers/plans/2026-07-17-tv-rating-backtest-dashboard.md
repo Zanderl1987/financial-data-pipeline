@@ -356,6 +356,19 @@ class TestEvaluateSignal:
         assert r["mean_daily_ic"] > 0.9
         assert r["ic_days"] == 30
         assert r["spread_pct"] > 0
+        # noise=0.0 makes fwd_1d an exact positive-scalar multiple of rating_all,
+        # so every single day's Spearman rho is exactly 1.0 -- zero cross-day
+        # variance, so ic_se/ic_t_stat are correctly None (same sd>0 guard
+        # sentiment_eval.evaluate() already uses for its own t-stat).
+        assert r["ic_se"] is None
+
+    def test_ic_se_positive_with_noisy_signal(self):
+        # noise=0.05 breaks the exact-rho-1.0-every-day degeneracy above, so
+        # ic_se's sd>0 branch is actually exercised and produces a real value.
+        panel = _synthetic_panel(noise=0.05)
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1,))
+        r = res[1]
+        assert r["ic_se"] is not None
         assert r["ic_se"] > 0
 
     def test_insufficient_rows_skipped(self):
@@ -446,7 +459,7 @@ def evaluate_signal(panel: pd.DataFrame, signal_col: str, horizons=HORIZONS,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `"C:\ProgramData\anaconda3\python.exe" -m pytest tests/test_tv_rating_eval.py::TestEvaluateSignal -v`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
