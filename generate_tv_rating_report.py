@@ -100,8 +100,8 @@ def build_symbol_table(panel: pd.DataFrame, signal: str = "rating_all",
                     ics[h] = rho
         if not ics:
             continue
-        best_h = max(ics, key=lambda h: (ics[h], h))
-        worst_h = min(ics, key=lambda h: (ics[h], -h))
+        best_h = max(ics, key=ics.get)
+        worst_h = min(ics, key=ics.get)
         rows.append({
             "symbol": sym, "n_signals": len(grp),
             "best_horizon": best_h, "best_ic": round(ics[best_h], 4),
