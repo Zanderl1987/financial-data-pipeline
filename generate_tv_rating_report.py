@@ -14,6 +14,7 @@ Usage
 Output: storage/reports/tv_rating_backtest.html
 """
 
+import argparse
 import json
 import os
 import sys
@@ -308,3 +309,103 @@ def build_cumulative_pnl_chart(trades: pd.DataFrame) -> go.Figure:
                            xref="paper", yref="paper", x=0, y=1.08, showarrow=False,
                            font=dict(size=11, color=COLOR_MUTED))
     return fig
+
+
+def build_headline_table(ic_stats: dict) -> go.Figure:
+    rows = build_headline_rows(ic_stats)
+    header = ["Signal", "Horizon", "n", "Pooled IC", "Pooled p", "Daily IC",
+             "IC t-stat", "IC days", "Spread %", "Spread t"]
+    if rows:
+        cols = list(zip(*[[r["signal"], f"{r['horizon']}d", r["n"], r["pooled_ic"],
+                          r["pooled_p"], r["mean_daily_ic"], r["ic_t_stat"],
+                          r["ic_days"], r["spread_pct"], r["spread_t"]]
+                         for r in rows]))
+        fill_colors = [TIER_COLOR[r["tier"]] for r in rows]
+    else:
+        cols = [[] for _ in header]
+        fill_colors = []
+
+    fig = go.Figure(data=[go.Table(
+        header=dict(values=header, fill_color="#e1e0d9", align="left"),
+        cells=dict(values=cols,
+                  fill_color=[["#fcfcfb"] * len(rows)] * (len(header) - 1) + [fill_colors],
+                  align="left"))])
+    fig.update_layout(title="Headline IC / significance by signal x horizon "
+                            "(Spread t column: grey=noise, yellow=weak, green=significant)")
+    return fig
+
+
+HOW_TO_READ = """
+<div style="max-width:900px;margin:24px auto;padding:16px;
+           border:1px solid #e1e0d9;border-radius:8px;
+           font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+           color:#52514e;">
+<h3 style="color:#0b0b0b;margin-top:0;">How to read this report</h3>
+<ul>
+  <li><b>|IC| &lt; 0.02</b> is noise. <b>0.02-0.05</b> is weak-but-real only if the
+      t-stat also holds (|t| &ge; 2). <b>|IC| &gt; 0.05</b> on daily data is
+      suspicious -- before celebrating, re-check for a look-ahead leak.</li>
+  <li>A t-stat needs roughly <b>250+ days</b> of daily IC observations before
+      it's trustworthy, and this report tests 3 signals x 5 horizons x 2 stats
+      -- one marginal t of about 2 among ~30 numbers is expected by chance alone.</li>
+  <li><b>Sign flips across horizons</b> (e.g. positive at 1 day, negative at 3
+      days) mean the signal is noise, not "momentum then reversal," unless that
+      flip was predicted before looking.</li>
+  <li>Universe is a fixed 69-symbol list (mega-caps + sector/bond/commodity
+      ETFs) -- not a broad-market sample. Returns are excess vs SPY.</li>
+  <li>The cumulative P&amp;L chart sums independently-sized $10,000 trades in
+      exit-date order -- it is <b>not</b> a capital-constrained portfolio
+      equity curve, since trades can overlap in time.</li>
+</ul>
+</div>
+"""
+
+
+def assemble_report(out_dir: "str | None" = None,
+                    report_path: str = "storage/reports/tv_rating_backtest.html") -> str:
+    ic_stats, panel, transitions, trades = load_artifacts(out_dir)
+    symbols = sorted(panel["symbol"].unique())
+
+    symbol_table = build_symbol_table(panel)
+    table_fig = go.Figure(data=[go.Table(
+        header=dict(values=list(symbol_table.columns), fill_color="#e1e0d9", align="left"),
+        cells=dict(values=[symbol_table[c] for c in symbol_table.columns],
+                  fill_color="#fcfcfb", align="left"))])
+    table_fig.update_layout(title="Per-symbol best/worst horizon IC (rating_all)")
+
+    figs = [
+        build_headline_table(ic_stats),
+        build_ic_bar_chart(ic_stats),
+        build_spread_chart(ic_stats),
+        build_scatter_section(panel),
+        build_transition_chart(transitions),
+        table_fig,
+        build_price_trades_chart(panel, trades, symbols),
+        build_cumulative_pnl_chart(trades),
+    ]
+
+    html_parts = ['<html><head><title>TV Rating Backtest</title></head><body>',
+                 '<h1 style="font-family:system-ui,sans-serif;">'
+                 'TradingView Rating Backtest</h1>']
+    for i, fig in enumerate(figs):
+        html_parts.append(fig.to_html(full_html=False, include_plotlyjs=(i == 0)))
+    html_parts.append(HOW_TO_READ)
+    html_parts.append("</body></html>")
+
+    os.makedirs(os.path.dirname(report_path) or ".", exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(html_parts))
+    return report_path
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Build the TV rating backtest HTML report")
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--report-path", default="storage/reports/tv_rating_backtest.html")
+    args = parser.parse_args()
+    path = assemble_report(args.out_dir, args.report_path)
+    print(f"-> wrote {path}")
+
+
+if __name__ == "__main__":
+    main()

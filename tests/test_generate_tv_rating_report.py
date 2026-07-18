@@ -161,3 +161,39 @@ class TestCumulativePnlChart:
         fig = gr.build_cumulative_pnl_chart(trades)
         y = list(fig.data[0].y)
         assert y == [-50.0, 150.0]     # sorted by exit_date: B(-50) then A(+200)
+
+
+class TestAssembleReport:
+    def test_writes_html_file_with_expected_sections(self, tmp_path):
+        out_dir = tmp_path / "artifacts"
+        out_dir.mkdir()
+        ic_stats = {"level_ic": {sig: {"1": {
+            "n": 50, "pooled_ic": 0.03, "pooled_p": 0.02, "mean_daily_ic": 0.025,
+            "ic_t_stat": 2.2, "ic_se": 0.011, "ic_days": 40,
+            "spread_pct": 0.4, "spread_t": 1.8}} for sig in gr.COLOR_SERIES},
+            "transition_stats": {}}
+        with open(out_dir / "ic_stats.json", "w") as f:
+            json.dump(ic_stats, f)
+
+        dates = pd.bdate_range("2024-01-01", periods=10)
+        panel = pd.DataFrame({
+            "symbol": "AAPL", "date": dates, "close": np.linspace(100, 110, 10),
+            "rating_all": np.linspace(-1, 1, 10), "rating_ma": np.linspace(-1, 1, 10),
+            "rating_osc": np.linspace(-1, 1, 10),
+            **{f"fwd_{h}d": np.linspace(-0.02, 0.02, 10) for h in gr.HORIZONS},
+        })
+        panel.to_parquet(out_dir / "panel.parquet", index=False)
+        pd.DataFrame(columns=["from_label", "to_label", "rel_day", "mean_car_pct", "n"]
+                    ).to_parquet(out_dir / "transitions.parquet", index=False)
+        pd.DataFrame(columns=["symbol", "side", "entry_date", "entry_price",
+                              "exit_date", "exit_price", "pnl_dollars", "pnl_pct"]
+                    ).to_parquet(out_dir / "trades.parquet", index=False)
+
+        report_path = tmp_path / "report.html"
+        path = gr.assemble_report(str(out_dir), str(report_path))
+        content = report_path.read_text(encoding="utf-8")
+
+        assert path == str(report_path)
+        assert "TradingView Rating Backtest" in content
+        assert "How to read this report" in content
+        assert content.lower().count("plotly") > 0
