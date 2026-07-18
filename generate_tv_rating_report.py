@@ -325,13 +325,18 @@ def build_headline_table(ic_stats: dict) -> go.Figure:
         cols = [[] for _ in header]
         fill_colors = []
 
+    # tier is classify_significance(mean_daily_ic, ic_t_stat) -- color the
+    # "IC t-stat" column (index 6) it's actually derived from, not "Spread t"
+    # (a prior draft colored Spread t, which misled a reader into thinking
+    # the color reflected that column's own significance).
     fig = go.Figure(data=[go.Table(
         header=dict(values=header, fill_color="#e1e0d9", align="left"),
         cells=dict(values=cols,
-                  fill_color=[["#fcfcfb"] * len(rows)] * (len(header) - 1) + [fill_colors],
+                  fill_color=[["#fcfcfb"] * len(rows)] * 6 + [fill_colors]
+                             + [["#fcfcfb"] * len(rows)] * 3,
                   align="left"))])
     fig.update_layout(title="Headline IC / significance by signal x horizon "
-                            "(Spread t column: grey=noise, yellow=weak, green=significant)")
+                            "(IC t-stat column: grey=noise, yellow=weak, green=significant)")
     return fig
 
 
