@@ -1052,6 +1052,21 @@ class TestSymbolTable:
         row = out.iloc[0]
         assert row["symbol"] == "X"
         assert row["best_horizon"] == 5
+
+    def test_no_qualifying_symbols_returns_empty_not_crash(self):
+        # Panel too thin for any symbol to reach the len(sub) >= 10 floor --
+        # must return an empty table with the expected columns, not raise
+        # KeyError from sort_values("best_ic") on a rows-less DataFrame.
+        dates = pd.bdate_range("2024-01-01", periods=5)
+        panel = pd.DataFrame({
+            "symbol": "X", "date": dates,
+            "rating_all": np.linspace(-1, 1, 5),
+            "fwd_1d": np.linspace(-0.01, 0.01, 5),
+        })
+        out = gr.build_symbol_table(panel, signal="rating_all", horizons=(1,))
+        assert out.empty
+        assert list(out.columns) == ["symbol", "n_signals", "best_horizon",
+                                     "best_ic", "worst_horizon", "worst_ic"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1171,6 +1186,9 @@ def build_symbol_table(panel: pd.DataFrame, signal: str = "rating_all",
             "best_horizon": best_h, "best_ic": round(ics[best_h], 4),
             "worst_horizon": worst_h, "worst_ic": round(ics[worst_h], 4),
         })
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "n_signals", "best_horizon",
+                                     "best_ic", "worst_horizon", "worst_ic"])
     return pd.DataFrame(rows).sort_values("best_ic", ascending=False).reset_index(drop=True)
 ```
 
