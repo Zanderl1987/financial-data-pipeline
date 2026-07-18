@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.parquet
 .idea/
+.worktrees/
 
 # Storage (data files — not tracked in git, but keep directory structure)
 storage/**/*.parquet
