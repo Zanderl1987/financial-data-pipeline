@@ -107,4 +107,7 @@ def build_symbol_table(panel: pd.DataFrame, signal: str = "rating_all",
             "best_horizon": best_h, "best_ic": round(ics[best_h], 4),
             "worst_horizon": worst_h, "worst_ic": round(ics[worst_h], 4),
         })
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "n_signals", "best_horizon",
+                                     "best_ic", "worst_horizon", "worst_ic"])
     return pd.DataFrame(rows).sort_values("best_ic", ascending=False).reset_index(drop=True)
