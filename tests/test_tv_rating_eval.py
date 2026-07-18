@@ -82,3 +82,64 @@ class TestReturnPanel:
         raw = 104 / 102 - 1.0
         bench_ret = 202 / 200 - 1.0
         assert panel.iloc[0]["fwd_1d"] == pytest.approx(raw - bench_ret)
+
+
+def _synthetic_panel(n_days=30, n_syms=10, noise=0.0, seed=7):
+    """Panel where fwd_1d is a monotone function of rating_all (+ noise)."""
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range("2025-01-02", periods=n_days)
+    rows = []
+    for d in dates:
+        for i in range(n_syms):
+            score = rng.uniform(-1, 1)
+            rows.append({
+                "symbol": f"S{i}", "date": d, "rating_all": score,
+                "fwd_1d": 0.01 * score + noise * rng.normal(),
+            })
+    return pd.DataFrame(rows)
+
+
+class TestEvaluateSignal:
+    def test_recovers_positive_signal(self):
+        panel = _synthetic_panel()
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1,))
+        assert 1 in res
+        r = res[1]
+        assert r["pooled_ic"] > 0.9
+        assert r["mean_daily_ic"] > 0.9
+        assert r["ic_days"] == 30
+        assert r["spread_pct"] > 0
+        # noise=0.0 makes fwd_1d an exact positive-scalar multiple of rating_all,
+        # so every single day's Spearman rho is exactly 1.0 -- zero cross-day
+        # variance, so ic_se/ic_t_stat are correctly None (same sd>0 guard
+        # sentiment_eval.evaluate() already uses for its own t-stat).
+        assert r["ic_se"] is None
+
+    def test_ic_se_positive_with_noisy_signal(self):
+        # noise=0.05 breaks the exact-rho-1.0-every-day degeneracy above, so
+        # ic_se's sd>0 branch is actually exercised and produces a real value.
+        panel = _synthetic_panel(noise=0.05)
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1,))
+        r = res[1]
+        assert r["ic_se"] is not None
+        assert r["ic_se"] > 0
+
+    def test_insufficient_rows_skipped(self):
+        panel = _synthetic_panel(n_days=1, n_syms=5)
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1,))
+        assert res == {} or "mean_daily_ic" not in res.get(1, {})
+
+    def test_daily_ic_withheld_below_min_names(self):
+        panel = _synthetic_panel(n_days=30, n_syms=3)
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1,), min_names=5)
+        assert "mean_daily_ic" not in res[1]
+
+    def test_missing_horizon_column_ignored(self):
+        panel = _synthetic_panel()
+        res = tve.evaluate_signal(panel, "rating_all", horizons=(1, 21))
+        assert 1 in res and 21 not in res
+
+    def test_works_on_any_signal_column_name(self):
+        panel = _synthetic_panel().rename(columns={"rating_all": "rating_osc"})
+        res = tve.evaluate_signal(panel, "rating_osc", horizons=(1,))
+        assert res[1]["pooled_ic"] > 0.9

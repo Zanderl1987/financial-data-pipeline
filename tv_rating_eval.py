@@ -133,3 +133,59 @@ def build_return_panel(cache: "dict[str, pd.DataFrame]",
             out[f"fwd_{h}d"] = ret.values
         frames.append(out)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def evaluate_signal(panel: pd.DataFrame, signal_col: str, horizons=HORIZONS,
+                    min_names: int = 5, bull_min: float = BULL_MIN,
+                    bear_max: float = BEAR_MAX) -> dict:
+    """
+    Pooled + daily cross-sectional IC and a bullish/bearish bucket spread
+    for one signal column, at each horizon. Same method as
+    sentiment_eval.evaluate(), generalized to an arbitrary signal column
+    and configurable bull/bear thresholds (default +-0.5, TV's own
+    strong_buy/strong_sell cutoffs, since rating_all/ma/osc share the
+    [-1, 1] scale).
+    """
+    out = {}
+    for h in horizons:
+        col = f"fwd_{h}d"
+        if col not in panel.columns:
+            continue
+        sub = panel.dropna(subset=[col, signal_col])
+        if len(sub) < 10:
+            continue
+        res = {"n": len(sub)}
+
+        rho, p = stats.spearmanr(sub[signal_col], sub[col])
+        res["pooled_ic"] = round(float(rho), 4)
+        res["pooled_p"] = round(float(p), 4)
+
+        ics = []
+        for _, day in sub.groupby("date"):
+            if day["symbol"].nunique() >= min_names and day[signal_col].nunique() > 1:
+                r, _ = stats.spearmanr(day[signal_col], day[col])
+                if np.isfinite(r):
+                    ics.append(r)
+        if len(ics) >= 5:
+            ics = np.array(ics)
+            sd = ics.std(ddof=1)
+            se = sd / math.sqrt(len(ics))
+            res["mean_daily_ic"] = round(float(ics.mean()), 4)
+            res["ic_se"] = round(float(se), 5) if sd > 0 else None
+            res["ic_t_stat"] = round(float(ics.mean() / se), 2) if sd > 0 else None
+            res["ic_days"] = len(ics)
+            res["ic_pct_positive"] = round(100 * float((ics > 0).mean()), 1)
+
+        bull = sub.loc[sub[signal_col] >= bull_min, col]
+        bear = sub.loc[sub[signal_col] <= bear_max, col]
+        res["bull_n"], res["bear_n"] = len(bull), len(bear)
+        res["bull_mean_pct"] = round(100 * float(bull.mean()), 3) if len(bull) else None
+        res["bear_mean_pct"] = round(100 * float(bear.mean()), 3) if len(bear) else None
+        if len(bull) > 5 and len(bear) > 5:
+            spread = float(bull.mean() - bear.mean())
+            t, p2 = stats.ttest_ind(bull, bear, equal_var=False)
+            res["spread_pct"] = round(100 * spread, 3)
+            res["spread_t"] = round(float(t), 2)
+            res["spread_p"] = round(float(p2), 4)
+        out[h] = res
+    return out
