@@ -108,3 +108,92 @@ class TestTradeRuleContract:
     def test_non_callable_raises(self):
         with pytest.raises(ValueError, match="callable"):
             TradeRule(name="r", entries="not a function", exits=lambda d: d)
+
+
+from evaluation.data import HORIZONS, apply_lag, build_return_panel
+
+
+def _close_matrix(n=40):
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    return pd.DataFrame({"AAA": 100.0 * (1.01 ** np.arange(n)),
+                         "SPY": np.full(n, 100.0)}, index=idx)
+
+
+class TestApplyLag:
+    def test_zero_lag_returns_copy_unchanged(self):
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [pd.Timestamp("2024-01-05")],
+                          "value": [1.0]})
+        out = apply_lag(f, 0)
+        assert out is not f
+        assert out["date"].iloc[0] == pd.Timestamp("2024-01-05")
+
+    def test_lag_moves_business_days(self):
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [pd.Timestamp("2024-01-05")],
+                          "value": [1.0]})           # a Friday
+        out = apply_lag(f, 2)
+        assert out["date"].iloc[0] == pd.Timestamp("2024-01-09")   # Fri + 2bd = Tue
+
+
+class TestBuildReturnPanel:
+    def test_entry_is_strictly_next_close(self):
+        closes = _close_matrix()
+        idx = closes.index
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [idx[5]], "value": [1.0]})
+        panel, dropped = build_return_panel(f, closes, benchmark=None)
+        assert dropped == {}
+        assert panel["entry_date"].iloc[0] == idx[6]
+        expected = closes["AAA"].iloc[7] / closes["AAA"].iloc[6] - 1.0
+        assert panel["fwd_1d"].iloc[0] == pytest.approx(expected)
+
+    def test_flat_benchmark_equals_raw_return(self):
+        closes = _close_matrix()          # SPY constant 100 -> excess == raw
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [closes.index[5]], "value": [1.0]})
+        raw, _ = build_return_panel(f, closes, benchmark=None)
+        exc, _ = build_return_panel(f, closes, benchmark="SPY")
+        assert exc["fwd_5d"].iloc[0] == pytest.approx(raw["fwd_5d"].iloc[0])
+
+    def test_excess_vs_identical_benchmark_is_zero(self):
+        closes = _close_matrix()
+        closes["SPY"] = closes["AAA"]
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [closes.index[5]], "value": [1.0]})
+        panel, _ = build_return_panel(f, closes, benchmark="SPY")
+        assert panel["fwd_5d"].iloc[0] == pytest.approx(0.0, abs=1e-12)
+
+    def test_lag_pushes_entry_and_kills_tail(self):
+        closes = _close_matrix()
+        idx = closes.index
+        f = pd.DataFrame({"symbol": ["AAA", "AAA"],
+                          "date": [idx[5], idx[38]], "value": [1.0, 2.0]})
+        panel, _ = build_return_panel(apply_lag(f, 3), closes, benchmark=None)
+        # idx[5] + 3bd = idx[8] -> entry strictly after = idx[9]
+        assert panel["entry_date"].iloc[0] == idx[9]
+        # idx[38] + 3bd is past the data end -> no entry, all horizons NaN
+        assert pd.isna(panel["entry_date"].iloc[1])
+        assert panel[[f"fwd_{h}d" for h in HORIZONS]].iloc[1].isna().all()
+
+    def test_benchmark_symbol_excluded(self):
+        closes = _close_matrix()
+        f = pd.DataFrame({"symbol": ["SPY"], "date": [closes.index[5]], "value": [1.0]})
+        panel, dropped = build_return_panel(f, closes, benchmark="SPY")
+        assert panel.empty
+        assert "SPY" in dropped and "benchmark" in dropped["SPY"]
+
+    def test_unknown_symbol_and_short_history_dropped(self):
+        closes = _close_matrix()
+        closes["SHT"] = np.nan
+        closes.iloc[:10, closes.columns.get_loc("SHT")] = 50.0
+        f = pd.DataFrame({"symbol": ["ZZZ", "SHT"],
+                          "date": [closes.index[2]] * 2, "value": [1.0, 1.0]})
+        panel, dropped = build_return_panel(f, closes, benchmark=None)
+        assert dropped["ZZZ"] == "no price data"
+        assert "history too short" in dropped["SHT"]
+
+    def test_nonpositive_prices_masked(self):
+        closes = _close_matrix()
+        closes.iloc[9, closes.columns.get_loc("AAA")] = -1.0   # WTI-Apr-2020 class
+        f = pd.DataFrame({"symbol": ["AAA"], "date": [closes.index[5]], "value": [1.0]})
+        panel, _ = build_return_panel(f, closes, benchmark=None)
+        # entry = idx[6]; h=3 exits at idx[9] (the bad close) -> masked to NaN
+        assert pd.isna(panel["fwd_3d"].iloc[0])
+        # h=1 exits at idx[7], untouched -> still a real return
+        assert np.isfinite(panel["fwd_1d"].iloc[0])
