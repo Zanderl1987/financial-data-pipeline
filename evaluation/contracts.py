@@ -8,7 +8,7 @@ re-validates. See docs/superpowers/specs/2026-07-18-unified-eval-framework-desig
 """
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import pandas as pd
