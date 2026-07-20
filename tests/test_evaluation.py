@@ -934,6 +934,170 @@ class TestRunner:
             ev_runner.run(rule, out_root=str(tmp_path / "reports"))
 
 
+from evaluation import adapters as ev_adapters
+
+
+def _fake_panel_frame():
+    dates = pd.bdate_range("2024-01-02", periods=10)
+    rows = []
+    for d in dates:
+        for s in ("AAA", "BBB"):
+            rows.append({"symbol": s, "date": d,
+                         "momentum": 0.1, "value": -0.2, "composite": 0.05})
+    return pd.DataFrame(rows)
+
+
+class TestAdapters:
+    def test_from_signal_panel(self, monkeypatch):
+        import analytics.signals as sig_mod
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda symbols=None, start=None, end=None:
+                            _fake_panel_frame())
+        s = ev_adapters.from_signal_panel(factor="momentum")
+        assert isinstance(s, Signal)
+        assert s.name == "factor_momentum"
+        assert s.lag_days == 0 and s.direction == 1
+        assert list(s.frame.columns) == ["symbol", "date", "value"]
+        assert (s.frame["value"] == 0.1).all()
+
+    def test_from_signal_panel_value_factor_no_collision(self, monkeypatch):
+        # the FACTOR named "value" must land in the contract column "value"
+        import analytics.signals as sig_mod
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda symbols=None, start=None, end=None:
+                            _fake_panel_frame())
+        s = ev_adapters.from_signal_panel(factor="value")
+        assert (s.frame["value"] == -0.2).all()
+
+    def test_from_signal_panel_unknown_factor(self, monkeypatch):
+        import analytics.signals as sig_mod
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda symbols=None, start=None, end=None:
+                            _fake_panel_frame())
+        with pytest.raises(ValueError, match="factor"):
+            ev_adapters.from_signal_panel(factor="nope")
+
+    def test_from_sentiment(self, monkeypatch):
+        import sentiment_eval as se_mod
+        fake = pd.DataFrame({"symbol": ["AAA", "BBB"],
+                             "date": pd.to_datetime(["2024-01-02",
+                                                     "2024-01-02"]),
+                             "sent_score": [0.3, -0.1],
+                             "n_articles": [4, 2]})
+        monkeypatch.setattr(se_mod, "daily_signals",
+                            lambda min_articles=1, start=None, end=None: fake)
+        s = ev_adapters.from_sentiment()
+        assert s.name == "news_sentiment"
+        assert list(s.frame.columns) == ["symbol", "date", "value"]
+        assert s.frame["value"].tolist() == [0.3, -0.1]
+
+    def test_from_rating_history(self):
+        idx = pd.bdate_range("2024-01-02", periods=6)
+        cache = {"AAA": pd.DataFrame({"close": 100.0, "rating_all": 0.4,
+                                      "rating_ma": 0.2}, index=idx),
+                 "BBB": pd.DataFrame({"close": 50.0, "rating_all": -0.3,
+                                      "rating_ma": -0.1}, index=idx)}
+        s = ev_adapters.from_rating_history(signal_col="rating_all",
+                                            cache=cache)
+        assert s.name == "tv_rating_all"
+        assert len(s.frame) == 12
+        assert set(s.frame["symbol"]) == {"AAA", "BBB"}
+        aaa = s.frame[s.frame["symbol"] == "AAA"]
+        assert (aaa["value"] == 0.4).all()
+
+    def test_from_rating_changes(self, monkeypatch):
+        import event_backtest as eb_mod
+        fake = pd.DataFrame({"symbol": ["AAA", "BBB"],
+                             "date": pd.to_datetime(["2024-03-01",
+                                                     "2024-03-04"]),
+                             "from_label": ["neutral", "buy"],
+                             "to_label": ["buy", "neutral"],
+                             "from_score": [0.0, 0.5], "to_score": [0.5, 0.0],
+                             "step": [1, 1], "direction": ["up", "down"]})
+        seen = {}
+
+        def fake_changes(symbols, start=None, end=None, min_step=1,
+                         price_table=None, **kw):
+            seen["start"] = start
+            return fake
+
+        monkeypatch.setattr(eb_mod, "rating_changes", fake_changes)
+        ev = ev_adapters.from_rating_changes(symbols=["AAA", "BBB"],
+                                             min_events=1)
+        assert isinstance(ev, EventSet)
+        assert ev.name == "tv_rating_changes"
+        assert sorted(ev.frame["label"].unique()) == ["down", "up"]
+        assert seen["start"] is not None      # full-history scan needs start
+
+    def test_tv_threshold_rule_matches_legacy_semantics(self):
+        import tv_rating_eval as tv
+        rule = ev_adapters.tv_threshold_rule()
+        assert isinstance(rule, TradeRule)
+        assert rule.side == "both"
+        assert rule.notional == tv.NOTIONAL
+        idx = pd.bdate_range("2024-01-02", periods=6)
+        df = pd.DataFrame({"close": 100.0,
+                           "rating_all": [0.0, 0.6, 0.6, 0.05, 0.6, -0.6]},
+                          index=idx)
+        le = rule.entries(df).to_numpy()
+        lx = rule.exits(df).to_numpy()
+        se_ = rule.short_entries(df).to_numpy()
+        sx = rule.short_exits(df).to_numpy()
+        # long entry only on the CROSS up through +0.5 (days 1 and 4)
+        assert le.tolist() == [False, True, False, False, True, False]
+        # long exit whenever rating < +0.1 (days 0, 3, 5)
+        assert lx.tolist() == [True, False, False, True, False, True]
+        # short entry on the cross down through -0.5 (day 5)
+        assert se_.tolist() == [False, False, False, False, False, True]
+        # short exit whenever rating > -0.1 (days 0..4)
+        assert sx.tolist() == [True, True, True, True, True, False]
+
+
+class TestCliAdapters:
+    def test_cli_adapter_signal_panel(self, tmp_path, monkeypatch, capsys):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        import analytics.signals as sig_mod
+        dates = closes.index[:260]
+        syms = [c for c in closes.columns if c != "SPY"]
+        rng = np.random.default_rng(11)
+        rows = [{"symbol": s, "date": d, "composite": float(rng.normal())}
+                for d in dates for s in syms]
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda symbols=None, start=None, end=None:
+                            pd.DataFrame(rows))
+        rc = ev_cli.main(["--adapter", "signal-panel", "--factor", "composite",
+                          "--out-root", str(tmp_path / "reports"),
+                          "--registry-path", str(tmp_path / "reg.parquet"),
+                          "--n-boot", "20", "--n-perm", "5"])
+        assert rc == 0
+        assert "factor_composite" in capsys.readouterr().out
+
+    def test_cli_requires_exactly_one_source(self):
+        with pytest.raises(SystemExit):
+            ev_cli.main(["--name", "x"])                       # neither
+        with pytest.raises(SystemExit):
+            ev_cli.main(["--input-parquet", "a.parquet",
+                         "--adapter", "sentiment", "--name", "x"])  # both
+
+    def test_cli_adapter_tv_rule(self, tmp_path, monkeypatch, capsys):
+        import evaluation.adapters as ad_mod
+        idx = pd.bdate_range("2024-01-02", periods=30)
+        df = pd.DataFrame({"close": np.linspace(100, 110, 30),
+                           "rating_all": [0.0] * 5 + [0.6] * 5 + [0.0] * 20},
+                          index=idx)
+        monkeypatch.setattr(ad_mod, "rating_cache",
+                            lambda **kw: {"AAA": df})
+        rc = ev_cli.main(["--adapter", "tv-rule",
+                          "--out-root", str(tmp_path / "reports"),
+                          "--registry-path", str(tmp_path / "reg.parquet"),
+                          "--n-perm", "10"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "tv_threshold" in out
+        assert out.isascii()
+
+
 class TestCli:
     def _write_signal_parquet(self, tmp_path, closes):
         sig = _runner_signal(closes)

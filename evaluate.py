@@ -63,16 +63,40 @@ def _print_events_summary(res):
         print(f"skipped {label}: {why}")
 
 
+def _print_trades_summary(res):
+    s = res["results"].get("summary", {})
+    p = res["results"].get("permutation", {})
+    print(f"== {res['name']} (trade rule) run {res['run_id']} ==")
+    print(f"trades {s.get('n_trades', 0)} "
+          f"(long {s.get('n_long', 0)} / short {s.get('n_short', 0)}) "
+          f"win_rate {_fmt(s.get('win_rate_pct'))}% "
+          f"pnl ${_fmt(s.get('total_pnl_dollars'))}")
+    print(f"permutation null: pnl_p {_fmt(p.get('pnl_p'))} "
+          f"win_rate_p {_fmt(p.get('win_rate_p'))} "
+          f"(n_perm={p.get('n_perm')})")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Unified evaluation framework -- compute stage")
-    ap.add_argument("--input-parquet", required=True,
+    ap.add_argument("--input-parquet", default=None,
                     help="parquet with [symbol, date, value] or "
                          "[symbol, date, label]")
+    ap.add_argument("--adapter",
+                    choices=["signal-panel", "sentiment", "rating",
+                             "rating-changes", "tv-rule"], default=None,
+                    help="evaluate a repo-native source instead of a parquet")
+    ap.add_argument("--factor", default="composite",
+                    help="signal-panel adapter: which factor column")
+    ap.add_argument("--signal-col", default="rating_all",
+                    help="rating adapter: which rating column")
+    ap.add_argument("--min-step", type=int, default=1,
+                    help="rating-changes adapter: minimum bucket jump")
     ap.add_argument("--input-type", choices=["signal", "events"],
                     default="signal")
-    ap.add_argument("--name", required=True,
-                    help="registry name for this input")
+    ap.add_argument("--name", default=None,
+                    help="registry name (required with --input-parquet; "
+                         "adapters name themselves)")
     ap.add_argument("--lag-days", type=int, default=0,
                     help="business days between data date and availability")
     ap.add_argument("--direction", type=int, choices=[1, -1, 0], default=1)
@@ -91,23 +115,65 @@ def main(argv=None) -> int:
                     help="do not append this run to the results registry")
     args = ap.parse_args(argv)
 
-    import pandas as pd
+    if bool(args.input_parquet) == bool(args.adapter):
+        ap.error("pass exactly one of --input-parquet or --adapter")
 
     from evaluation import runner
     from evaluation.contracts import EventSet, Signal
 
-    frame = pd.read_parquet(args.input_parquet)
-    if args.input_type == "signal":
-        obj = Signal(name=args.name, frame=frame, lag_days=args.lag_days,
-                     direction=args.direction, source=args.input_parquet)
+    cache = None
+    if args.adapter:
+        from evaluation import adapters
+        if args.adapter == "signal-panel":
+            obj = adapters.from_signal_panel(factor=args.factor,
+                                             symbols=args.universe,
+                                             start=args.start, end=args.end)
+        elif args.adapter == "sentiment":
+            obj = adapters.from_sentiment(start=args.start, end=args.end)
+        elif args.adapter == "rating":
+            obj = adapters.from_rating_history(signal_col=args.signal_col,
+                                               symbols=args.universe,
+                                               price_table=args.price_table,
+                                               start=args.start, end=args.end)
+        elif args.adapter == "tv-rule":
+            obj = adapters.tv_threshold_rule()
+            cache = adapters.rating_cache(symbols=args.universe,
+                                          price_table=args.price_table,
+                                          start=args.start, end=args.end)
+        else:                                   # rating-changes
+            obj = adapters.from_rating_changes(symbols=args.universe,
+                                               start=args.start or "2000-01-01",
+                                               end=args.end,
+                                               min_step=args.min_step,
+                                               price_table=args.price_table)
+        if args.name:
+            obj.name = args.name
+        from evaluation.contracts import TradeRule
+        if isinstance(obj, TradeRule):
+            args.input_type = "trades"
+        elif isinstance(obj, EventSet):
+            args.input_type = "events"
+        else:
+            args.input_type = "signal"
     else:
-        obj = EventSet(name=args.name, frame=frame, lag_days=args.lag_days)
+        if not args.name:
+            ap.error("--name is required with --input-parquet")
+        import pandas as pd
+        frame = pd.read_parquet(args.input_parquet)
+        if args.input_type == "signal":
+            obj = Signal(name=args.name, frame=frame, lag_days=args.lag_days,
+                         direction=args.direction, source=args.input_parquet)
+        else:
+            obj = EventSet(name=args.name, frame=frame,
+                           lag_days=args.lag_days)
 
     kwargs = dict(universe=args.universe, start=args.start, end=args.end,
                   benchmark=args.benchmark, price_table=args.price_table,
                   quantiles=args.quantiles, rebalance=args.rebalance,
                   write_registry=not args.no_registry,
                   n_boot=args.n_boot, n_perm=args.n_perm)
+    if cache is not None:
+        kwargs["cache"] = cache
     if args.out_root:
         kwargs["out_root"] = args.out_root
     if args.registry_path:
@@ -121,8 +187,10 @@ def main(argv=None) -> int:
         return 1
     if args.input_type == "signal":
         _print_signal_summary(res)
-    else:
+    elif args.input_type == "events":
         _print_events_summary(res)
+    else:
+        _print_trades_summary(res)
     print(f"artifacts: {res['out_dir']}")
     print(f"registry rows written: {res['rows_written']}")
     return 0
