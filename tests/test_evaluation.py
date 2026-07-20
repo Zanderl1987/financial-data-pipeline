@@ -269,3 +269,104 @@ class TestEvaluateIC:
         p = _planted_panel()                   # only fwd_1d exists
         res = evaluate_ic(p)
         assert list(res.keys()) == [1]
+
+
+from types import SimpleNamespace
+
+import backtest as bt_module
+import event_backtest as eb_module
+
+from evaluation.portfolio import evaluate_portfolio, summarize_portfolio
+from evaluation.events import evaluate_events
+
+
+class TestEvaluatePortfolio:
+    def _fake_result(self):
+        return SimpleNamespace(metrics={"sharpe": 1.0, "cagr_pct": 5.0},
+                               params={"score": "value", "n_symbols": 3},
+                               returns=pd.Series([0.001, -0.002]))
+
+    def test_wraps_backtest_with_value_score(self, monkeypatch):
+        captured = {}
+
+        def fake_backtest(signal, score="composite", **kw):
+            captured["frame"] = signal.copy()
+            captured["score"] = score
+            captured["kw"] = kw
+            return self._fake_result()
+
+        monkeypatch.setattr(bt_module, "backtest", fake_backtest)
+        f = _sig_frame(n_dates=30, symbols=("AAA", "BBB"))
+        res = evaluate_portfolio(f, quantiles=4, rebalance="W")
+        assert captured["score"] == "value"
+        assert captured["kw"]["quantiles"] == 4
+        assert captured["kw"]["rebalance"] == "W"
+        assert res.metrics["sharpe"] == 1.0
+
+    def test_direction_minus_one_flips_values(self, monkeypatch):
+        captured = {}
+
+        def fake_backtest(signal, score="composite", **kw):
+            captured["values"] = signal["value"].copy()
+            return self._fake_result()
+
+        monkeypatch.setattr(bt_module, "backtest", fake_backtest)
+        f = _sig_frame(n_dates=30, symbols=("AAA", "BBB"))
+        evaluate_portfolio(f, direction=-1)
+        assert (captured["values"] == -f["value"]).all()
+
+    def test_summarize_is_json_safe(self):
+        res = SimpleNamespace(metrics={"sharpe": float("nan"), "cagr_pct": 5.0},
+                              params={"score": "value"})
+        s = summarize_portfolio(res)
+        assert s["metrics"]["sharpe"] is None       # NaN -> None for JSON
+        assert s["metrics"]["cagr_pct"] == 5.0
+        json.dumps(s)                               # must not raise
+
+
+class TestEvaluateEvents:
+    def _fake_study(self, n=7):
+        horizons = pd.DataFrame({"n": [n, n], "mean_pct": [1.0, 2.0],
+                                 "t_stat": [2.5, 3.0]}, index=[5, 21])
+        horizons.index.name = "horizon_days"
+        return SimpleNamespace(n_events=n, horizons=horizons,
+                               mean_car=pd.Series([0.0, 0.01], index=[0, 1]))
+
+    def _events_frame(self, label_counts):
+        rows = []
+        d0 = pd.Timestamp("2024-01-02")
+        for label, cnt in label_counts.items():
+            for i in range(cnt):
+                rows.append({"symbol": f"S{i}", "date": d0 + pd.Timedelta(days=i),
+                             "label": label})
+        return pd.DataFrame(rows)
+
+    def test_small_labels_skipped_large_studied(self, monkeypatch):
+        calls = []
+
+        def fake_event_study(events, **kw):
+            calls.append(kw)
+            return self._fake_study(n=len(events))
+
+        monkeypatch.setattr(eb_module, "event_study", fake_event_study)
+        f = self._events_frame({"big": 8, "tiny": 2})
+        out = evaluate_events(f, min_events=5)
+        assert "big" in out["labels"] and out["labels"]["big"]["n_events"] == 8
+        assert out["skipped"]["tiny"] == 2
+        assert calls[0]["entry_lag"] == 1           # engine-enforced next close
+
+    def test_runtime_error_becomes_skip(self, monkeypatch):
+        def fake_event_study(events, **kw):
+            raise RuntimeError("No events had enough surrounding price history.")
+
+        monkeypatch.setattr(eb_module, "event_study", fake_event_study)
+        f = self._events_frame({"big": 8})
+        out = evaluate_events(f, min_events=5)
+        assert out["labels"] == {}
+        assert "price history" in out["skipped"]["big"]
+
+    def test_output_is_json_safe(self, monkeypatch):
+        monkeypatch.setattr(eb_module, "event_study",
+                            lambda events, **kw: self._fake_study())
+        f = self._events_frame({"big": 8})
+        json.dumps(evaluate_events(f, min_events=5))    # must not raise
