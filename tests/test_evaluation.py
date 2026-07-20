@@ -370,3 +370,71 @@ class TestEvaluateEvents:
                             lambda events, **kw: self._fake_study())
         f = self._events_frame({"big": 8})
         json.dumps(evaluate_events(f, min_events=5))    # must not raise
+
+
+from evaluation.trades import (TRADE_COLS, rule_flags, simulate, simulate_symbol,
+                               trade_summary)
+
+
+def _trade_frame(n=12):
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    df = pd.DataFrame({"close": 100.0 + np.arange(n),
+                       "ent": False, "ex": False}, index=idx)
+    return df
+
+
+def _flag_rule(side="long"):
+    return TradeRule(name="flagrule",
+                     entries=lambda d: d["ent"], exits=lambda d: d["ex"],
+                     side=side)
+
+
+class TestTradeEngine:
+    def test_next_close_execution_and_no_pyramiding(self):
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[4], "ent"] = True      # while in position -> ignored
+        df.loc[df.index[5], "ex"] = True
+        trades = simulate(_flag_rule(), {"AAA": df})
+        assert len(trades) == 1
+        t = trades.iloc[0]
+        assert t["entry_signal_date"] == df.index[2]
+        assert t["entry_date"] == df.index[3]          # next close
+        assert t["entry_price"] == pytest.approx(103.0)
+        assert t["exit_date"] == df.index[6]           # exit signal 5 -> close 6
+        assert t["exit_price"] == pytest.approx(106.0)
+        assert t["days_held"] == 3
+        assert t["pnl_dollars"] == pytest.approx(10_000 * 3.0 / 103.0, abs=0.01)
+
+    def test_short_side_flips_pnl_sign(self):
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[5], "ex"] = True
+        trades = simulate(_flag_rule(side="short"), {"AAA": df})
+        assert trades.iloc[0]["side"] == "short"
+        assert trades.iloc[0]["pnl_dollars"] == pytest.approx(-10_000 * 3.0 / 103.0, abs=0.01)
+
+    def test_open_position_dropped_and_blocks_reentry(self):
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True      # never exits
+        df.loc[df.index[8], "ent"] = True      # blocked: prior still open
+        trades = simulate(_flag_rule(), {"AAA": df})
+        assert trades.empty
+        assert list(trades.columns) == TRADE_COLS
+
+    def test_flag_length_mismatch_raises(self):
+        df = _trade_frame()
+        bad = TradeRule(name="bad", entries=lambda d: pd.Series([True]),
+                        exits=lambda d: d["ex"])
+        with pytest.raises(ValueError, match="flags"):
+            rule_flags(bad, df)
+
+    def test_trade_summary(self):
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[5], "ex"] = True
+        trades = simulate(_flag_rule(), {"AAA": df})
+        s = trade_summary(trades)
+        assert s["n_trades"] == 1 and s["n_long"] == 1 and s["n_short"] == 0
+        assert s["win_rate_pct"] == 100.0
+        assert trade_summary(trades.iloc[0:0])["summary_reason"] == "no realized trades"
