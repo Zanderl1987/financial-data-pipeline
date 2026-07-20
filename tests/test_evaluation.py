@@ -685,3 +685,99 @@ class TestTier3:
         r = ev_stats.registry_percentile(0.5, [0.1, 0.2, 0.6, 0.9])
         assert r["percentile"] == 50.0 and r["n_population"] == 4
         assert "pct_reason" in ev_stats.registry_percentile(0.5, [0.1])
+
+
+from evaluation import registry as ev_registry
+
+
+def _reg_rows(run_id="r1", name="sig_a", value=0.02, created="2026-07-19T10:00:00",
+              uhash="abc123", statistic="pooled_ic", horizon=1):
+    return pd.DataFrame([{
+        "run_id": run_id, "input_name": name, "input_type": "signal",
+        "evaluation": "ic", "horizon": horizon, "statistic": statistic,
+        "value": value, "n": 100, "universe_hash": uhash,
+        "date_range": "2024-01-02..2025-01-31", "created_at": created,
+    }])
+
+
+class TestRegistry:
+    def test_roundtrip_and_missing_file(self, tmp_path):
+        path = str(tmp_path / "reg" / "results.parquet")
+        assert ev_registry.load(path).empty
+        assert list(ev_registry.load(path).columns) == ev_registry.COLUMNS
+        n = ev_registry.append(_reg_rows(), path)
+        assert n == 1
+        reg = ev_registry.load(path)
+        assert len(reg) == 1
+        assert list(reg.columns) == ev_registry.COLUMNS
+        assert not os.path.exists(path + ".tmp")
+
+    def test_append_is_additive(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        ev_registry.append(_reg_rows(run_id="r1"), path)
+        ev_registry.append(_reg_rows(run_id="r2"), path)
+        assert len(ev_registry.load(path)) == 2
+
+    def test_append_rejects_missing_columns(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        bad = _reg_rows().drop(columns=["statistic"])
+        with pytest.raises(ValueError, match="statistic"):
+            ev_registry.append(bad, path)
+
+    def test_baselines_latest_wins(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        ev_registry.append(_reg_rows(run_id="r1", value=0.01,
+                                     created="2026-07-18T10:00:00"), path)
+        ev_registry.append(_reg_rows(run_id="r2", value=0.03,
+                                     created="2026-07-19T10:00:00"), path)
+        base = ev_registry.baselines(path=path)
+        assert len(base) == 1
+        assert base.iloc[0]["value"] == pytest.approx(0.03)
+        assert base.iloc[0]["run_id"] == "r2"
+
+    def test_compare_within_tol_and_universe_guard(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        ev_registry.append(_reg_rows(run_id="r1", value=0.010, uhash="aaa"), path)
+        fresh_ok = _reg_rows(run_id="r2", value=0.012, uhash="aaa")
+        cmp = ev_registry.compare(fresh_ok, path=path, tol=0.005)
+        assert bool(cmp.iloc[0]["within_tol"]) is True
+        assert cmp.iloc[0]["baseline"] == pytest.approx(0.010)
+        fresh_far = _reg_rows(run_id="r3", value=0.030, uhash="aaa")
+        cmp2 = ev_registry.compare(fresh_far, path=path, tol=0.005)
+        assert bool(cmp2.iloc[0]["within_tol"]) is False
+        fresh_mismatch = _reg_rows(run_id="r4", value=0.011, uhash="bbb")
+        with pytest.raises(ValueError, match="universe"):
+            ev_registry.compare(fresh_mismatch, path=path)
+        cmp3 = ev_registry.compare(fresh_mismatch, path=path,
+                                   allow_universe_mismatch=True)
+        assert len(cmp3) == 1
+
+    def test_population_latest_per_input(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        ev_registry.append(_reg_rows(run_id="r1", name="sig_a", value=1.0,
+                                     statistic="sharpe", horizon=-1,
+                                     created="2026-07-18T10:00:00"), path)
+        ev_registry.append(_reg_rows(run_id="r2", name="sig_a", value=1.5,
+                                     statistic="sharpe", horizon=-1,
+                                     created="2026-07-19T10:00:00"), path)
+        ev_registry.append(_reg_rows(run_id="r3", name="sig_b", value=-0.2,
+                                     statistic="sharpe", horizon=-1), path)
+        pop = ev_registry.population("sharpe", path=path)
+        assert sorted(pop) == [pytest.approx(-0.2), pytest.approx(1.5)]
+        assert ev_registry.population("nope", path=path) == []
+
+    def test_universe_hash_order_and_case_invariant(self):
+        h1 = ev_registry.universe_hash(["AAPL", "MSFT", "SPY"])
+        h2 = ev_registry.universe_hash(["spy", "msft", "aapl"])
+        h3 = ev_registry.universe_hash(["AAPL", "MSFT"])
+        assert h1 == h2
+        assert h1 != h3
+        assert len(h1) == 12
+
+    def test_summary_is_ascii(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        assert "empty" in ev_registry.summary(path)
+        ev_registry.append(_reg_rows(), path)
+        s = ev_registry.summary(path)
+        assert s.isascii()
+        assert "sig_a" in s and "1 rows" in s
