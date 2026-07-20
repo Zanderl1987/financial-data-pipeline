@@ -781,3 +781,196 @@ class TestRegistry:
         s = ev_registry.summary(path)
         assert s.isascii()
         assert "sig_a" in s and "1 rows" in s
+
+
+import types
+
+from evaluation import runner as ev_runner
+import evaluate as ev_cli
+
+
+def _fake_price_world(n=320, syms=("AAA", "BBB", "CCC", "DDD", "EEE", "FFF"),
+                      seed=3):
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    rng = np.random.default_rng(seed)
+    data = {s: 100.0 * np.cumprod(1 + rng.normal(0.0003, 0.01, n))
+            for s in syms}
+    data["SPY"] = 100.0 * np.cumprod(1 + rng.normal(0.0003, 0.008, n))
+    return pd.DataFrame(data, index=idx)
+
+
+def _runner_signal(closes, n_sig_dates=260, seed=7):
+    syms = [c for c in closes.columns if c != "SPY"]
+    dates = closes.index[:n_sig_dates]
+    rng = np.random.default_rng(seed)
+    rows = [{"symbol": s, "date": d, "value": float(rng.normal())}
+            for d in dates for s in syms]
+    return Signal(name="test_sig", frame=pd.DataFrame(rows), lag_days=1)
+
+
+def _install_fake_market(monkeypatch, closes):
+    """Fake the two repo modules the evaluation package imports locally."""
+    fake_eb = types.SimpleNamespace(
+        load_close_matrix=lambda syms, start=None, end=None, price_table=None:
+            closes[[s for s in syms if s in closes.columns]])
+    monkeypatch.setitem(sys.modules, "event_backtest", fake_eb)
+
+    ls = closes.drop(columns=["SPY"]).pct_change().mean(axis=1).fillna(0.0)
+    fake_res = types.SimpleNamespace(
+        returns=ls, equity=(1 + ls).cumprod(),
+        benchmark=closes["SPY"].pct_change().fillna(0.0),
+        weights=None,
+        metrics={"sharpe": 0.9, "cagr_pct": 7.5, "max_drawdown_pct": -12.0},
+        params={"quantiles": 5, "rebalance": "M"})
+    fake_bt = types.SimpleNamespace(backtest=lambda *a, **kw: fake_res)
+    monkeypatch.setitem(sys.modules, "backtest", fake_bt)
+    return fake_eb, fake_bt
+
+
+class TestRunner:
+    def test_signal_end_to_end(self, tmp_path, monkeypatch):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path,
+                            n_boot=50, n_perm=10, seed=0)
+        assert res["input_type"] == "signal"
+        assert res["n_evaluations"] >= 2          # ic + portfolio at minimum
+        out_dir = res["out_dir"]
+        for fname in ("results.json", "run_meta.json", "panel.parquet"):
+            assert os.path.exists(os.path.join(out_dir, fname))
+        with open(os.path.join(out_dir, "run_meta.json")) as fh:
+            meta = json.load(fh)
+        assert meta["input_name"] == "test_sig"
+        assert meta["universe_hash"]
+        assert "dropped" in meta and "git_commit" in meta
+        assert ".." in meta["date_range"]
+        ic1 = res["results"]["ic"][1]
+        assert ic1["pooled_ic"] is not None
+        assert "tier2" in res["results"] and "tier3" in res["results"]
+        assert "fdr" in res["results"]
+        reg = ev_registry.load(reg_path)
+        assert res["rows_written"] == len(reg) > 0
+        assert (reg["statistic"] == "pooled_ic").any()
+        assert (reg["statistic"] == "sharpe").any()
+        assert reg["run_id"].nunique() == 1
+
+    def test_signal_no_registry_write(self, tmp_path, monkeypatch):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, write_registry=False,
+                            n_boot=20, n_perm=5)
+        assert res["rows_written"] == 0
+        assert not os.path.exists(reg_path)
+
+    def test_events_dispatch(self, tmp_path, monkeypatch):
+        fake_events_result = {
+            "labels": {"up": {"n_events": 6,
+                              "horizons": {1: {"n": 6, "mean_pct": 0.5,
+                                               "t_stat": 1.2},
+                                           5: {"n": 6, "mean_pct": 1.1,
+                                               "t_stat": 1.8}},
+                              "mean_car_pct": {0: 0.0, 1: 0.4}}},
+            "skipped": {"tiny": "3 events < min_events=5"},
+        }
+        seen = {}
+
+        def fake_evaluate_events(frame, **kw):
+            seen["frame"] = frame
+            seen["kw"] = kw
+            return fake_events_result
+
+        import evaluation.events as ev_events_mod
+        monkeypatch.setattr(ev_events_mod, "evaluate_events",
+                            fake_evaluate_events)
+        ev = EventSet(name="test_ev", frame=pd.DataFrame({
+            "symbol": ["AAA"] * 6, "label": ["up"] * 6,
+            "date": pd.bdate_range("2024-02-01", periods=6)}), lag_days=1)
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(ev, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path)
+        # runner applied the 1-BDay lag before handing the frame over
+        assert (pd.to_datetime(seen["frame"]["date"]).min()
+                > pd.Timestamp("2024-02-01"))
+        assert seen["kw"]["entry_lag"] == 1
+        assert res["results"]["events"] == fake_events_result
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "events:up").any()
+        row = reg[(reg["evaluation"] == "events:up")
+                  & (reg["horizon"] == 5) & (reg["statistic"] == "mean_pct")]
+        assert row.iloc[0]["value"] == pytest.approx(1.1)
+
+    def test_trade_rule_dispatch(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="test_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=20, seed=0)
+        assert res["input_type"] == "trade_rule"
+        assert res["results"]["summary"]["n_trades"] == 2
+        assert os.path.exists(os.path.join(res["out_dir"], "trades.parquet"))
+        perm = res["results"]["permutation"]
+        assert perm["pnl_p"] is None or 0.0 <= perm["pnl_p"] <= 1.0
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "trades").any()
+
+    def test_trade_rule_requires_cache(self, tmp_path):
+        rule = TradeRule(name="r", entries=lambda d: d["close"] > 0,
+                         exits=lambda d: d["close"] < 0)
+        with pytest.raises(ValueError, match="cache"):
+            ev_runner.run(rule, out_root=str(tmp_path / "reports"))
+
+
+class TestCli:
+    def _write_signal_parquet(self, tmp_path, closes):
+        sig = _runner_signal(closes)
+        p = str(tmp_path / "sig.parquet")
+        sig.frame.to_parquet(p, index=False)
+        return p
+
+    def test_cli_signal_happy_path(self, tmp_path, monkeypatch, capsys):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        p = self._write_signal_parquet(tmp_path, closes)
+        rc = ev_cli.main([
+            "--input-parquet", p, "--input-type", "signal",
+            "--name", "cli_sig", "--lag-days", "1",
+            "--out-root", str(tmp_path / "reports"),
+            "--registry-path", str(tmp_path / "reg.parquet"),
+            "--n-boot", "20", "--n-perm", "5"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "cli_sig" in out
+        assert out.isascii()
+
+    def test_cli_zero_evaluations_exits_nonzero(self, tmp_path, monkeypatch,
+                                                capsys):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        frame = pd.DataFrame({"symbol": ["ZZZ"] * 5,
+                              "date": pd.bdate_range("2024-02-01", periods=5),
+                              "value": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        p = str(tmp_path / "zzz.parquet")
+        frame.to_parquet(p, index=False)
+        rc = ev_cli.main([
+            "--input-parquet", p, "--name", "no_prices",
+            "--out-root", str(tmp_path / "reports"), "--no-registry"])
+        assert rc == 1
+
+    def test_cli_rejects_bad_input_type(self, tmp_path):
+        with pytest.raises(SystemExit):
+            ev_cli.main(["--input-parquet", "x.parquet",
+                         "--input-type", "bogus", "--name", "n"])
