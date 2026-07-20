@@ -538,3 +538,97 @@ class TestTradeEngine:
         assert long_trades.iloc[0]["entry_date"] == df.index[8]
         assert long_trades.iloc[0]["exit_signal_date"] == df.index[10]
         assert long_trades.iloc[0]["exit_date"] == df.index[11]
+
+
+class TestTier2:
+    def test_planted_spread_ci_excludes_zero(self):
+        p = _planted_panel()
+        r = ev_stats.block_bootstrap_spread(p, "value", "fwd_1d", n_boot=300, seed=0)
+        assert r["spread_ci_lo_pct"] > 0
+
+    def test_noise_spread_ci_straddles_zero(self):
+        # NOTE: _noise_panel()'s shared default (seed=1) happens to land on a
+        # per-day quintile-spread realization with |t| ~ 2.8 (see Tier1's own
+        # looser "< 3" bound on the same fixture) -- a 95% bootstrap CI is a
+        # stricter (~1.96 sigma) check and deterministically excludes zero
+        # for that specific seed. seed=2 is an equally-noise fixture that
+        # does not hit this fluke; verified across seeds 1-29 (27/29 straddle,
+        # seeds 1 and 21 don't) that this is fixture-realization variance,
+        # not an implementation bug.
+        p = _noise_panel(seed=2)
+        r = ev_stats.block_bootstrap_spread(p, "value", "fwd_1d", n_boot=300, seed=0)
+        assert r["spread_ci_lo_pct"] < 0 < r["spread_ci_hi_pct"]
+
+    def test_bootstrap_spread_too_few_days_reason(self):
+        p = _planted_panel(n_dates=10)
+        r = ev_stats.block_bootstrap_spread(p, "value", "fwd_1d")
+        assert r["spread_ci_lo_pct"] is None and "usable days" in r["boot_reason"]
+
+    def test_bootstrap_sharpe_ci_and_guards(self):
+        rng = np.random.default_rng(0)
+        good = pd.Series(rng.normal(0.001, 0.01, size=500))
+        r = ev_stats.bootstrap_sharpe(good, n_boot=300, seed=0)
+        assert r["sharpe_ci_lo"] < r["sharpe"] < r["sharpe_ci_hi"]
+        flat = pd.Series(np.zeros(500))
+        assert "sharpe_reason" in ev_stats.bootstrap_sharpe(flat)
+        short = pd.Series(rng.normal(size=10))
+        assert "sharpe_reason" in ev_stats.bootstrap_sharpe(short)
+
+    def test_permutation_null_rule_not_significant(self):
+        # a rule whose entries are RANDOM days on a random walk must not
+        # produce a tiny p (null true -> p ~ uniform; loose bound, fixed seeds)
+        rng = np.random.default_rng(7)
+        idx = pd.bdate_range("2020-01-02", periods=400)
+        cache = {}
+        for sym in ("AAA", "BBB", "CCC"):
+            close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, size=400)))
+            ent = np.zeros(400, dtype=bool)
+            ent[rng.choice(400, size=12, replace=False)] = True
+            ex = np.zeros(400, dtype=bool)
+            ex[rng.choice(400, size=40, replace=False)] = True
+            cache[sym] = pd.DataFrame({"close": close, "ent": ent, "ex": ex},
+                                      index=idx)
+        rule = TradeRule(name="nullrule", entries=lambda d: d["ent"],
+                         exits=lambda d: d["ex"])
+        r = ev_stats.permutation_trades(rule, cache, n_perm=99, seed=0)
+        assert r["pnl_p"] > 0.01 and r["pnl_p"] <= 1.0
+        assert r["n_perm"] > 20
+
+    def test_permutation_no_trades_reason(self):
+        idx = pd.bdate_range("2024-01-02", periods=30)
+        cache = {"AAA": pd.DataFrame({"close": np.full(30, 100.0),
+                                      "ent": False, "ex": False}, index=idx)}
+        rule = TradeRule(name="never", entries=lambda d: d["ent"],
+                         exits=lambda d: d["ex"])
+        r = ev_stats.permutation_trades(rule, cache, n_perm=20, seed=0)
+        assert r["pnl_p"] is None and "no realized trades" in r["perm_reason"]
+
+    def test_bh_fdr_known_vector(self):
+        # NOTE: brief's original literals (0.039, 0.041) sit just ABOVE their
+        # own BH thresholds (0.03, 0.04), so the largest-k-satisfying-p_(k)
+        # <= alpha*k/m rule actually stops at k=2, not k=4 -- verified against
+        # the reference bh_fdr implementation transcribed verbatim below.
+        # Using 0.029/0.031 (just under the same thresholds) match the
+        # comment's stated intent (reject first 4) without changing alpha,
+        # m, or the algorithm.
+        recs = [{"id": i, "p": p} for i, p in
+                enumerate([0.001, 0.008, 0.029, 0.031, 0.20, None])]
+        out = ev_stats.bh_fdr(recs, alpha=0.05)
+        # m=5 valid; BH thresholds 0.01,0.02,0.03,0.04,0.05 -> reject first 4
+        assert out.loc[out["id"] == 0, "reject"].item() is np.True_ or \
+               bool(out.loc[out["id"] == 0, "reject"].item())
+        assert bool(out.loc[out["id"] == 3, "reject"].item())
+        assert not bool(out.loc[out["id"] == 4, "reject"].item())
+        assert not bool(out.loc[out["id"] == 5, "reject"].item())   # None p
+        assert pd.isna(out.loc[out["id"] == 5, "p_adj"].item())
+
+    def test_noise_grid_survives_nothing(self):
+        # spec falsification: pure-noise stats must NOT survive FDR
+        recs = []
+        for seed in range(12):
+            p = _noise_panel(seed=seed + 10)
+            d = ev_stats.daily_ic(p, "value", "fwd_1d")
+            if d["ic_t_stat"] is not None:
+                recs.append({"id": seed, "p": ev_stats.t_to_p(d["ic_t_stat"])})
+        out = ev_stats.bh_fdr(recs, alpha=0.10)
+        assert int(out["reject"].sum()) == 0
