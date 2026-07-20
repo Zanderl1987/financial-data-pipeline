@@ -484,10 +484,14 @@ class TestTradeEngine:
     def test_last_row_exit_boundary(self):
         """Exit at last row (exit_date past data end) drops trade and blocks reentry."""
         df = _trade_frame()
-        df.loc[df.index[2], "ent"] = True
-        df.loc[df.index[11], "ex"] = True  # exit_sig_i=11, exit_i=12 >= n=12
+        df.loc[df.index[2], "ent"] = True   # Entry 1
+        df.loc[df.index[11], "ex"] = True   # exit_sig_i=11, exit_i=12 >= n=12
+        df.loc[df.index[10], "ent"] = True  # Entry 2: later entry signal should be blocked
         trades = simulate(_flag_rule(), {"AAA": df})
-        assert trades.empty  # Trade dropped due to boundary
+        # Entry 1 dropped due to boundary exit, setting next_free=n.
+        # Entry 2 blocked by next_free=n (sig_i=10 < next_free=12).
+        # Together: no trades produced.
+        assert trades.empty
 
     def test_side_both_uses_short_flags(self):
         """side='both' correctly uses short_entries/short_exits for short side."""
