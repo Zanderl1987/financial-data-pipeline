@@ -255,3 +255,122 @@ def bh_fdr(records, alpha: float = 0.10, p_key: str = "p") -> pd.DataFrame:
     if k:
         df.loc[ps.index[:k], "reject"] = True
     return df
+
+
+# --------------------------------------------------------------- Tier 3
+
+
+def walk_forward(panel: pd.DataFrame, value_col: str, fwd_col: str,
+                 n_folds: int = 4, min_train_days: int = 126,
+                 min_names: int = 5) -> dict:
+    """
+    Expanding-window walk-forward: the first min_train_days distinct dates
+    are the initial in-sample block; the remaining dates split into n_folds
+    sequential OOS folds. For unfitted signals this measures out-of-sample
+    STABILITY; headline numbers are the OOS aggregate (spec rule).
+    """
+    sub = panel.dropna(subset=[value_col, fwd_col])
+    dates = np.array(sorted(sub["date"].unique()))
+    need = min_train_days + n_folds * 21
+    if len(dates) < need:
+        return {"oos": None, "folds": [],
+                "wf_reason": f"only {len(dates)} dates (< {need})"}
+    oos_dates = dates[min_train_days:]
+    folds = []
+    for i, chunk in enumerate(np.array_split(oos_dates, n_folds)):
+        fsub = sub[sub["date"].isin(chunk)]
+        d = daily_ic(fsub, value_col, fwd_col, min_names=min_names)
+        folds.append({"fold": i + 1,
+                      "date_range": f"{pd.Timestamp(chunk[0]).date()}"
+                                    f"..{pd.Timestamp(chunk[-1]).date()}",
+                      "mean_daily_ic": d.get("mean_daily_ic"),
+                      "ic_t_stat": d.get("ic_t_stat"),
+                      "ic_days": d.get("ic_days")})
+    osub = sub[sub["date"].isin(oos_dates)]
+    oos = daily_ic(osub, value_col, fwd_col, min_names=min_names)
+    oos.update(quantile_spread(osub, value_col, fwd_col))
+    return {"oos": oos, "folds": folds, "n_train_days": int(min_train_days)}
+
+
+def regime_conditioning(panel: pd.DataFrame, value_col: str, fwd_col: str,
+                        bench_close: pd.Series, min_names: int = 5,
+                        sma_window: int = 200, vol_window: int = 21) -> dict:
+    """
+    Per-regime Tier-1 stats. Bull/bear: benchmark close >= its sma_window SMA.
+    High/low vol: benchmark vol_window realized vol vs its own median.
+    Regimes are assigned by SIGNAL date (info available at signal time).
+    """
+    b = pd.Series(bench_close).dropna()
+    if len(b) < sma_window + vol_window:
+        return {"regime_reason": f"benchmark history too short ({len(b)} days)"}
+    sma = b.rolling(sma_window).mean()
+    vol = b.pct_change().rolling(vol_window).std() * math.sqrt(252.0)
+    med = vol.median()
+
+    sub = panel.dropna(subset=[value_col, fwd_col]).copy()
+    dates = pd.DatetimeIndex(pd.to_datetime(sub["date"]))
+    sma_at = sma.reindex(dates).to_numpy()
+    close_at = b.reindex(dates).to_numpy()
+    vol_at = vol.reindex(dates).to_numpy()
+    sma_ok = np.isfinite(sma_at) & np.isfinite(close_at)
+    vol_ok = np.isfinite(vol_at)
+
+    masks = {"bull": sma_ok & (close_at >= sma_at),
+             "bear": sma_ok & (close_at < sma_at),
+             "high_vol": vol_ok & (vol_at > med),
+             "low_vol": vol_ok & (vol_at <= med)}
+    out = {}
+    for name, mask in masks.items():
+        fsub = sub[mask]
+        res = {"n_days": int(fsub["date"].nunique())}
+        res.update(daily_ic(fsub, value_col, fwd_col, min_names=min_names))
+        res.update(quantile_spread(fsub, value_col, fwd_col))
+        out[name] = res
+    return out
+
+
+def deflated_sharpe(sharpe_ann, n_days: int, trial_sharpes_ann,
+                    skew: float = 0.0, kurt: float = 3.0) -> dict:
+    """
+    Bailey & Lopez de Prado deflated Sharpe ratio. trial_sharpes_ann is the
+    registry's population of previously recorded annualized Sharpes -- a
+    REAL 'number of things tried' denominator instead of a guess. Returns
+    dsr_prob ~ P(true SR > expected max of N null trials).
+    """
+    if sharpe_ann is None or not np.isfinite(sharpe_ann):
+        return {"dsr_prob": None, "dsr_reason": "no observed Sharpe"}
+    trials = np.asarray([s for s in trial_sharpes_ann
+                         if s is not None and np.isfinite(s)], dtype=float)
+    N = len(trials)
+    if N < 2:
+        return {"dsr_prob": None,
+                "dsr_reason": f"registry population too small (n={N} < 2)"}
+    if n_days < 30:
+        return {"dsr_prob": None, "dsr_reason": f"only {n_days} days (< 30)"}
+    daily = 1.0 / math.sqrt(252.0)
+    sr = float(sharpe_ann) * daily
+    var_tr = float(np.var(trials * daily, ddof=1))
+    if not var_tr > 0:
+        return {"dsr_prob": None,
+                "dsr_reason": "zero variance across trial Sharpes"}
+    gamma = 0.5772156649015329
+    z = sps.norm.ppf
+    sr0 = math.sqrt(var_tr) * ((1 - gamma) * z(1 - 1.0 / N)
+                               + gamma * z(1 - 1.0 / (N * math.e)))
+    denom_sq = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr
+    if not denom_sq > 0:
+        return {"dsr_prob": None, "dsr_reason": "invalid skew/kurtosis adjustment"}
+    stat = (sr - sr0) * math.sqrt(n_days - 1) / math.sqrt(denom_sq)
+    return {"dsr_prob": round(float(sps.norm.cdf(stat)), 4),
+            "sr0_ann": round(float(sr0 / daily), 3), "n_trials": int(N)}
+
+
+def registry_percentile(value, population) -> dict:
+    """Where does `value` sit in the registry's population of the same stat?"""
+    pop = np.asarray([v for v in population
+                      if v is not None and np.isfinite(v)], dtype=float)
+    if len(pop) < 2:
+        return {"percentile": None,
+                "pct_reason": f"population too small (n={len(pop)})"}
+    return {"percentile": round(100.0 * float((pop <= value).mean()), 1),
+            "n_population": int(len(pop))}

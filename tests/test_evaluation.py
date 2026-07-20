@@ -632,3 +632,56 @@ class TestTier2:
                 recs.append({"id": seed, "p": ev_stats.t_to_p(d["ic_t_stat"])})
         out = ev_stats.bh_fdr(recs, alpha=0.10)
         assert int(out["reject"].sum()) == 0
+
+
+class TestTier3:
+    def test_walk_forward_planted_oos_holds(self):
+        p = _planted_panel(n_dates=400)
+        r = ev_stats.walk_forward(p, "value", "fwd_1d", n_folds=4,
+                                  min_train_days=126)
+        assert len(r["folds"]) == 4
+        assert r["oos"]["mean_daily_ic"] > 0.9
+        assert all(f["mean_daily_ic"] > 0.9 for f in r["folds"])
+
+    def test_walk_forward_too_short_reason(self):
+        p = _planted_panel(n_dates=100)
+        r = ev_stats.walk_forward(p, "value", "fwd_1d")
+        assert r["oos"] is None and "dates" in r["wf_reason"]
+
+    def test_regime_conditioning_partitions_days(self):
+        # benchmark: 300 rising days (ends above SMA) then 200 falling days
+        idx = pd.bdate_range("2022-01-03", periods=500)
+        px = np.concatenate([100 * (1.004 ** np.arange(300)),
+                             100 * (1.004 ** 299) * (0.996 ** np.arange(1, 201))])
+        bench = pd.Series(px, index=idx)
+        rng = np.random.default_rng(0)
+        rows = [{"symbol": f"S{k}", "date": d, "value": float(rng.normal()),
+                 "fwd_1d": float(rng.normal(scale=0.01))}
+                for d in idx for k in range(6)]
+        panel = pd.DataFrame(rows)
+        r = ev_stats.regime_conditioning(panel, "value", "fwd_1d", bench)
+        assert set(r) == {"bull", "bear", "high_vol", "low_vol"}
+        assert r["bull"]["n_days"] > 0 and r["bear"]["n_days"] > 0
+        # bull+bear cover exactly the SMA-defined dates
+        assert r["bull"]["n_days"] + r["bear"]["n_days"] == 500 - 199
+
+    def test_regime_short_benchmark_reason(self):
+        bench = pd.Series(np.arange(50, dtype=float),
+                          index=pd.bdate_range("2024-01-02", periods=50))
+        r = ev_stats.regime_conditioning(_planted_panel(), "value", "fwd_1d", bench)
+        assert "regime_reason" in r
+
+    def test_deflated_sharpe_monotone_in_trial_dispersion(self):
+        tight = ev_stats.deflated_sharpe(2.0, 500, [0.2, 0.3, 0.1, -0.1])
+        wide = ev_stats.deflated_sharpe(2.0, 500, [3.0, -3.0, 2.5, -2.5])
+        assert tight["dsr_prob"] > 0.9
+        assert wide["dsr_prob"] < tight["dsr_prob"]
+
+    def test_deflated_sharpe_small_population_reason(self):
+        r = ev_stats.deflated_sharpe(2.0, 500, [1.0])
+        assert r["dsr_prob"] is None and "population too small" in r["dsr_reason"]
+
+    def test_registry_percentile(self):
+        r = ev_stats.registry_percentile(0.5, [0.1, 0.2, 0.6, 0.9])
+        assert r["percentile"] == 50.0 and r["n_population"] == 4
+        assert "pct_reason" in ev_stats.registry_percentile(0.5, [0.1])
