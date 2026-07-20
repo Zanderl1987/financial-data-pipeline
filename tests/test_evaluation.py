@@ -197,3 +197,75 @@ class TestBuildReturnPanel:
         assert pd.isna(panel["fwd_3d"].iloc[0])
         # h=1 exits at idx[7], untouched -> still a real return
         assert np.isfinite(panel["fwd_1d"].iloc[0])
+
+
+from evaluation import stats as ev_stats
+from evaluation.ic import evaluate_ic
+
+
+def _planted_panel(n_dates=300, n_syms=8, slope=0.01, noise=0.001, seed=0):
+    """fwd_1d = slope * value + eps -- a signal that OBVIOUSLY works."""
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range("2023-01-02", periods=n_dates)
+    rows = []
+    for d in dates:
+        vals = rng.normal(size=n_syms)
+        for k in range(n_syms):
+            rows.append({"symbol": f"S{k}", "date": d, "value": float(vals[k]),
+                         "fwd_1d": slope * float(vals[k]) + rng.normal(scale=noise)})
+    return pd.DataFrame(rows)
+
+
+def _noise_panel(n_dates=300, n_syms=8, seed=1):
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range("2023-01-02", periods=n_dates)
+    rows = [{"symbol": f"S{k}", "date": d, "value": float(rng.normal()),
+             "fwd_1d": float(rng.normal(scale=0.01))}
+            for d in dates for k in range(n_syms)]
+    return pd.DataFrame(rows)
+
+
+class TestTier1:
+    def test_planted_signal_detected_everywhere(self):
+        p = _planted_panel()
+        pool = ev_stats.pooled_ic(p["value"], p["fwd_1d"])
+        assert pool["pooled_ic"] > 0.9
+        d = ev_stats.daily_ic(p, "value", "fwd_1d")
+        assert d["mean_daily_ic"] > 0.9 and d["ic_t_stat"] > 10
+        s = ev_stats.quantile_spread(p, "value", "fwd_1d")
+        assert s["spread_pct"] > 0 and s["spread_t"] > 10
+
+    def test_noise_not_detected(self):
+        p = _noise_panel()
+        pool = ev_stats.pooled_ic(p["value"], p["fwd_1d"])
+        assert abs(pool["pooled_ic"]) < 0.05
+        s = ev_stats.quantile_spread(p, "value", "fwd_1d")
+        assert abs(s["spread_t"]) < 3
+
+    def test_pooled_too_few_pairs_reason(self):
+        r = ev_stats.pooled_ic(pd.Series([1.0, 2.0]), pd.Series([0.1, 0.2]))
+        assert r["pooled_ic"] is None and "fewer than" in r["pooled_reason"]
+
+    def test_daily_zero_variance_guard(self):
+        p = _planted_panel()
+        p["value"] = 1.0                       # constant -> no per-day ranks
+        d = ev_stats.daily_ic(p, "value", "fwd_1d")
+        assert d["ic_t_stat"] is None and "daily_reason" in d
+
+    def test_t_to_p_two_sided(self):
+        assert ev_stats.t_to_p(0.0) == pytest.approx(1.0)
+        assert ev_stats.t_to_p(1.96) == pytest.approx(0.05, abs=0.01)
+
+
+class TestEvaluateIC:
+    def test_direction_minus_one_orients(self):
+        p = _planted_panel()
+        p["value"] = -p["value"]               # now LOWER value = higher return
+        res = evaluate_ic(p, direction=-1)
+        assert res[1]["pooled_ic"] > 0.9       # orientation recovers the sign
+        assert res[1]["oriented"] == -1
+
+    def test_missing_horizon_columns_skipped(self):
+        p = _planted_panel()                   # only fwd_1d exists
+        res = evaluate_ic(p)
+        assert list(res.keys()) == [1]
