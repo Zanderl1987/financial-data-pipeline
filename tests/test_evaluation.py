@@ -1138,3 +1138,117 @@ class TestCli:
         with pytest.raises(SystemExit):
             ev_cli.main(["--input-parquet", "x.parquet",
                          "--input-type", "bogus", "--name", "n"])
+
+
+import generate_eval_report as ev_report
+
+
+def _write_fake_run(root, name="fake_sig", ts="20260719_120000"):
+    d = os.path.join(str(root), f"{name}_{ts}")
+    os.makedirs(d, exist_ok=True)
+    results = {
+        "ic": {"1": {"pooled_ic": 0.011, "pooled_p": 0.2, "n": 900,
+                     "mean_daily_ic": 0.010, "ic_t_stat": 1.1,
+                     "ic_days": 250, "spread_pct": 0.05, "spread_t": 0.8,
+                     "spread_p": 0.4, "top_n": 200, "bottom_n": 200,
+                     "oriented": 1},
+               "5": {"pooled_ic": 0.031, "pooled_p": 0.01, "n": 880,
+                     "mean_daily_ic": 0.028, "ic_t_stat": 2.4,
+                     "ic_days": 248, "spread_pct": 0.22, "spread_t": 2.1,
+                     "spread_p": 0.04, "top_n": 190, "bottom_n": 190,
+                     "oriented": 1}},
+        "tier2": {"1": {"spread_boot_mean_pct": 0.05,
+                        "spread_ci_lo_pct": -0.1, "spread_ci_hi_pct": 0.2,
+                        "n_boot": 50, "boot_days": 250},
+                  "5": {"spread_boot_mean_pct": 0.22,
+                        "spread_ci_lo_pct": 0.02, "spread_ci_hi_pct": 0.4,
+                        "n_boot": 50, "boot_days": 248}},
+        "tier3": {"walk_forward": {"oos": {"mean_daily_ic": 0.02,
+                                           "ic_t_stat": 1.5, "ic_days": 60},
+                                   "n_train_days": 126},
+                  "regimes": {"bull": {"n_days": 150, "mean_daily_ic": 0.03},
+                              "bear": {"n_days": 100, "mean_daily_ic": -0.01},
+                              "high_vol": {"n_days": 125,
+                                           "mean_daily_ic": 0.02},
+                              "low_vol": {"n_days": 125,
+                                          "mean_daily_ic": 0.01}},
+                  "deflated_sharpe": {"dsr_prob": 0.62, "sr0_ann": 0.8,
+                                      "n_trials": 3}},
+        "portfolio": {"metrics": {"sharpe": 0.9},
+                      "sharpe_bootstrap": {"sharpe": 0.9,
+                                           "sharpe_ci_lo": 0.1,
+                                           "sharpe_ci_hi": 1.6,
+                                           "n_boot": 50}},
+        "fdr": [{"evaluation": "ic", "horizon": 5, "statistic": "pooled_p",
+                 "p": 0.01, "p_adj": 0.05, "reject": True}],
+    }
+    meta = {"run_id": "abc123", "input_name": name, "input_type": "signal",
+            "created_at": "2026-07-19T12:00:00+00:00", "git_commit": "deadbeef",
+            "universe": ["AAA", "BBB"], "universe_hash": "aaa111bbb222",
+            "date_range": "2024-01-02..2025-01-31",
+            "dropped": {"ZZZ": "no price data"}, "n_evaluations": 4,
+            "params": {"lag_days": 0, "direction": 1, "benchmark": "SPY"}}
+    with open(os.path.join(d, "results.json"), "w") as fh:
+        json.dump(results, fh)
+    with open(os.path.join(d, "run_meta.json"), "w") as fh:
+        json.dump(meta, fh)
+    return d
+
+
+class TestReport:
+    def test_signal_report_end_to_end(self, tmp_path, capsys):
+        d = _write_fake_run(tmp_path)
+        out = str(tmp_path / "report.html")
+        rc = ev_report.main(["--run-dir", d, "--out", out])
+        assert rc == 0
+        assert capsys.readouterr().out.isascii()
+        html = open(out, encoding="utf-8").read()
+        assert "plotly" in html.lower()
+        assert "fake_sig" in html
+        assert "deadbeef" in html          # provenance in the header
+
+    def test_latest_picks_newest(self, tmp_path):
+        _write_fake_run(tmp_path, ts="20260101_000000")
+        d2 = _write_fake_run(tmp_path, ts="20260301_000000")
+        assert ev_report.find_latest("fake_sig", root=str(tmp_path)) == d2
+        assert ev_report.find_latest("nope", root=str(tmp_path)) is None
+
+    def test_missing_run_dir_fails_cleanly(self, tmp_path, capsys):
+        rc = ev_report.main(["--run-dir", str(tmp_path / "absent")])
+        assert rc == 1
+        assert "X" in capsys.readouterr().out
+
+    def test_classify_significance_tiers(self):
+        assert ev_report.classify_significance(0.01, 3.0) == "noise"
+        assert ev_report.classify_significance(0.03, 1.0) == "noise"
+        assert ev_report.classify_significance(0.03, 2.5) == "weak"
+        assert ev_report.classify_significance(0.06, 2.5) == "significant"
+        assert ev_report.classify_significance(None, None) == "noise"
+
+    def test_trade_report(self, tmp_path):
+        d = os.path.join(str(tmp_path), "rule_20260719_120000")
+        os.makedirs(d)
+        results = {"summary": {"n_trades": 2, "n_long": 2, "n_short": 0,
+                               "total_pnl_dollars": 350.0,
+                               "win_rate_pct": 100.0, "avg_pnl_pct": 1.7,
+                               "median_days_held": 5.0, "n_symbols": 1},
+                   "permutation": {"obs_pnl_dollars": 350.0,
+                                   "obs_win_rate_pct": 100.0,
+                                   "pnl_p": 0.2, "win_rate_p": 0.3,
+                                   "n_perm": 20}}
+        meta = {"run_id": "r", "input_name": "rule", "input_type":
+                "trade_rule", "created_at": "2026-07-19", "git_commit": "x",
+                "universe": ["AAA"], "universe_hash": "h",
+                "date_range": "2024-01-02..2024-03-01", "dropped": {},
+                "n_evaluations": 2, "params": {}}
+        with open(os.path.join(d, "results.json"), "w") as fh:
+            json.dump(results, fh)
+        with open(os.path.join(d, "run_meta.json"), "w") as fh:
+            json.dump(meta, fh)
+        pd.DataFrame({"symbol": ["AAA", "AAA"], "side": ["long", "long"],
+                      "pnl_pct": [2.0, 1.4], "pnl_dollars": [200.0, 150.0],
+                      "days_held": [5, 6]}).to_parquet(
+            os.path.join(d, "trades.parquet"), index=False)
+        out = str(tmp_path / "rule.html")
+        assert ev_report.main(["--run-dir", d, "--out", out]) == 0
+        assert "rule" in open(out, encoding="utf-8").read()
