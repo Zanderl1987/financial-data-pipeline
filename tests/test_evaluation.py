@@ -438,3 +438,99 @@ class TestTradeEngine:
         assert s["n_trades"] == 1 and s["n_long"] == 1 and s["n_short"] == 0
         assert s["win_rate_pct"] == 100.0
         assert trade_summary(trades.iloc[0:0])["summary_reason"] == "no realized trades"
+
+    def test_invalid_entry_price_skipped(self):
+        """Entry price NaN/zero/negative skips position entirely."""
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[5], "ex"] = True
+        df.loc[df.index[3], "close"] = np.nan  # entry_date has NaN close
+        trades = simulate(_flag_rule(), {"AAA": df})
+        assert trades.empty
+
+        # Test with zero entry price
+        df2 = _trade_frame()
+        df2.loc[df2.index[2], "ent"] = True
+        df2.loc[df2.index[5], "ex"] = True
+        df2.loc[df2.index[3], "close"] = 0.0
+        trades2 = simulate(_flag_rule(), {"AAA": df2})
+        assert trades2.empty
+
+        # Test with negative entry price
+        df3 = _trade_frame()
+        df3.loc[df3.index[2], "ent"] = True
+        df3.loc[df3.index[5], "ex"] = True
+        df3.loc[df3.index[3], "close"] = -5.0
+        trades3 = simulate(_flag_rule(), {"AAA": df3})
+        assert trades3.empty
+
+    def test_invalid_exit_price_skipped(self):
+        """Exit price NaN/zero/negative skips position entirely."""
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[5], "ex"] = True
+        df.loc[df.index[6], "close"] = np.nan  # exit_date has NaN close
+        trades = simulate(_flag_rule(), {"AAA": df})
+        assert trades.empty
+
+        # Test with zero exit price
+        df2 = _trade_frame()
+        df2.loc[df2.index[2], "ent"] = True
+        df2.loc[df2.index[5], "ex"] = True
+        df2.loc[df2.index[6], "close"] = 0.0
+        trades2 = simulate(_flag_rule(), {"AAA": df2})
+        assert trades2.empty
+
+    def test_last_row_exit_boundary(self):
+        """Exit at last row (exit_date past data end) drops trade and blocks reentry."""
+        df = _trade_frame()
+        df.loc[df.index[2], "ent"] = True
+        df.loc[df.index[11], "ex"] = True  # exit_sig_i=11, exit_i=12 >= n=12
+        trades = simulate(_flag_rule(), {"AAA": df})
+        assert trades.empty  # Trade dropped due to boundary
+
+    def test_side_both_uses_short_flags(self):
+        """side='both' correctly uses short_entries/short_exits for short side."""
+        df = _trade_frame(n=20)  # Use larger frame to fit both non-overlapping positions
+        # Set up separate entry/exit columns
+        df["short_ent"] = False
+        df["short_ex"] = False
+
+        # Short entry at index 1 (entry_date 2), exit at index 4 (exit_date 5)
+        df.loc[df.index[1], "short_ent"] = True
+        df.loc[df.index[4], "short_ex"] = True
+
+        # Long entry at index 7 (entry_date 8), exit at index 10 (exit_date 11)
+        df.loc[df.index[7], "ent"] = True
+        df.loc[df.index[10], "ex"] = True
+
+        rule = TradeRule(
+            name="both_rule",
+            entries=lambda d: d["ent"],
+            exits=lambda d: d["ex"],
+            short_entries=lambda d: d["short_ent"],
+            short_exits=lambda d: d["short_ex"],
+            side="both"
+        )
+
+        trades = simulate(rule, {"AAA": df})
+        assert len(trades) == 2
+
+        # Separate by side
+        long_trades = trades[trades["side"] == "long"]
+        short_trades = trades[trades["side"] == "short"]
+
+        assert len(long_trades) == 1
+        assert len(short_trades) == 1
+
+        # Short uses short_entries/short_exits (earlier)
+        assert short_trades.iloc[0]["entry_signal_date"] == df.index[1]
+        assert short_trades.iloc[0]["entry_date"] == df.index[2]
+        assert short_trades.iloc[0]["exit_signal_date"] == df.index[4]
+        assert short_trades.iloc[0]["exit_date"] == df.index[5]
+
+        # Long uses entries/exits (later)
+        assert long_trades.iloc[0]["entry_signal_date"] == df.index[7]
+        assert long_trades.iloc[0]["entry_date"] == df.index[8]
+        assert long_trades.iloc[0]["exit_signal_date"] == df.index[10]
+        assert long_trades.iloc[0]["exit_date"] == df.index[11]
