@@ -117,12 +117,22 @@ def compare(rows: pd.DataFrame, path: str = REG_PATH, tol: float = 0.005,
     return out.drop(columns=["baseline_universe_hash"])
 
 
-def population(statistic: str, path: str = REG_PATH) -> list:
-    """Latest value per input_name for one statistic (deflated-Sharpe trials)."""
+def population(statistic: str, path: str = REG_PATH,
+               exclude_input_name=None) -> list:
+    """Latest value per input_name for one statistic (deflated-Sharpe trials).
+
+    exclude_input_name, if given, drops that input_name's own rows before
+    taking the latest-per-name population. Callers who are about to append
+    their own just-computed value to this population (e.g. DSR trials) pass
+    their own name here -- otherwise a re-run of an already-registered
+    signal double-counts its own prior entry (stale value + current value).
+    """
     reg = load(path)
     if reg.empty:
         return []
     sub = reg[(reg["statistic"] == statistic) & reg["value"].notna()]
+    if exclude_input_name is not None:
+        sub = sub[sub["input_name"] != exclude_input_name]
     if sub.empty:
         return []
     latest = (sub.sort_values("created_at")

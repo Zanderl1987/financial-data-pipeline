@@ -766,6 +766,26 @@ class TestRegistry:
         assert sorted(pop) == [pytest.approx(-0.2), pytest.approx(1.5)]
         assert ev_registry.population("nope", path=path) == []
 
+    def test_population_exclude_input_name(self, tmp_path):
+        path = str(tmp_path / "results.parquet")
+        ev_registry.append(_reg_rows(run_id="r1", name="sig_a", value=1.0,
+                                     statistic="sharpe", horizon=-1,
+                                     created="2026-07-18T10:00:00"), path)
+        ev_registry.append(_reg_rows(run_id="r2", name="sig_b", value=-0.2,
+                                     statistic="sharpe", horizon=-1,
+                                     created="2026-07-18T10:00:00"), path)
+        # excluding sig_a's own name drops its entry, keeps sig_b's
+        pop = ev_registry.population("sharpe", path=path,
+                                     exclude_input_name="sig_a")
+        assert pop == [pytest.approx(-0.2)]
+        # a different signal's own prior entries are unaffected
+        pop_other = ev_registry.population("sharpe", path=path,
+                                           exclude_input_name="sig_c")
+        assert sorted(pop_other) == [pytest.approx(-0.2), pytest.approx(1.0)]
+        # no exclusion (default) still returns both, matching prior behavior
+        assert sorted(ev_registry.population("sharpe", path=path)) == \
+            [pytest.approx(-0.2), pytest.approx(1.0)]
+
     def test_universe_hash_order_and_case_invariant(self):
         h1 = ev_registry.universe_hash(["AAPL", "MSFT", "SPY"])
         h2 = ev_registry.universe_hash(["spy", "msft", "aapl"])
@@ -787,6 +807,23 @@ import types
 
 from evaluation import runner as ev_runner
 import evaluate as ev_cli
+
+
+class TestStatRows:
+    def test_excludes_metadata_keeps_real_stats(self):
+        d = {"pooled_ic": 0.05, "pooled_p": 0.02, "n": 900, "oriented": 1,
+             "mean_daily_ic": 0.01, "ic_days": 250, "top_n": 200,
+             "bottom_n": 200, "spread_pct": 0.1, "ic_pct_positive": 60.0}
+        rows = ev_runner._stat_rows("ic", 5, d, n_key="n")
+        stats = {r["statistic"] for r in rows}
+        # metadata keys (counts/sizes/orientation flag) must not appear
+        assert stats.isdisjoint({"n", "oriented", "ic_days", "top_n",
+                                 "bottom_n"})
+        # real measured statistics from the same dict must still appear
+        assert {"pooled_ic", "pooled_p", "mean_daily_ic", "spread_pct",
+                "ic_pct_positive"} <= stats
+        # n_key's value still flows into every emitted row's n column
+        assert all(r["n"] == 900 for r in rows)
 
 
 def _fake_price_world(n=320, syms=("AAA", "BBB", "CCC", "DDD", "EEE", "FFF"),
@@ -856,6 +893,47 @@ class TestRunner:
         assert (reg["statistic"] == "pooled_ic").any()
         assert (reg["statistic"] == "sharpe").any()
         assert reg["run_id"].nunique() == 1
+
+    def test_dsr_trials_exclude_own_prior_run(self, tmp_path, monkeypatch):
+        """A re-run of an already-registered signal must not double-count
+        its own prior sharpe in the DSR trial population (finding 1)."""
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+
+        # Seed the registry as if this exact signal already ran once (own
+        # prior sharpe=1.0), plus a different signal's own prior (2.0).
+        ev_registry.append(_reg_rows(run_id="prior_x", name=sig.name,
+                                     value=1.0, statistic="sharpe",
+                                     horizon=-1,
+                                     created="2026-07-18T10:00:00"), reg_path)
+        ev_registry.append(_reg_rows(run_id="prior_y", name="other_sig",
+                                     value=2.0, statistic="sharpe",
+                                     horizon=-1,
+                                     created="2026-07-18T10:00:00"), reg_path)
+
+        captured = {}
+        real_dsr = ev_stats.deflated_sharpe
+
+        def fake_dsr(sharpe_ann, n_days, trials, *a, **kw):
+            captured["trials"] = list(trials)
+            return real_dsr(sharpe_ann, n_days, trials, *a, **kw)
+
+        monkeypatch.setattr(ev_stats, "deflated_sharpe", fake_dsr)
+
+        ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                      registry_path=reg_path, n_boot=50, n_perm=10, seed=0)
+
+        assert "trials" in captured, "DSR path did not run"
+        trials = captured["trials"]
+        # X's own stale prior entry (1.0) must be fully excluded -- not
+        # merely deduped -- before this run's fresh sharpe_now is appended.
+        assert trials.count(1.0) == 0
+        # Y's own prior entry is a DIFFERENT signal's trial and must
+        # still be counted.
+        assert 2.0 in trials
+        assert len(trials) == 2          # [other_sig's 2.0, this run's own]
 
     def test_signal_no_registry_write(self, tmp_path, monkeypatch):
         closes = _fake_price_world()

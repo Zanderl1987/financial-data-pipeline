@@ -50,13 +50,32 @@ def _json_safe(v):
     return v
 
 
+# Sample-size / count / flag leaves produced across the _stat_rows call
+# sites in this module (ic_res per-horizon dicts, block_bootstrap_spread,
+# walk_forward's oos dict, regime_conditioning's per-regime dicts,
+# bootstrap_sharpe, deflated_sharpe, registry_percentile, the events-loop
+# rowdict, and the trades summary/perm dicts). These are metadata about
+# HOW a statistic was computed, not measured signal quality -- registering
+# them as first-class "statistic" rows would let compare()/baselines() diff
+# them run-over-run as if they were real regressions. ic_pct_positive is a
+# genuine measured statistic (share of days with positive IC) and stays in.
+_METADATA_KEYS = {
+    "n", "ic_days", "top_n", "bottom_n", "oriented",
+    "n_boot", "boot_days", "n_days", "n_trials", "n_population", "n_perm",
+    "n_trades", "n_long", "n_short", "n_symbols",
+}
+
+
 def _stat_rows(evaluation: str, horizon: int, d: dict, n_key=None) -> list:
-    """One registry row per numeric (non-bool) leaf of a flat result dict."""
+    """One registry row per numeric (non-bool) leaf of a flat result dict,
+    excluding sample-size/count/flag metadata keys (see _METADATA_KEYS)."""
     n = 0
     if n_key is not None and d.get(n_key) is not None:
         n = int(d[n_key])
     rows = []
     for k, v in d.items():
+        if k in _METADATA_KEYS:
+            continue
         if isinstance(v, bool) or not isinstance(v, (int, float, np.floating,
                                                      np.integer)):
             continue
@@ -145,7 +164,8 @@ def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
         rows += _stat_rows("portfolio_boot", -1, boot_sharpe, n_key="n_boot")
         sharpe_now = boot_sharpe.get("sharpe")
         if sharpe_now is not None:
-            trials = ev_registry.population("sharpe", path=registry_path)
+            trials = ev_registry.population("sharpe", path=registry_path,
+                                            exclude_input_name=obj.name)
             trials = trials + [sharpe_now]
             dsr = ev_stats.deflated_sharpe(sharpe_now, len(rets), trials)
             pct = ev_stats.registry_percentile(sharpe_now, trials)
