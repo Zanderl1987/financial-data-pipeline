@@ -215,22 +215,22 @@ Files touched this task: `docs/EVALUATION.md` (new), `CLAUDE.md` (Commands
   unavailable to the controller when attempted directly — this remains an
   environment gap, not a code gap.
 
-## Task 12 — BLOCKED on a real-data-access decision (not yet resolved)
+## Task 12 — real-data access, resolved (2026-07-22)
 
 Task 12 is the acceptance gate: run the framework against REAL curated data
-and reproduce the recorded sentiment/TV-rating baselines. Discovered the
-worktree has no `storage/curated/` (gitignored, never populated there — a
-non-issue for Tasks 1–11 since those only used synthetic/monkeypatched data,
-but Task 12 explicitly requires the real store). The real curated data only
-exists in the main repo checkout, which currently carries substantial
-unrelated in-flight uncommitted work (the constituents/securities pipeline
-session).
+and reproduce the recorded sentiment/TV-rating baselines. The worktree had no
+`storage/curated/` (gitignored, never populated there — a non-issue for Tasks
+1–11 since those only used synthetic/monkeypatched data, but Task 12
+explicitly requires the real store). The real curated data only exists in the
+main repo checkout, which currently carries substantial unrelated in-flight
+uncommitted work (the constituents/securities pipeline session).
 
-Asked Zander how to give the worktree access: (a) a directory junction from
-the worktree's `storage/curated` to the main checkout's real one — no
-copying, Task 12 only reads curated data and writes new output solely to
-`storage/eval_registry/` and `storage/reports/eval/`, both worktree-local and
-nonexistent in the main checkout; (b) copy the data instead for full
-isolation; (c) skip the live acceptance run for now and only write docs with
-placeholder numbers. Question was interrupted before Zander answered — pick
-this back up before touching Task 12.
+Resolved via option (a) from the choices originally raised: a directory
+junction from the worktree's `storage/curated` to the main checkout's real
+one (`C:\Users\zande\PycharmProjects\financial-data-pipeline\storage\curated`)
+— confirmed present via `Get-Item` (`LinkType: Junction`). No copying; Task
+12 only reads curated data through this junction and writes its own new
+output solely to `storage/eval_registry/` and `storage/reports/eval/`, both
+worktree-local and untouched in the main checkout. See the "Task 12
+acceptance run" section above for the resulting numbers, reproduced against
+this real data.
