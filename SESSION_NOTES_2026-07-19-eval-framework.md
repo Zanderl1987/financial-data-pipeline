@@ -100,3 +100,137 @@ Fixes made during review:
 - Price-volume signal family (own cycle) • conditional/compound scenario
   testing • config-YAML runner layer • TV-rating experiment writeup •
   custom_index_tool fiscal-quarter derivation fix (EARNINGS_PULL_FAILED.txt).
+
+## Session continuation — 2026-07-20 (Claude Sonnet 5, execution)
+
+Zander chose Subagent-Driven Development. Worktree confirmed at
+`.worktrees/eval-framework` (branch `eval-framework-impl`, based on `5bd7815`).
+Executed Tasks 1–11 of 12 this session (Tasks 1–6 had already landed in an
+earlier part of this same session before a resume): fresh implementer
+subagent per task + task-reviewer subagent (spec compliance + code quality),
+per the skill. All eleven approved; only Minor findings throughout, no
+Critical/Important issues survived review. Progress ledger:
+`.superpowers/sdd/progress.md` (commit range per task, reviewer verdict).
+
+## Session continuation — 2026-07-22 (Claude Sonnet 5, Task 12 acceptance run)
+
+Plan executed through Task 12 — the acceptance gate. No new framework code;
+ran the already-built framework against real curated parquet and reproduced
+the legacy baselines.
+
+**Step 1 — test suite:** `pytest tests/ -q` → 440 passed, 1 failed
+(`test_catalog.py::TestCatalogPaths::test_storage_dirs_exist`), traced via
+`git log -- query.py` to commit `a0b78b0` (before this branch existed) —
+CATALOG entries for the separate in-flight constituents-pipeline work whose
+storage dirs were never populated. Not a new failure from this task.
+`tests/test_evaluation.py` alone: 92/92 passed.
+
+**Step 2 — sentiment acceptance:** `evaluate.py --adapter sentiment
+--n-boot 500 --n-perm 100` reproduced `SENTIMENT_EVAL_RESULTS.txt`'s
+2026-07-07 `sentiment_eval.py` table to 4 decimal places at every horizon:
+
+| h | pooled_ic | daily_ic | t | legacy pooledIC |
+|---|---|---|---|---|
+| 1 | 0.0086 | 0.0100 | 0.88 | 0.0086 |
+| 3 | -0.0113 | -0.0213 | -1.95 | -0.0113 |
+| 5 | -0.0054 | -0.0108 | -0.92 | -0.0054 |
+| 10 | 0.0175 | 0.0046 | 0.42 | 0.0175 |
+| 21 | 0.0045 | -0.0154 | -1.40 | 0.0045 |
+
+All horizons verdict noise (|daily IC| < 0.02 or |t| < 2 at every h). Well
+within the ±0.005 tolerance — effectively an exact reproduction.
+
+**Step 3 — TV rating acceptance:** `evaluate.py --adapter rating
+--signal-col rating_all --n-boot 500 --n-perm 100`: daily ICs -0.0049
+(h1) to -0.0115 (h21), t down to -5.16 at h21. Matches
+`SESSION_NOTES_2026-07-18.md`'s recorded range (-0.0048 to -0.0122, t up
+to -5.13) almost exactly. |IC| < 0.02 at every horizon → noise verdict
+throughout, consistent with the recorded "mildly contrarian, not a
+tradeable edge" read.
+
+**Step 4 — 9 factor first baselines** (`evaluate.py --adapter signal-panel
+--factor <f>`, all exit 0, none empty): headline daily_ic (h=1 / h=21):
+momentum +0.0190 / +0.0332 (t up to 11.53 — clearly the strongest, real
+signal); value -0.0036 / -0.0063; quality +0.0004 / -0.0154; low_vol
+-0.0005 / -0.0448 (t -15.27 at h21 — strong and growing, worth a closer
+look later); growth +0.0050 / +0.0093; short_pressure -0.0757 (h1 only,
+n/a beyond h5 — thin data, only 9 distinct dates); insider_flow -0.0085 /
+-0.0582; sentiment(factor) -0.0184 / -0.0798 (this is the fundamentals-
+style `analytics.signals` sentiment factor, distinct from the VADER
+`news_sentiment` adapter in Step 2 — much stronger/more negative, first
+baseline only, no legacy comparison exists); composite +0.0118 / -0.0049.
+All recorded as first baselines in the registry, nulls included
+(short_pressure has no h10/h21 due to sparse data).
+
+**Step 5 — event + trade-rule smoke:** `rating-changes --start 2024-01-01`
+exits 0 (upgrade n=8913, downgrade n=8918, no legacy baseline to compare).
+`tv-rule --n-perm 200` exits 0: 21,938 trades (14,230 long / 7,708 short),
+36.6% win rate, net pnl $378,073.23 — matches `SESSION_NOTES_2026-07-18.md`'s
+recorded trade summary (21,938 trades, 36.6% win rate, net +$378,073)
+essentially exactly.
+
+**Step 6 — registry + report:** registry = 3,893 rows, 13 distinct
+input_names (>= 11 required): factor_composite, factor_growth,
+factor_insider_flow, factor_low_vol, factor_momentum, factor_quality,
+factor_sentiment, factor_short_pressure, factor_value, news_sentiment,
+tv_rating_all, tv_rating_changes, tv_threshold. HTML report
+(`generate_eval_report.py --latest news_sentiment`) wrote a 3.5 MB file
+with correct title/headline section; `Start-Process` skipped per task
+instructions (environment can't open a browser) — file-size + content
+grep substituted.
+
+**No deviations from the recorded baselines** — both gating checks
+(sentiment, TV rating) reproduced within tolerance on the first run; no
+re-audit or framework changes were needed.
+
+Files touched this task: `docs/EVALUATION.md` (new), `CLAUDE.md` (Commands
++ Architecture pointer), this file. No `evaluation/*.py`, `evaluate.py`, or
+`generate_eval_report.py` changes — acceptance run only.
+
+- Task 7 (Tier-3 battery): clean. 2 Minor (unguarded `n_folds=0`, undocumented
+  magic number), both traced to the brief's own reference code.
+- Task 8 (registry.py): clean, verified byte-identical transcription.
+- Task 9 (runner + evaluate.py CLI): clean, verified byte-identical
+  transcription; reviewer independently cross-checked every integration call
+  site against the real Task 1–8 signatures, zero mismatches.
+- Task 10 (adapters): implementer caught a genuine typo in the PLAN's own
+  test literal — `test_tv_threshold_rule_matches_legacy_semantics`'s
+  `short_exits` assertion had `False` at index 3, contradicting both its own
+  inline comment and the real `tv_rating_eval.py` `EXIT_SHORT_MIN` semantics.
+  Independently verified by hand (0.05 > -0.1 is True) before fixing both the
+  plan file and the extracted brief, then re-dispatching. Otherwise clean;
+  reviewer independently checked every adapter call site against the real
+  `analytics.signals`/`sentiment_eval`/`tv_rating_eval`/`event_backtest`
+  signatures, zero mismatches.
+- Task 11 (generate_eval_report.py): implementer reported DONE_WITH_CONCERNS —
+  the `claude-in-chrome` browser tool was unavailable in its environment, so
+  the brief's Step 5 visual eyeball couldn't be done; substituted a
+  structural check. Controller independently rendered real signal and
+  trade-rule reports from the actual module (not test fixtures) and verified
+  the style contract by inspecting the raw HTML/Plotly JSON directly: fixed
+  categorical colors in order, status colors correctly applied to regime
+  bars, zero-line via the axis `zeroline` property (not a `shapes` entry —
+  worth knowing if auditing this again), single y-axis throughout, correct
+  legend behavior, pure ASCII, no leaked `None`/`NaN`. Browser tool was also
+  unavailable to the controller when attempted directly — this remains an
+  environment gap, not a code gap.
+
+## Task 12 — BLOCKED on a real-data-access decision (not yet resolved)
+
+Task 12 is the acceptance gate: run the framework against REAL curated data
+and reproduce the recorded sentiment/TV-rating baselines. Discovered the
+worktree has no `storage/curated/` (gitignored, never populated there — a
+non-issue for Tasks 1–11 since those only used synthetic/monkeypatched data,
+but Task 12 explicitly requires the real store). The real curated data only
+exists in the main repo checkout, which currently carries substantial
+unrelated in-flight uncommitted work (the constituents/securities pipeline
+session).
+
+Asked Zander how to give the worktree access: (a) a directory junction from
+the worktree's `storage/curated` to the main checkout's real one — no
+copying, Task 12 only reads curated data and writes new output solely to
+`storage/eval_registry/` and `storage/reports/eval/`, both worktree-local and
+nonexistent in the main checkout; (b) copy the data instead for full
+isolation; (c) skip the live acceptance run for now and only write docs with
+placeholder numbers. Question was interrupted before Zander answered — pick
+this back up before touching Task 12.

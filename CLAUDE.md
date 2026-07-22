@@ -26,6 +26,8 @@ C:\ProgramData\anaconda3\python.exe run_all.py --dry-run     # show pipeline pla
 C:\ProgramData\anaconda3\python.exe run_all.py               # run all (3 dependency stages)
 C:\ProgramData\anaconda3\python.exe validate.py              # data health check
 C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped snapshots
+C:\ProgramData\anaconda3\python.exe evaluate.py --adapter sentiment   # unified eval framework (see docs/EVALUATION.md)
+C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest <name>   # HTML report from eval artifacts
 ```
 
 ## Architecture
@@ -37,6 +39,7 @@ C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped s
             └─ query.py  (DuckDB CATALOG; q.load()/q.sql(); PREFERS curated)
                  └─ analytics/  (features.py PIT panel, signals.py z-scored factors, technical.py TA + tv_rating)
                       └─ backtest.py (quantile portfolios) / event_backtest.py (event studies)
+                           └─ evaluation/ + evaluate.py (unified eval framework: 3-tier significance battery, append-only registry — docs/EVALUATION.md)
                            └─ signal_monitor.py (maintained signal-health table, DEGRADED flags)
 ```
 
