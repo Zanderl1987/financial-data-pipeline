@@ -562,3 +562,48 @@ which always roots at `storage/raw/`, but the actual Iceberg data lives at
 from yesterday's `d5dd859` Iceberg migration. **Not fixed** — flagged to
 Zander, awaiting a decision on whether to tackle it now or later. Also not
 yet committed as of this writing (the file moves + this note).
+
+## Iceberg CATALOG fix + pytrends dependency (2026-07-23, same session continued)
+
+Zander asked to fix the Iceberg CATALOG path bug next. Before touching
+`query.py`, checked whether `_register_views()` errors or silently no-ops
+when a glob matches zero files — it silently `continue`s. That explained why
+`curated.py` never complained about these 6 tables: their views (and
+`index_holdings`, the composite view joining 3 of them) simply never existed,
+with no error surfaced anywhere. Added `_iceberg_glob()` (rooted at
+`storage/iceberg/`, next to the existing `_glob()` rooted at `storage/raw/`)
+and repointed the 6 CATALOG entries.
+
+Before calling that "fixed," checked whether these tables would return clean
+data once their views existed — naively globbing an Iceberg table's `data/`
+directory reads every data file ever written across every commit, not just
+the current snapshot (query.py doesn't use a real Iceberg snapshot-aware
+scan). Checked for duplicates on each table's natural key: `index_members`
+0.05% dupes, `fund_holdings` ~1%, but `securities` 49.7% and both shipping
+tables ~50% — periodic full re-fetches, not corruption. Confirmed these 6
+were never wired into `curated.py`'s `KEYS` either (a second gap from the
+`d5dd859` migration — there was even a stale comment claiming shipping was
+"Iceberg-managed, no curated needed," which is false given how query.py
+actually reads it). Added natural keys for all 6. `securities` uses
+`last_refreshed` instead of `fetched_at` for its timestamp, which
+`_sort_recency` didn't recognize — added it, spot-checked NVDA's dedup keeps
+the 07-23 refresh over 07-17 (i.e. actually freshest, not just last-in-glob-order).
+
+Verified: `curated.py` compacts 139 tables (was 133), `index_holdings` (previously
+silently empty) returns 15,199 rows, full suite still 453 passed with only the
+same pre-existing unrelated failure (never-run pipelines) remaining. Committed
+`8e7b05f`.
+
+Then fixed the last item on the list: `google_trends`'s missing `pytrends`
+dependency. Already listed in `requirements.txt` (unpinned) — just never
+installed. `pip install pytrends` (4.9.2), ran the pipeline live (3 keyword
+groups, 1,365 rows each), reran `curated.py` (142 tables, clean). No repo file
+changed, so nothing to commit for this one — env-only fix.
+
+All three follow-up issues found while fixing the original `futures` ask are
+now resolved: Hive partition stray files (prior section), Iceberg CATALOG
+path bug, and `google_trends`. `PROJECT_NOTES.md` updated in place to reflect
+all of this; this file gets the narrative. Of the original 5-item roadmap
+initiative, only items 2 (Schwab OAuth) and 3 (AV earnings backfill) remain,
+both blocked on external factors (Zander's interactive action; AV quota
+pacing) rather than anything left to build.

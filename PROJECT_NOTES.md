@@ -37,9 +37,9 @@ the start of any session that touches pipelines or analytics.
 | **Congressional trade disclosures** | Senate + House disclosure sites both 403 on all 3 retry attempts — looks like a new bot-detection block on a previously-keyless source. | 2026-07-23 stage-1 backfill live run |
 | **PatentsView / FDIC failures** | Both hit DNS resolution failures (`getaddrinfo failed`) in the same run window — looks like a transient local network drop, not a dead source. Re-run before concluding either is broken. | 2026-07-23 stage-1 backfill live run |
 | **Fed SOMA backfill** | Times out at its internal 3600s limit before completing — this source needs a dedicated run with a longer timeout, not a re-run inside the full stage-1 sweep. The killed run also left a truncated (unreadable) partial parquet file behind; a timed-out pipeline can do this, so check for "No magic bytes found" errors after any timeout kill. | 2026-07-23 stage-1 backfill live run |
-| **`google_trends_pipeline.py`** | `ModuleNotFoundError: No module named 'pytrends'` — dependency was never installed. One-line fix (`pip install pytrends`), not attempted yet. | 2026-07-23 stage-1 backfill live run |
+| **`google_trends_pipeline.py`** | Was `ModuleNotFoundError: No module named 'pytrends'` — the package was listed in `requirements.txt` (unpinned) but never actually installed. Fixed 2026-07-23: `pip install pytrends` (4.9.2). Verified live run — 3 keyword groups, 1,365 rows each, compacts clean. No repo file changed (env-only fix). | 2026-07-23, fixed and verified |
 | **Hive partition mismatches (raw store)** | Several raw dirs (`futures`, `sec_edgar/submissions`, `sec_edgar/xbrl_fundamentals`, `cot`, `synthetic_options`, `options_history`) had legacy files sitting directly in the table dir instead of under `year=/month=`, predating `write_partitioned()`'s adoption for those pipelines. `read_parquet(..., hive_partitioning=true)` throws a Binder Error the moment a partitioned sibling file appears alongside one, breaking `curated.py` compaction for the whole run (not just the offending table). Fixed 2026-07-23 by moving all 7 stray files into their correct `year=/month=` dir (partition inferred from each file's `fetched_at`/`fetch_date`). If a new stray unpartitioned file ever appears, find it via: `glob.glob('storage/raw/**/*.parquet', recursive=True)` filtered to paths without `year=`. | 2026-07-23 |
-| **Iceberg CATALOG path bug (unresolved)** | `query.py`'s `CATALOG` entries for `index_members`, `securities`, `fund_holdings`, `identifier_map`, `shipping_gscpi`, `shipping_freight_ppi` all use `_glob()`, which always roots at `storage/raw/`. The real Iceberg data lives at `storage/iceberg/...` (not `storage/raw/iceberg/...`), so these six paths point at directories that will never exist. Caught by `tests/test_catalog.py::test_storage_dirs_exist`. Looks like a leftover from the `d5dd859` Iceberg migration commit (2026-07-22) — not yet fixed, needs Zander's OK since it touches the query layer. | 2026-07-23, test run |
+| **Iceberg CATALOG path bug (fixed)** | `query.py`'s `CATALOG` entries for `index_members`, `securities`, `fund_holdings`, `identifier_map`, `shipping_gscpi`, `shipping_freight_ppi` used `_glob()`, which always roots at `storage/raw/`, but the real Iceberg data lives at `storage/iceberg/...`. Since `_register_views()` silently skips a table when its glob matches zero files, these 6 views (and `index_holdings`, the composite view built on 3 of them) simply didn't exist — no error, just silently missing data. Leftover from the `d5dd859` Iceberg migration (2026-07-22). Fixed 2026-07-23: added `_iceberg_glob()` rooted correctly. These tables were also never wired into `curated.py`'s `KEYS` (a second gap from the same migration) — fixed too, since the path fix alone would have surfaced raw duplicates (49.7% for `securities`, 50% for both shipping tables). `_sort_recency` now also recognizes `last_refreshed` (securities' timestamp column). Verified: `curated.py` compacts 139 tables (was 133), `index_holdings` returns 15,199 rows. Committed `8e7b05f`. | 2026-07-23, fixed and verified |
 
 ## Cross-repo dependencies
 
@@ -110,6 +110,12 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    in `futures` — traced to a legacy unpartitioned file, which led to finding
    and fixing 6 more of the same class across the raw store, plus a
    timeout-corrupted `fed_soma` parquet file blocking compaction entirely.
-   See constraints table above for both. Also surfaced (not yet fixed): the
-   Iceberg CATALOG path bug (see constraints table) via
-   `tests/test_catalog.py::test_storage_dirs_exist`.
+   Also surfaced and fixed the Iceberg CATALOG path bug (see constraints
+   table for both) via `tests/test_catalog.py::test_storage_dirs_exist`, and
+   the `google_trends` missing-dependency fix. All three follow-up fixes are
+   now done and verified — `curated.py` compacts 142 tables clean.
+
+**Initiative status:** items 1, 4, and 5 (plus all follow-up fixes surfaced
+by 5) are complete. Only externally-blocked items remain: item 2 (Schwab
+OAuth — needs Zander to run it interactively) and item 3 (AV earnings
+backfill — quota-gated, needs pacing across multiple days).
