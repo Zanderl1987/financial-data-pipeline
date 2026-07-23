@@ -2855,7 +2855,7 @@ class TestAdapters:
         # short entry on the cross down through -0.5 (day 5)
         assert se_.tolist() == [False, False, False, False, False, True]
         # short exit whenever rating > -0.1 (days 0..4)
-        assert sx.tolist() == [True, True, True, False, True, False]
+        assert sx.tolist() == [True, True, True, True, True, False]
 
 
 class TestCliAdapters:

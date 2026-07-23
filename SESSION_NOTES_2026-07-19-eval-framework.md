@@ -234,3 +234,69 @@ output solely to `storage/eval_registry/` and `storage/reports/eval/`, both
 worktree-local and untouched in the main checkout. See the "Task 12
 acceptance run" section above for the resulting numbers, reproduced against
 this real data.
+
+Task 12 itself review: clean after 1 fix round (commits `898f724..757637e`).
+Important: this file had a stale, self-contradictory "BLOCKED, not yet
+resolved" section left over from an earlier draft, replaced with the
+resolution text above. Minor: cosmetic only.
+
+## Final whole-branch review + fix + re-review (2026-07-22, same session)
+
+Plan status: **all 12 tasks complete.** Per subagent-driven-development, ran
+the final whole-branch review on the most capable model (opus) against the
+full range `5bd7815..757637e` (16 commits, all 12 tasks). Verdict: **Ready
+to merge = Yes**, no Critical findings. The PIT/lag-applied-once invariant,
+no-raw-price-globs rule, local-import convention, forbidden-file (`run_all.py`
+/`curated.py`/`validate.py`/legacy eval scripts) untouched-ness, single-choke
+registry schema, and `.gitignore` coverage of `storage/eval_registry/` all
+held across the whole branch, not just per-task.
+
+Two Important (non-blocking but real) findings surfaced only by the
+whole-branch view:
+1. `runner.py::_run_signal`'s deflated-Sharpe block appended the current
+   run's own sharpe to `registry.population("sharpe", ...)`, which already
+   returns latest-per-signal-name — double-counting a signal's own prior
+   run on any re-run, inflating the DSR trial count (conservative direction,
+   but undercuts the "honest N trials" property that's the point of DSR).
+2. `_stat_rows` wrote every numeric leaf of every result dict as a registry
+   "statistic" row, including count/flag metadata (`n`, `top_n`, `bottom_n`,
+   `oriented`, `n_trades`, etc.) — polluting `registry.compare()`/
+   `baselines()`, the framework's own regression-check primitives.
+
+Consistent with how every other Important finding in this plan was handled,
+dispatched one fix subagent (sonnet) rather than deferring these. Fix
+landed as commit `01dbcb3` ("fix(evaluation): exclude own prior DSR trial +
+drop metadata rows from registry"), touching only `evaluation/registry.py`
+(new `population(..., exclude_input_name=)` param), `evaluation/runner.py`
+(`_run_signal` passes `exclude_input_name=obj.name`; new `_METADATA_KEYS`
+blocklist in `_stat_rows`, audited against every stat-dict call site so no
+real statistic was dropped), and `tests/test_evaluation.py` (+3 tests).
+`pytest tests/test_evaluation.py -q` → 95 passed (was 92).
+
+Re-review (opus, scoped: confirm both fixes correct + no scope creep + no
+new issues, light sanity pass on the rest) against `5bd7815..01dbcb3` (17
+commits): **Ready to merge = Yes**, both Important findings genuinely
+resolved at the root (exclusion happens before the groupby; blocklist
+verified key-by-key against every `_stat_rows` call site), exactly the 3
+named files touched (+112/-4), no new Critical/Important. 2 Minor notes
+left as-is (not blocking): `population()` filters by statistic name across
+all evaluation namespaces rather than scoping by evaluation (harmless today,
+`"sharpe"` only written by `bootstrap_sharpe`); `sr0_ann` kept as a registry
+stat even though it moves with N rather than signal skill.
+
+**Plan complete. Branch `eval-framework-impl` is ready to merge to
+`master`** (`.superpowers/sdd/progress.md` has the full per-task ledger).
+Final HEAD: `01dbcb3`. Not yet merged — the main checkout has ~31 lines of
+unrelated uncommitted work from the separate constituents/securities
+pipeline session sitting on `master`, and `master` itself is 28 commits
+ahead of `origin/master` (unpushed). Merge/PR/keep/discard decision is
+Zander's call, offered via the finishing-a-development-branch skill;
+answer not yet given as of this note.
+
+Also worth remembering from this stretch: `rtk`'s git-command rewriting is
+not always semantics-preserving — a plain `git restore --staged <file>` got
+rewritten into something that also touched the working tree and deleted an
+untracked scratch file (no data lost that time, content was already
+committed elsewhere). Logged to memory; use `rtk proxy git ...` for
+restore/reset/clean/checkout-- inside a worktree with uncommitted work
+nearby.
