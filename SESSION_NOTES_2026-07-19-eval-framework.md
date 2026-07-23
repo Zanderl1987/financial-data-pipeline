@@ -369,3 +369,34 @@ cleanup epilogue") and pushed.
 
 **Final end state:** `origin/master` == local `master` == `9546d5c`.
 Working tree clean. Session complete.
+
+## HuggingFace dataset upload (2026-07-23, new session)
+
+Reviewed `upload_huggingface.py` (added uncommitted in `d5dd859`, never
+run) before executing it. Found one real bug: the script hardcoded
+`ZanderL1337` as the GitHub org in the generated README's Pipeline link,
+but the actual GitHub org (per `git remote -v`) is `Zanderl1987` — the
+link would have pointed at a nonexistent repo. Confirmed with Zander that
+`ZanderL1337` (HF namespace, a separate identity from GitHub) is correct
+and left as-is; fixed only the GitHub link.
+
+Confirmed via web search that on a free HF account, public dataset repos
+get free/effectively-unlimited storage (~1TB soft cap, raised on request)
+while private repos are capped at 100GB total — so public was the right
+default for this dataset's size trajectory, not just a visibility
+preference. Left `private=False` (the script's existing default)
+unchanged.
+
+Ran `upload_huggingface.py`: uploaded 114 tables, 9,993,893 rows, 223.6 MB
+to `https://huggingface.co/datasets/ZanderL1337/financial-data-pipeline`
+(public). Verified live via WebFetch (browser extension wasn't connected
+in this background session) — README rendering correctly, source-category
+breakdown and tags all correct, 234 MB reported on the page.
+
+Committed the GitHub-link fix plus the regenerated
+`storage/curated/README.md` (tracked in git, refreshed with the live
+upload's stats) as `9ec4524` ("fix(upload_huggingface): correct GitHub
+org in README template") and pushed.
+
+**End state:** `origin/master` == local `master` == `9ec4524`. Working
+tree clean. HuggingFace dataset live and verified.
