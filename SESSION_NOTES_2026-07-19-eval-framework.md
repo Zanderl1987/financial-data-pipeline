@@ -300,3 +300,65 @@ untracked scratch file (no data lost that time, content was already
 committed elsewhere). Logged to memory; use `rtk proxy git ...` for
 restore/reset/clean/checkout-- inside a worktree with uncommitted work
 nearby.
+
+## Merge, push, and cleanup (2026-07-22, same session)
+
+Zander approved Option 1 (merge locally) once told the branch was clean.
+Before merging: the main checkout had ~31 lines of uncommitted constituents/
+securities-pipeline work on `master`, one file of which
+(`SESSION_NOTES_2026-07-19-eval-framework.md` itself) overlapped with what
+the branch also changed. Stashed it (`git stash push -u`) to get a clean
+tree first — this hit the `rtk` rewrite hazard again (the push didn't fully
+reset tracked files even though it did capture everything; verified
+byte-identical via file-by-file `diff --strip-trailing-cr` against the
+stash contents before finishing the reset with `rtk proxy git checkout --`).
+
+Merge: `git merge eval-framework-impl` was a clean fast-forward,
+`5bd7815..01dbcb3`, 18 files, no conflicts. `pytest tests/test_evaluation.py
+-q` on merged master: 95/95 passed. Worktree removed (after manually
+unlinking the `storage/curated` junction first, non-recursively, so the
+removal couldn't cascade into the real curated data) and branch
+`eval-framework-impl` deleted (`-d`, safe — fully merged).
+
+Restoring the stash back needed two `stash pop` attempts: the first
+correctly aborted on the same overlapping session-notes file (git protects
+against overwriting local changes) but did restore the untracked files;
+the second (after resetting that one file to HEAD) auto-merged the rest
+cleanly. My own uncommitted session-notes addition had been reset away for
+the pop, so it had to be reapplied from a backup afterward — no content was
+actually lost, just briefly staged in a temp copy. Also found a
+`storage/raw/iceberg` junction duplicating `storage/iceberg`'s 29 tracked-
+worthy metadata/catalog files under a second path — left it alone at the
+time (harmless, untracked).
+
+Pushed `master` to `origin` (`01dbcb3`, 45 commits, clean fast-forward,
+0 behind).
+
+Zander then asked to commit the constituents session's own uncommitted
+work. Reviewed before staging: no secrets found (grepped new pipeline
+files + README for API-key/token/password patterns, checked
+`upload_huggingface.py` — reads `HUGGINGFACE_TOKEN` from `.env`, no
+hardcoded values), and `storage/raw/iceberg` was excluded from the
+commit — committing it would have baked a machine-specific absolute
+junction target into the repo and duplicated the same 29 files under a
+second path. Committed as `d5dd859` ("feat: index constituents/securities
+pipeline + Iceberg migration": index_constituents/securities_reference/
+fund_holdings/openfigi/omkar_commodity pipelines, audit tooling, Iceberg
+migration for constituents + shipping, shipping FRED expansion 8->18
+series, README/ARCHITECTURE/PIPELINE_CATALOG docs, requirements.txt) and
+pushed.
+
+This file's own pending edits (the "Final whole-branch review" section
+above) and the plan file's test-literal correction were then committed
+separately as `33c0cad` ("docs(evaluation): record final whole-branch
+review, fix, and re-review") and pushed, since they're eval-framework
+content, not constituents-session content.
+
+Finally removed the `storage/raw/iceberg` junction (non-recursive delete,
+verified `storage/iceberg`'s real data intact afterward) — it was never
+committed, so this was a pure filesystem cleanup, not a git operation.
+
+**End state:** `origin/master` == local `master` == `33c0cad`. Working
+tree fully clean. Eval-framework plan (12 tasks + final review + fix)
+merged and live. Constituents/securities pipeline session's work
+committed and live. No outstanding uncommitted state from either thread.
