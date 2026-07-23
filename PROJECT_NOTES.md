@@ -36,6 +36,10 @@ the start of any session that touches pipelines or analytics.
 | **OECD MEI (`stats.oecd.org/SDMX-JSON`)** | Every one of the 8 requested series 404s. Looks like OECD retired/moved this endpoint (they've been migrating to a new Data Explorer API) — a likely permanent break needing a pipeline rewrite against the new API, not a transient issue. | 2026-07-23 stage-1 backfill live run |
 | **Congressional trade disclosures** | Senate + House disclosure sites both 403 on all 3 retry attempts — looks like a new bot-detection block on a previously-keyless source. | 2026-07-23 stage-1 backfill live run |
 | **PatentsView / FDIC failures** | Both hit DNS resolution failures (`getaddrinfo failed`) in the same run window — looks like a transient local network drop, not a dead source. Re-run before concluding either is broken. | 2026-07-23 stage-1 backfill live run |
+| **Fed SOMA backfill** | Times out at its internal 3600s limit before completing — this source needs a dedicated run with a longer timeout, not a re-run inside the full stage-1 sweep. The killed run also left a truncated (unreadable) partial parquet file behind; a timed-out pipeline can do this, so check for "No magic bytes found" errors after any timeout kill. | 2026-07-23 stage-1 backfill live run |
+| **`google_trends_pipeline.py`** | `ModuleNotFoundError: No module named 'pytrends'` — dependency was never installed. One-line fix (`pip install pytrends`), not attempted yet. | 2026-07-23 stage-1 backfill live run |
+| **Hive partition mismatches (raw store)** | Several raw dirs (`futures`, `sec_edgar/submissions`, `sec_edgar/xbrl_fundamentals`, `cot`, `synthetic_options`, `options_history`) had legacy files sitting directly in the table dir instead of under `year=/month=`, predating `write_partitioned()`'s adoption for those pipelines. `read_parquet(..., hive_partitioning=true)` throws a Binder Error the moment a partitioned sibling file appears alongside one, breaking `curated.py` compaction for the whole run (not just the offending table). Fixed 2026-07-23 by moving all 7 stray files into their correct `year=/month=` dir (partition inferred from each file's `fetched_at`/`fetch_date`). If a new stray unpartitioned file ever appears, find it via: `glob.glob('storage/raw/**/*.parquet', recursive=True)` filtered to paths without `year=`. | 2026-07-23 |
+| **Iceberg CATALOG path bug (unresolved)** | `query.py`'s `CATALOG` entries for `index_members`, `securities`, `fund_holdings`, `identifier_map`, `shipping_gscpi`, `shipping_freight_ppi` all use `_glob()`, which always roots at `storage/raw/`. The real Iceberg data lives at `storage/iceberg/...` (not `storage/raw/iceberg/...`), so these six paths point at directories that will never exist. Caught by `tests/test_catalog.py::test_storage_dirs_exist`. Looks like a leftover from the `d5dd859` Iceberg migration commit (2026-07-22) — not yet fixed, needs Zander's OK since it touches the query layer. | 2026-07-23, test run |
 
 ## Cross-repo dependencies
 
@@ -55,6 +59,15 @@ private repos cap at 100GB free). This removes the storage constraint that
 previously gated the Schwab full price-history backfill — that backfill is now
 blocked only on Schwab OAuth (interactive, see above), not on disk budget.
 
+**Iceberg snapshot growth (watch this):** Iceberg keeps every historical
+metadata/manifest file with no expiration configured. The 2026-07-23 stage-1
+backfill alone generated 149 new snapshot files for `fund_holdings` (vs ~30
+files total across all Iceberg tables at initial migration) — looks like that
+pipeline writes a new snapshot per symbol/batch rather than one per run. Not
+urgent yet (1.7MB added), but will compound under `ClaudeAuto-DailyAccumulators`
+if daily runs touch it. Follow-up: batch `fund_holdings` writes and/or add
+Iceberg snapshot expiration before this grows unbounded in git history.
+
 ## In-flight initiative (started 2026-07-23)
 
 Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfill:
@@ -66,40 +79,37 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
 3. Historical earnings — **AV path confirmed viable** (see constraints table);
    full backfill of `alpha_vantage_earnings`/`alpha_vantage_earnings_calendar` not
    yet run (quota-gated, needs pacing).
-4. Factor evaluation pass — **done**. Only `momentum` clears significance
-   positive (Sharpe 0.55 [0.23, 0.88]). `low_vol` clears significance
-   *negative* (Sharpe -0.81 [-1.15, -0.51]) — the signal is inverted, not
-   just noisy, and is dragging the equal-weighted composite down. Everything
-   else (value, quality, growth, insider_flow, sentiment) is statistically
-   indistinguishable from zero; `short_pressure` has too little date
-   coverage (43 vs 121 registry rows) to judge yet. Proposed fix — zero (or
-   sign-flip and re-test) `low_vol` in `analytics/signals.py`
-   `DEFAULT_WEIGHTS`, down-weight the insignificant four — is written up but
-   **not applied**, pending Zander's OK. Full table in
-   `SESSION_NOTES_2026-07-19-eval-framework.md`.
-5. Full `run_all.py --backfill --stage 1` — **running live, resumed after a
-   timeout kill**. Dry-run first confirmed 63 pipelines queued, 6 skipped
-   for missing env vars (expected: `trade`, `omkar_commodity`, `comtrade`,
-   `reddit`, `ais`, `fed_sentiment`). Deliberately excluded throughout:
-   `alpha_vantage_fundamentals` (shares the same 25/day AV quota as the
-   earnings backfill — Zander chose to pace it separately) and
-   `nasdaq_data_link` (confirmed dead end, see `CLAUDE.md`).
-   **Note for future runs:** a `run_all.py --backfill --stage 1` sweep of
-   this many pipelines does not fit in one 10-minute background command —
-   the first attempt (task `bv1yomcmw`) was killed by the tool timeout
-   partway through `fear_greed` (32 of ~61 active pipelines done). Resumed
-   with `--skip <all completed pipelines>` as task `b25ng1ljy`, appending
-   to the same log (`storage/quality_reports/stage1_backfill_2026-07-23.log`).
-   Expect to need another `--skip`-based resume if it also hits 10 minutes;
-   check task status before assuming a kill notification means failure.
-   Clean completions confirmed so far: `commodity_macro`, `gas_prices`,
-   `futures` (CFTC COT skipped — `cot_reports` package not installed),
-   `short_interest`, `finnhub`, `finnhub_events`, `fundamentals`, `bls`,
-   `treasury`, `world_bank`, `tiingo`, `institutional`, `noaa_climate`,
-   `usda`, `eia`, `stockanalysis`, `finviz`, `coingecko`, `forex`, `bea`,
-   `usgs_minerals`, `fama_french`, `shiller`, `cboe`, `ecb`. New breaks
-   found (see constraints table): `oecd` (dead endpoint),
-   `congressional_trades` (new 403 block); `patents`/`fdic` partially hit a
-   likely-transient DNS blip. `dividends` got 0 rows (Finnhub 403) and
-   `simfin` returned empty for every symbol despite a set API key — neither
-   confirmed as a permanent break yet.
+4. Factor evaluation pass — **done, and applied.** Only `momentum` cleared
+   significance positive (Sharpe 0.55 [0.23, 0.88]). `low_vol` cleared
+   significance *negative* (Sharpe -0.81 [-1.15, -0.51]) — confirmed a real,
+   regime-invariant inversion (negative IC in every regime slice — bull,
+   bear, high-vol, low-vol — plus walk-forward OOS), not a look-ahead
+   artifact or single-period fluke. Zander approved: sign-flipped `low_vol`
+   in `analytics/signals.py` (now longs volatility instead of calm) and
+   zeroed `value`/`quality`/`sentiment`/`insider_flow` in `DEFAULT_WEIGHTS`
+   (`growth`/`short_pressure` left at 1.0 — borderline / insufficient
+   coverage, not clearly null). Composite Sharpe after the change: -0.11
+   [-0.45, 0.21] -> 1.01 [0.70, 1.32]. Committed `3b363af`. Full eval table
+   in `SESSION_NOTES_2026-07-19-eval-framework.md`.
+5. Full `run_all.py --backfill --stage 1` — **done.** 27 PASS, 2 FAIL
+   (`fed_soma` timed out at its internal 3600s limit — needs a dedicated
+   longer-timeout run, not a re-run inside the sweep; `google_trends` —
+   missing `pytrends` dependency, one-line fix not yet applied), 6 SKIP (all
+   expected missing-env-var skips: `trade`, `omkar_commodity`, `comtrade`,
+   `reddit`, `ais`, `fed_sentiment`). 117m12s total. Deliberately excluded
+   throughout: `alpha_vantage_fundamentals` (AV quota, paced separately) and
+   `nasdaq_data_link` (confirmed dead end). Needed two resumes to get past
+   the tool's 10-minute background-command timeout (`bv1yomcmw` then
+   `b25ng1ljy`, same log, `storage/quality_reports/stage1_backfill_2026-07-23.log`).
+   New source breaks found: `oecd` (dead endpoint), `congressional_trades`
+   (new 403 block); `patents`/`fdic` DNS blips look transient, re-run before
+   concluding broken; `dividends` (Finnhub 403) and `simfin` (empty despite
+   a set key) not yet confirmed as permanent breaks.
+
+   Post-backfill, `curated.py` compaction failed on a Hive partition mismatch
+   in `futures` — traced to a legacy unpartitioned file, which led to finding
+   and fixing 6 more of the same class across the raw store, plus a
+   timeout-corrupted `fed_soma` parquet file blocking compaction entirely.
+   See constraints table above for both. Also surfaced (not yet fixed): the
+   Iceberg CATALOG path bug (see constraints table) via
+   `tests/test_catalog.py::test_storage_dirs_exist`.

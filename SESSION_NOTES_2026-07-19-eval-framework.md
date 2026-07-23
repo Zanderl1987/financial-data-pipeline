@@ -491,3 +491,74 @@ status. Wired into `CLAUDE.md`'s "Where deeper knowledge lives" section.
 this writing; commit once the factor-eval pass and backfill dry-run are further
 along, per Zander's usual pattern of committing at natural checkpoints rather
 than mid-stream.
+
+## low_vol decision, backfill completion, commits, futures partition fix (2026-07-23, same session continued)
+
+Picked back up after a `/clear`. The stage-1 backfill (item 5 above) was still
+running live from the prior session (PID 19220) — armed a persistent `Monitor`
+poll on the process rather than blocking, and worked the `low_vol` decision in
+parallel while waiting.
+
+**low_vol decision — resolved and applied.** Before deciding zero-vs-flip,
+checked the eval registry's regime breakdown (`tier3_regime_bull/bear/high_vol/
+low_vol` + `tier3_wf_oos`) rather than trusting the single pooled number:
+negative IC in *every* slice (bull t=-5.71, bear t=-2.18, high-vol t=-4.87,
+low-vol t=-3.23, walk-forward OOS t=-5.90), full-sample pooled t=-15.27 @ h=21
+over 452k obs, 1990-2026. Also checked `vol_21d`'s computation
+(`analytics/features.py:132`) for a look-ahead bug given how strong the
+inversion was — it's a plain trailing rolling std, same PIT treatment as every
+other factor, no bug found. Regime-invariance + no lookahead bug together made
+this a real, robust finding rather than a bull-market fluke, so recommended
+sign-flip over zero-out. Zander approved both the flip and zeroing the other
+four insignificant factors (value/quality/sentiment/insider_flow).
+
+Implemented in `analytics/signals.py`: `low_vol` now `= df["vol_21d"]` (was
+`= -df["vol_21d"]`), column name kept for continuity but now longs volatility.
+Updated the one test that asserted the old sign (`test_low_vol_is_negated_vol`
+-> `test_low_vol_tracks_vol`). `tests/test_signals.py` 16/16 pass. Re-ran
+`evaluate.py --adapter signal-panel --factor composite` to confirm the change
+actually helps rather than trusting the theory: Sharpe -0.11 [-0.45, 0.21] ->
+**1.01 [0.70, 1.32]**, IC t-stat (h=21) -1.46 -> 18.88, deflated Sharpe prob
+0.91. Substantial, not marginal.
+
+**Stage-1 backfill completed** (117m12s total): 27 PASS, 2 FAIL (`fed_soma`
+timed out at its internal 3600s limit; `google_trends` missing `pytrends`
+dependency), 6 SKIP (all expected). Full breakdown and new source breaks in
+`PROJECT_NOTES.md` item 5 (kept in sync there rather than duplicated here).
+
+**Committed in 3 commits** once Zander said to commit what we had:
+- `c0e4748` — docs: daily-accumulator automation + new `PROJECT_NOTES.md`
+- `3b363af` — fix: `low_vol` sign-flip + zeroed insignificant weights
+- `40c9df7` — data: Iceberg snapshot refresh from the backfill (149 new
+  `fund_holdings` snapshot files flagged as a growth concern, not fixed —
+  Zander chose "commit as-is now, investigate later" when asked)
+
+**futures partition mismatch — fixed, but was one of a class of 7.** Zander
+asked specifically about `futures`; investigating turned up 6 more raw-store
+directories with the same shape of bug (legacy unpartitioned file colliding
+with a newly-written `year=/month=` sibling, breaking `curated.py`'s
+`read_parquet(..., hive_partitioning=true)` for the whole run, not just the
+one table): `sec_edgar/submissions`, `sec_edgar/xbrl_fundamentals`, `cot`,
+`synthetic_options`, `options_history` (4 symbol files). Found all of them at
+once via `glob.glob('storage/raw/**/*.parquet', recursive=True)` filtered to
+paths missing `year=`, rather than fixing one-by-one by rerunning `curated.py`
+each time. Moved each into its correct `year=/month=` dir (partition inferred
+from the file's own `fetched_at`/`fetch_date` column, not file mtime). Also
+hit and removed a second, unrelated blocker: the timed-out `fed_soma` run left
+a truncated parquet file (`No magic bytes found` — confirmed corrupt via
+`pyarrow.parquet.ParquetFile`) that was failing `curated.py` for a different
+reason; deleted it (gitignored raw data, unreadable, `fed_soma` needs a
+proper re-run anyway).
+
+Verified: `curated.py` compacts all 133 tables clean, no errors. `futures`
+loads via `query.load('futures')` — 183,281 rows, 30 symbols, 1997-10-29 to
+2026-07-23 (June + July raw files both present and merged). Full test suite:
+453 passed, 1 failed — but the failure (`test_storage_dirs_exist`) is
+unrelated to this fix (confirmed no directories were removed by the file
+moves). That test caught a real, separate, pre-existing bug: `query.py`'s
+`CATALOG` entries for 6 Iceberg-backed tables resolve through `_glob()`,
+which always roots at `storage/raw/`, but the actual Iceberg data lives at
+`storage/iceberg/...` — those 6 paths can never exist. Looks like a leftover
+from yesterday's `d5dd859` Iceberg migration. **Not fixed** — flagged to
+Zander, awaiting a decision on whether to tackle it now or later. Also not
+yet committed as of this writing (the file moves + this note).
