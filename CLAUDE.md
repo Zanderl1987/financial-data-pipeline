@@ -90,6 +90,9 @@ C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest <name>   # 
 
 - `EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
   traps, cross-repo synergy. **Read it before planning any substantial work here.**
+- `PROJECT_NOTES.md` — living project-state reference, updated in place (not
+  append-only): active automations, verified hard API constraints/quotas, cross-repo
+  dependencies. Check this before assuming a constraint is still true.
 - `CLAUDE_SESSION_NOTES.md` + `SESSION_NOTES_2026-07-03.md` — running session log with
   per-pipeline API quirks (SimFin v3 codes, EDGAR 13F parsing, Pink Sheet URL rotation…).
 - `docs/` — source research notes. `FinancialDataPipeline_Future_Improvements.md` — roadmap.

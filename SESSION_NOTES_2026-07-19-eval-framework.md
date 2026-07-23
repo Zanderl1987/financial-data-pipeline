@@ -400,3 +400,94 @@ org in README template") and pushed.
 
 **End state:** `origin/master` == local `master` == `9ec4524`. Working
 tree clean. HuggingFace dataset live and verified.
+
+## EXPERT_BRIEF roadmap items 1-4 + full backfill (2026-07-23, new session)
+
+Zander asked to work through `EXPERT_BRIEF.md` roadmap items 1-4 in order, then
+backfill the full pipeline now that public HF storage removed the size constraint
+that was previously gating the Schwab full price-history pull. Researched via three
+parallel Explore agents (run_all.py structure + per-source quota table, earnings
+history blocker, factor-eval interface) before touching anything, since a couple of
+these steps burn shared/limited quota or take hours.
+
+**Item 1 — daily automation: done.** Registered `ClaudeAuto-DailyAccumulators`
+(daily 9:00 AM, `run_all.py --only tradingview,short_interest,finnhub_events`,
+mirrors the existing `ClaudeAuto-PipelineQuality` task pattern). Added
+`finnhub_events` to the accumulator set beyond what `AUTOMATION.md` originally
+scoped (tv/short_interest only) — confirmed live that `earnings_calendar` is also
+a use-it-or-lose-it accumulator (see item 3 finding below), so it needed the same
+daily-run protection. Wrote `scripts/daily_accumulators.ps1`, flag file
+`DAILY_ACCUMULATOR_FAIL.txt`. Updated `AUTOMATION.md`.
+
+**Item 2 — Schwab OAuth: waiting on Zander.** Interactive, code expires ~30s — I
+cannot run this myself. Asked him to run
+`schwab_quotes_pipeline.py` in a real terminal to create `tokens.db`.
+
+**Item 3 — historical earnings: real finding, not yet a full fix.** Confirmed
+(via a live 2026-07-18 backfill re-check, not assumption) that Finnhub's free
+tier hard-caps earnings data at ~1 year regardless of requested date range —
+`finnhub_events_pipeline.py`'s `--backfill` already requests 365 days and gets
+nothing older than "now." This falsifies the assumption in
+`FinancialDataPipeline_Future_Improvements.md` §D that a pipeline-code extension
+would fix it. Probed Alpha Vantage's `EARNINGS` endpoint instead (2 requests
+spent from the shared 25/day quota, `fetch_earnings()` in
+`alpha_vantage_fundamentals_pipeline.py`, already wired but never populated) —
+AAPL and MSFT both returned full history back to 1996 (121 quarterly + 31
+annual rows each). This is a real fix, but populating
+`alpha_vantage_earnings`/`alpha_vantage_earnings_calendar` for the full
+watchlist is quota-gated and shares the same per-IP 25/day budget as
+`custom_index_tool`'s TranscriptPull/EarningsSurprisePull — not run yet, needs
+pacing across multiple days.
+
+**Item 4 — factor evaluation pass: COMPLETE.** Re-ran
+`evaluate.py --adapter signal-panel --factor <f>` for all 8 factors + composite
+(2026-07-23, background job `biavxk2y2` after `b9sl4qd8b` for momentum). The
+2026-07-22 acceptance-gate run (see Step 4 above) computed portfolio metrics
+for all factors as a side effect but never recorded them — registry/reports
+artifacts are gitignored and lived only in the now-deleted worktree. This run
+captured real numbers:
+
+| Factor | Sharpe [95% CI] | Signal quality | Verdict |
+|---|---|---|---|
+| momentum | 0.55 [0.23, 0.88] | positive IC every horizon, t=6.5->11.5 | only statistically robust positive factor |
+| composite | -0.11 [-0.45, 0.21] | h=1 IC t=4.79 (real), decays to t=-1.46 by h=21 | short-horizon signal real, dragged down by low_vol (see below) |
+| growth | 0.15 [-0.18, 0.48] | weak positive, t<=1.97 | not significant |
+| insider_flow | -0.07 [-0.41, 0.20] | negative, worsens with horizon (t=-5.89 @21d) | not significant, wrong-signed |
+| quality | -0.10 [-0.41, 0.20] | negative at longer horizons (t=-3.77 @21d) | not significant |
+| sentiment | -0.13 [-0.48, 0.22] | negative, t=-5.42 @21d | not significant |
+| value | -0.25 [-0.56, 0.04] | negative, CI hugs zero | borderline negative |
+| short_pressure | -0.22 [n/a, n/a] | only 43 registry rows vs 121 for the rest (dates too sparse for CI) | not a real evaluation yet — insufficient coverage |
+| low_vol | -0.81 [-1.15, -0.51] | strongly negative, t=-15.27 @21d | **statistically significant negative — signal is inverted**, not just noise |
+
+**Recommendation:** `analytics/signals.py:52-59` `DEFAULT_WEIGHTS` currently
+weights all 8 factors equally at 1.0. `low_vol`'s CI sits entirely below zero
+(the only factor besides momentum with a CI that excludes zero) — it is
+actively pulling the composite down every day it's non-NaN, and is the
+likely explanation for why composite shows a real short-horizon IC
+(t=4.79 @ h=1, momentum's fingerprint) but a flat/insignificant portfolio
+Sharpe overall. Proposed action (not yet applied — needs Zander's OK since
+it changes a scored analytics output): zero out `low_vol` in
+`DEFAULT_WEIGHTS` (worth first checking whether flipping its sign instead
+recovers a positive Sharpe, before assuming it's dead rather than inverted),
+and down-weight value/quality/sentiment/insider_flow toward 0 since none
+clear statistical significance. `short_pressure` can't be judged yet —
+coverage will deepen via `ClaudeAuto-DailyAccumulators` (see Item 1) since
+it's a snapshot-only source; re-evaluate in a few weeks once it has more
+distinct dates.
+
+**Item 5 — full stage-1 backfill: not started.** Plan (per Zander's choice) is
+dry-run `run_all.py --backfill --stage 1` first to preview the full command
+list and flag known-broken sources (`nasdaq_data_link`) before spending real
+time/quota, then run for real in the background.
+
+Also started `PROJECT_NOTES.md` (new, living/updated-in-place reference doc —
+distinct from this file's chronological narrative and from `EXPERT_BRIEF.md`'s
+roadmap framing) to hold durable state: active automations, verified hard API
+constraints, cross-repo AV quota sharing, and this initiative's in-flight
+status. Wired into `CLAUDE.md`'s "Where deeper knowledge lives" section.
+
+**Not yet committed** — working tree has automation script, `AUTOMATION.md`,
+`PROJECT_NOTES.md`, `CLAUDE.md`, and this session-notes edit uncommitted as of
+this writing; commit once the factor-eval pass and backfill dry-run are further
+along, per Zander's usual pattern of committing at natural checkpoints rather
+than mid-stream.
