@@ -362,3 +362,10 @@ committed, so this was a pure filesystem cleanup, not a git operation.
 tree fully clean. Eval-framework plan (12 tasks + final review + fix)
 merged and live. Constituents/securities pipeline session's work
 committed and live. No outstanding uncommitted state from either thread.
+
+This section itself (the "Merge, push, and cleanup" epilogue above) was
+then committed as `9546d5c` ("docs(evaluation): record merge, push, and
+cleanup epilogue") and pushed.
+
+**Final end state:** `origin/master` == local `master` == `9546d5c`.
+Working tree clean. Session complete.
