@@ -45,6 +45,7 @@ import pandas as pd
 
 _STORAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "raw")
 _CURATED_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "curated")
+_ICEBERG_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "iceberg")
 
 # When True (default), a table's view reads its deduplicated curated snapshot
 # (storage/curated/<table>/<table>.parquet) if one exists, falling back to the
@@ -54,6 +55,11 @@ USE_CURATED = True
 
 def _glob(relative: str) -> str:
     return os.path.join(_STORAGE_ROOT, relative).replace("\\", "/")
+
+
+def _iceberg_glob(relative: str) -> str:
+    """Iceberg tables live under storage/iceberg/, not storage/raw/ — _glob()'s root."""
+    return os.path.join(_ICEBERG_ROOT, relative).replace("\\", "/")
 
 
 def _curated_file(table: str) -> str:
@@ -145,10 +151,10 @@ CATALOG: dict[str, str] = {
     "eia_crude_trade":         _glob("eia/crude_trade/**/*.parquet"),
     "eia_hourly_grid":         _glob("eia/hourly_grid/**/*.parquet"),
     # ── Index constituents (Iceberg) ──────────────────────────────────────────
-    "index_members":           _glob("iceberg/constituents/index_members/**/*.parquet"),
-    "securities":              _glob("iceberg/constituents/securities/**/*.parquet"),
-    "fund_holdings":           _glob("iceberg/constituents/fund_holdings/**/*.parquet"),
-    "identifier_map":          _glob("iceberg/constituents/identifier_map/**/*.parquet"),
+    "index_members":           _iceberg_glob("constituents/index_members/**/*.parquet"),
+    "securities":              _iceberg_glob("constituents/securities/**/*.parquet"),
+    "fund_holdings":           _iceberg_glob("constituents/fund_holdings/**/*.parquet"),
+    "identifier_map":          _iceberg_glob("constituents/identifier_map/**/*.parquet"),
     # ── TSA checkpoint travel volumes ──────────────────────────────────────────
     "tsa_checkpoint":          _glob("tsa/**/*.parquet"),
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
@@ -241,8 +247,8 @@ CATALOG: dict[str, str] = {
     "zillow_zori":             _glob("zillow/zori/**/*.parquet"),
     # ── Shipping / logistics (NY Fed GSCPI + FRED freight PPI) ───────────────
     # ── Shipping / logistics (Iceberg) ──────────────────────────────────────
-    "shipping_gscpi":         _glob("iceberg/shipping/gscpi/**/*.parquet"),
-    "shipping_freight_ppi":   _glob("iceberg/shipping/freight_ppi/**/*.parquet"),
+    "shipping_gscpi":         _iceberg_glob("shipping/gscpi/**/*.parquet"),
+    "shipping_freight_ppi":   _iceberg_glob("shipping/freight_ppi/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────

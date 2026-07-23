@@ -95,7 +95,16 @@ KEYS: dict[str, list[str]] = {
     "fhfa_hpi":               ["hpi_type", "hpi_flavor", "frequency", "level", "place_id", "date"],
     "zillow_zhvi":            ["region_id", "date"],
     "zillow_zori":            ["region_id", "date"],
-    # Shipping / logistics (Iceberg-managed, no curated needed)
+    # Shipping / logistics (Iceberg-backed raw store — same duplication as any
+    # other raw table since query.py globs the underlying data files directly
+    # rather than doing a snapshot-aware Iceberg read; needs dedup like everything else)
+    "shipping_gscpi":         ["date"],
+    "shipping_freight_ppi":   ["date", "series_id"],
+    # Index constituents (Iceberg-backed raw store, same caveat as above)
+    "index_members":          ["index_code", "ticker", "snapshot_date"],
+    "securities":             ["symbol"],
+    "fund_holdings":          ["fund_ticker", "holding_ticker", "snapshot_date"],
+    "identifier_map":         ["ticker"],
     # EIA refinery activity / crude trade
     "eia_refinery_activity":  ["series_id", "date"],
     "eia_crude_trade":        ["series_id", "date"],
@@ -243,7 +252,7 @@ def _dedup_subset(table: str, df: pd.DataFrame) -> list[str]:
 
 def _sort_recency(df: pd.DataFrame) -> pd.DataFrame:
     """Sort so the freshest version of a key sorts last (kept by keep='last')."""
-    order = [c for c in ("fetched_at", "filed", "filing_date", "filed_date") if c in df.columns]
+    order = [c for c in ("fetched_at", "filed", "filing_date", "filed_date", "last_refreshed") if c in df.columns]
     if not order:
         return df
     return df.sort_values(order, kind="stable")
