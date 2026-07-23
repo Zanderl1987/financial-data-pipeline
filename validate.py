@@ -475,6 +475,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "table_title", "period", "value"],
         "date_col":    None,
     },
+    "omkar_commodity": {
+        "required":    ["commodity", "price_usd", "fetched_at"],
+        "critical_nn": ["commodity", "price_usd"],
+        "date_col":    None,
+    },
     # ── Fama-French factor returns ────────────────────────────────────────────
     "ff_factors": {
         "required":    ["date", "frequency", "factor", "value", "source", "fetched_at"],
@@ -770,6 +775,11 @@ SCHEMAS: dict[str, dict] = {
     "shipping_freight_ppi": {
         "required":    ["series_id", "date", "value", "fetched_at"],
         "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "shipping_gscpi": {
+        "required":    ["date", "gscpi", "fetched_at"],
+        "critical_nn": ["date", "gscpi"],
         "date_col":    "date",
     },
     # ── TSA checkpoint travel volumes ─────────────────────────────────────────
@@ -1111,6 +1121,26 @@ SCHEMAS: dict[str, dict] = {
         "required":    ['region_code', 'metric_type', 'value', 'fetched_at'],
         "critical_nn": ['region_code', 'metric_type', 'value'],
         "date_col":    "timestamp_utc",
+    },
+    "index_members": {
+        "required":    ['index_code', 'ticker', 'snapshot_date', 'fetched_at'],
+        "critical_nn": ['index_code', 'ticker'],
+        "date_col":    "snapshot_date",
+    },
+    "securities": {
+        "required":    ['symbol', 'last_refreshed'],
+        "critical_nn": ['symbol'],
+        "date_col":    None,
+    },
+    "fund_holdings": {
+        "required":    ['fund_ticker', 'holding_ticker', 'source', 'fetched_at'],
+        "critical_nn": ['fund_ticker', 'holding_ticker'],
+        "date_col":    "snapshot_date",
+    },
+    "identifier_map": {
+        "required":    ['ticker', 'source', 'fetched_at'],
+        "critical_nn": ['ticker'],
+        "date_col":    None,
     },
     "finnhub_esg": {
         "required":    ['symbol', 'fetched_at'],

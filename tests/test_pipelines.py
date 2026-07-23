@@ -70,11 +70,16 @@ PIPELINE_MODULES = [
     "eia_expansion_pipeline",
     "eia_petng_prices_pipeline",
     "eia_hourly_grid_pipeline",
+    "index_constituents_pipeline",
+    "securities_reference_pipeline",
+    "fund_holdings_pipeline",
+    "openfigi_pipeline",
     "finnhub_expansion_pipeline",
     "finnhub_fundamentals_pipeline",
     "tiingo_corporate_actions_pipeline",
     "tiingo_fundamentals_pipeline",
     "treasury_fiscal_pipeline",
+    "omkar_commodity_pipeline",
 ]
 
 

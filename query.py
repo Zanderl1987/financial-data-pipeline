@@ -144,6 +144,11 @@ CATALOG: dict[str, str] = {
     "eia_refinery_activity":   _glob("eia/refinery_activity/**/*.parquet"),
     "eia_crude_trade":         _glob("eia/crude_trade/**/*.parquet"),
     "eia_hourly_grid":         _glob("eia/hourly_grid/**/*.parquet"),
+    # ── Index constituents (Iceberg) ──────────────────────────────────────────
+    "index_members":           _glob("iceberg/constituents/index_members/**/*.parquet"),
+    "securities":              _glob("iceberg/constituents/securities/**/*.parquet"),
+    "fund_holdings":           _glob("iceberg/constituents/fund_holdings/**/*.parquet"),
+    "identifier_map":          _glob("iceberg/constituents/identifier_map/**/*.parquet"),
     # ── TSA checkpoint travel volumes ──────────────────────────────────────────
     "tsa_checkpoint":          _glob("tsa/**/*.parquet"),
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
@@ -165,6 +170,8 @@ CATALOG: dict[str, str] = {
     "ecb_rates":               _glob("ecb/**/*.parquet"),
     # ── USGS critical mineral statistics ─────────────────────────────────────
     "usgs_minerals":           _glob("usgs_minerals/**/*.parquet"),
+    # ── Omkar Cloud commodity spot prices ────────────────────────────────────
+    "omkar_commodity":         _glob("omkar_commodity/**/*.parquet"),
     # ── UN Comtrade international trade flows ─────────────────────────────────
     "comtrade_trade":          _glob("comtrade/**/*.parquet"),
     # ── Fama-French factor returns + industry portfolios ──────────────────────
@@ -233,8 +240,9 @@ CATALOG: dict[str, str] = {
     "zillow_zhvi":             _glob("zillow/zhvi/**/*.parquet"),
     "zillow_zori":             _glob("zillow/zori/**/*.parquet"),
     # ── Shipping / logistics (NY Fed GSCPI + FRED freight PPI) ───────────────
-    "shipping_gscpi":          _glob("shipping/gscpi/**/*.parquet"),
-    "shipping_freight_ppi":    _glob("shipping/freight_ppi/**/*.parquet"),
+    # ── Shipping / logistics (Iceberg) ──────────────────────────────────────
+    "shipping_gscpi":         _glob("iceberg/shipping/gscpi/**/*.parquet"),
+    "shipping_freight_ppi":   _glob("iceberg/shipping/freight_ppi/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────
@@ -352,6 +360,194 @@ CATALOG: dict[str, str] = {
     "treasury_mts_budget_comparison":  _glob("treasury/mts_budget_comparison/**/*.parquet"),
 }
 
+# ---------------------------------------------------------------------------
+# Analytics views — cross-table joins built on top of the base catalog
+# ---------------------------------------------------------------------------
+ANALYTICS_VIEWS: dict[str, str] = {
+    # Securities enriched with OpenFIGI identifiers
+    "securities_full": """
+        SELECT
+            s.symbol,
+            s.company_name,
+            s.asset_type,
+            s.sector,
+            s.industry,
+            s.exchange,
+            s.currency,
+            s.country,
+            s.market_cap,
+            s.shares_outstanding,
+            s.ipo_date,
+            s.cik,
+            s.is_sp500,
+            s.is_nasdaq100,
+            s.is_dji30,
+            s.is_russell3000,
+            s.is_russell2000,
+            s.is_wilshire5000,
+            i.figi,
+            i.composite_figi,
+            i.cusip,
+            i.isin,
+            i.sedol,
+            i.security_type AS openfigi_security_type
+        FROM securities s
+        LEFT JOIN identifier_map i ON s.symbol = i.ticker
+    """,
+
+    # Index constituents enriched with reference data + FIGI
+    "index_holdings": """
+        SELECT
+            im.snapshot_date,
+            im.index_code,
+            im.index_name,
+            im.ticker,
+            im.company_name,
+            im.gics_sector,
+            im.gics_sub_industry,
+            im.weight_pct,
+            im.shares_outstanding,
+            im.market_cap AS index_market_cap,
+            s.sector,
+            s.industry,
+            s.asset_type,
+            s.exchange,
+            s.country,
+            s.is_sp500,
+            s.is_nasdaq100,
+            s.is_dji30,
+            i.figi,
+            i.composite_figi
+        FROM index_members im
+        LEFT JOIN securities s ON im.ticker = s.symbol
+        LEFT JOIN identifier_map i ON im.ticker = i.ticker
+    """,
+
+    # Fund holdings enriched with issuer reference data + FIGI
+    "fund_holdings_full": """
+        SELECT
+            fh.snapshot_date,
+            fh.fund_ticker,
+            fh.fund_name,
+            fh.holding_ticker,
+            fh.holding_name,
+            fh.weight_pct,
+            fh.market_value_usd,
+            fh.shares_held,
+            fh.asset_category,
+            fh.sector AS fund_sector,
+            fh.country AS fund_country,
+            s.sector,
+            s.industry,
+            s.asset_type,
+            s.exchange,
+            s.country,
+            s.market_cap,
+            i.figi,
+            i.composite_figi,
+            fh.filing_date,
+            fh.reporting_period_end
+        FROM fund_holdings fh
+        LEFT JOIN securities s ON fh.holding_ticker = s.symbol
+        LEFT JOIN identifier_map i ON fh.holding_ticker = i.ticker
+    """,
+
+    # Institutional holdings enriched with issuer reference data
+    "institutional_holdings_enriched": """
+        SELECT
+            ih.institution,
+            ih.cik,
+            ih.filed_date,
+            ih.company_name,
+            ih.cusip,
+            ih.value_usd,
+            ih.shares,
+            ih.share_type,
+            ih.put_call,
+            ih.investment_discretion,
+            s.symbol,
+            s.sector,
+            s.industry,
+            s.market_cap,
+            s.exchange,
+            s.country
+        FROM institutional_holdings ih
+        LEFT JOIN securities s ON ih.company_name = s.company_name
+    """,
+
+    # Insider transactions enriched with issuer reference data
+    "insider_by_sector": """
+        SELECT
+            it.symbol,
+            it.name,
+            it.share,
+            it.change,
+            it.filing_date,
+            it.transaction_date,
+            it.transaction_code,
+            it.transaction_price,
+            s.sector,
+            s.industry,
+            s.company_name,
+            s.market_cap,
+            s.exchange,
+            s.country
+        FROM insider_transactions it
+        LEFT JOIN securities s ON it.symbol = s.symbol
+    """,
+
+    # Earnings calendar with index membership flags
+    "earnings_with_index": """
+        SELECT
+            ec.symbol,
+            ec.date,
+            ec.hour,
+            ec.quarter,
+            ec.year,
+            ec.eps_estimate,
+            ec.eps_actual,
+            ec.revenue_estimate,
+            ec.revenue_actual,
+            s.company_name,
+            s.sector,
+            s.industry,
+            s.market_cap,
+            s.is_sp500,
+            s.is_nasdaq100,
+            s.is_dji30,
+            s.is_russell3000
+        FROM earnings_calendar ec
+        LEFT JOIN securities s ON ec.symbol = s.symbol
+    """,
+
+    # Prices enriched with security reference data
+    "prices_enriched": """
+        SELECT
+            p.symbol,
+            p.date,
+            p.open,
+            p.high,
+            p.low,
+            p.close,
+            p.volume,
+            p.pct_change,
+            p.vwap,
+            s.company_name,
+            s.sector,
+            s.industry,
+            s.asset_type,
+            s.exchange,
+            s.country,
+            s.market_cap,
+            s.is_sp500,
+            s.is_nasdaq100,
+            s.is_dji30
+        FROM prices p
+        LEFT JOIN securities s ON p.symbol = s.symbol
+    """,
+}
+
+
 _CON: duckdb.DuckDBPyConnection | None = None
 
 
@@ -388,6 +584,14 @@ def _register_views(con: duckdb.DuckDBPyConnection) -> None:
             CREATE OR REPLACE VIEW {name} AS
             SELECT * FROM read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)
         """)
+
+    # Analytics cross-table views
+    for name, sql_text in ANALYTICS_VIEWS.items():
+        try:
+            con.execute(f"CREATE OR REPLACE VIEW {name} AS {sql_text}")
+        except Exception as e:
+            # Base views may not exist yet — skip silently
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +634,9 @@ def load(
     columns   : list of column names to SELECT (default: all)
     limit     : int          — LIMIT N rows (default: no limit)
     """
-    if table not in CATALOG:
-        raise ValueError(f"Unknown table '{table}'. Available: {sorted(CATALOG)}")
+    all_tables = set(CATALOG) | set(ANALYTICS_VIEWS)
+    if table not in all_tables:
+        raise ValueError(f"Unknown table '{table}'. Available: {sorted(all_tables)}")
 
     select = ", ".join(columns) if columns else "*"
     clauses: list[str] = []
@@ -469,27 +674,29 @@ def load(
 
 def schema(table: str) -> pd.DataFrame:
     """Return column names and DuckDB types for a table."""
-    if table not in CATALOG:
-        raise ValueError(f"Unknown table '{table}'. Available: {sorted(CATALOG)}")
+    all_tables = set(CATALOG) | set(ANALYTICS_VIEWS)
+    if table not in all_tables:
+        raise ValueError(f"Unknown table '{table}'. Available: {sorted(all_tables)}")
     return sql(f"DESCRIBE {table}")
 
 
 def tables() -> pd.DataFrame:
     """List all catalog entries with row counts. 'no data' = no files on disk yet."""
     rows = []
-    for name in CATALOG:
+    for name in list(CATALOG) + list(ANALYTICS_VIEWS):
         try:
             count = _con().execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-            rows.append({"table": name, "rows": f"{count:,}"})
+            rows.append({"table": name, "rows": f"{count:,}", "type": "analytics" if name in ANALYTICS_VIEWS else "base"})
         except Exception:
-            rows.append({"table": name, "rows": "no data"})
+            rows.append({"table": name, "rows": "no data", "type": "analytics" if name in ANALYTICS_VIEWS else "base"})
     return pd.DataFrame(rows)
 
 
 def symbols(table: str) -> list[str]:
     """Return sorted list of distinct tickers available in a table."""
-    if table not in CATALOG:
-        raise ValueError(f"Unknown table '{table}'. Available: {sorted(CATALOG)}")
+    all_tables = set(CATALOG) | set(ANALYTICS_VIEWS)
+    if table not in all_tables:
+        raise ValueError(f"Unknown table '{table}'. Available: {sorted(all_tables)}")
     try:
         return sql(f"SELECT DISTINCT symbol FROM {table} ORDER BY symbol")["symbol"].tolist()
     except Exception:

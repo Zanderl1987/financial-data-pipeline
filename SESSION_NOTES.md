@@ -1,5 +1,106 @@
 # Session Notes — running log
 
+## 2026-07-20 (session 3) — FRED shipping expansion (+10 series)
+
+Expanded `FREIGHT_SERIES` in `shipping_pipeline.py` from 8 to 18 series, backfilled, curated, validated, tests pass (145/145).
+
+**New series added:**
+| Series ID | Description | History |
+|-----------|-------------|---------|
+| FRGSHPUSM649NCIS | Cass Freight Index: Shipments | 2016-01 to 2026-06 |
+| FRGEXPUSM649NCIS | Cass Freight Index: Expenditures | 2016-01 to 2026-06 |
+| TRUCKD11 | Truck Tonnage Index (ATA) | 2000-01 to 2026-04 |
+| RAILFRTCARLOADSD11 | Rail Freight Carloads SA | 2000-01 to 2026-04 |
+| RAILFRTINTERMODAL | Rail Freight Intermodal Traffic NSA | 2000-01 to 2026-04 |
+| PCU483211483211 | Inland Water Freight PPI | 1990-12 to 2026-06 |
+| PCU481112481112 | Scheduled Freight Air PPI | 2003-12 to 2026-06 |
+| IC131 | Inbound Air Freight Price Index | 1990-09 to 2026-06 |
+| IS231 | Outbound Air Freight Price Index | 1992-09 to 2026-06 |
+| AIRRTMFMD11 | Air Revenue Ton Miles (SA) | 2000-01 to 2026-03 |
+
+**Curated `shipping_freight_ppi`:** 5,282 rows across 18 series.
+
+## 2026-07-20 (session 2) — shipping data source research
+
+Researched free/cheap shipping data sources to expand the pipeline beyond GSCPI + 8 FRED series.
+
+**Tier 1 — FRED expansion (zero new infra, existing FRED_API_KEY):**
+- Cass Freight Index: Shipments (`FRGSHPUSM649NCIS`) and Expenditures (`FRGEXPUSM649NCIS`) — most-watched US freight volume proxies, monthly 2016+
+- Truck Tonnage Index (`TRUCKD11`) — ATA data, monthly 2000+
+- Inland Water Freight PPI (`PCU483211483211`) — monthly 1990+
+- Air freight price indexes — Inbound (`IC131`, 1990+) and Outbound (`IS231`, 1992+)
+- Rail Freight Carloads and Intermodal Traffic — monthly 2000+
+- Air Revenue Ton Miles of Freight and Mail — monthly 2000+
+- Scheduled Freight Air Transportation PPI (`PCU481112481112`) — monthly 2003+
+- Regional diesel prices (`GASDESECM` etc.) — PADD-level, beyond national average
+
+**Tier 2 — FreightPulse (new source, free tier):**
+- 100 calls/month free, no credit card needed. Port congestion, freight rates, fuel prices, disruption alerts.
+- Snapshot data only (no history backfill).
+- Signup: https://freightpulsehq.com/
+
+**Tier 3 — ShippingRates (no signup basics):**
+- 25 free requests/month, zero signup. Port-to-port freight rates, carrier tariffs, congestion.
+- Paid after 25 via crypto micropayment.
+- Not time-series — route queries.
+
+**Tier 4 — Zemlo AI (zero-auth):**
+- No API key needed. Live carrier rates + risk + CO2 per route.
+- `/signal?from=X&to=Y` at https://zemloai-api.onrender.com
+- Case-by-case, not time-series. No history.
+
+**Decision:** Start with Tier 1 FRED expansion (Cass, truck tonnage, water/air freight, rail, regional diesel) since it's keyless and immediate. Then add Tier 2 FreightPulse if Zander signs up for a free key.
+
+**Executed 2026-07-20 (session 3):** Tier 1 complete. 10 new FRED series added, backfilled, curated. 18 total series in `shipping_freight_ppi`.
+
+**Iceberg migration (session 3 cont.):** Rewired shipping pipeline to write Apache Iceberg tables with Snappy compression. Created `shipping.gscpi` and `shipping.freight_ppi` Iceberg tables (shared catalog `constituents_catalog.db`, namespace `shipping`). Backfilled: 342 rows GSCPI, 5,282 rows freight_ppi — all Snappy-compressed. Updated `query.py`, `validate.py`, `curated.py`. Validate PASS, 145/145 tests pass.
+
+## 2026-07-18 — constituents Iceberg cleanup + NDX scraper fix + visualizations + identifier_map
+
+Revisited the `index_constituents_pipeline.py` Iceberg table. Fixed three issues:
+
+1. **Iceberg table stale paths.** SQLite catalog had `metadata_location` pointing to
+   `E:/AI_Projects/...` (wrong drive). Dropped table, deleted directory, recreated with
+   `catalog.create_table()` using correct C: drive paths. Schema fix: `TimestamptzType`
+   (not `TimestampType`) for `fetched_at` to match Arrow `pa.timestamp("us", tz="UTC")`.
+2. **NDX scraper no company names.** stockanalysis.com HTML has SvelteKit hydration
+   comments between `<td>` elements. Added `re.sub(r'<!----?>|<!--.*?-->', '', text)`
+   comment stripping, then paired regex for `<td class="sym">` + `<td class="slw">`.
+   NDX now returns 103 tickers with company names.
+3. **Visualizations.** Generated 5 matplotlib charts (sector pie/bar, index sizes, overlap
+   matrix, R2K top holdings) from DuckDB queries against the Iceberg table. Saved to
+   `storage/iceberg/viz/`.
+4. **identifier_map enriched.** Expanded from 10 rows (mega-caps with FIGI) to 3,056 rows
+   (all index_members tickers with CIK from SEC EDGAR via securities table). 99% CIK
+   coverage. Used drop+recreate to avoid stale parquet file issue with overwrite.
+5. **Iceberg health check.** All 4 tables healthy. fund_holdings has 25 snapshots that
+   could be expired. securities is clean (10,426 rows, 100% CIK).
+
+Detail: `SESSION_NOTES_2026-07-18-constituents.md`. TODOs: OpenFIGI key registration,
+full OpenFIGI run, disk size assessment, fund_holdings snapshot expiry.
+
+## 2026-07-16 — verification pass + commodity build (session 8)
+
+Attempted to fix 9 items from the prioritized build table. All 8 code fixes (items 1-8)
+were already implemented in sessions 5-6 and committed in session 7 (`a0b78b0`). Verified
+each finding against current code:
+
+- eia_hourly_grid: fully wired (validate.py:1110, run_all.py:620, curated.py:159,
+  test_pipelines.py:72, test_catalog.py:121)
+- finnhub dedup keys: natural keys `['symbol', 'date']` / `['symbol', 'id']`
+- treasury_fiscal pagination: reads `total_pages`/`total-pages` correctly
+- alpha_vantage dividends: reads `data.get("data", [])` correctly
+- coingecko null crash: `or {}` guard on lines 179, 202
+- exposure.py OLS: uses `np.linalg.pinv` (pseudo-inverse)
+- features.py tie-break: breadth-based `(overlap, len(syms))`, backtest.py passes symbols
+- event_impact.py except: catches only `NoQualifyingEventsError` (narrow subclass)
+
+Commodity build completed: 25 FRED PPI series (lumber/steel/plastics/glass) added to
+`commodity_macro_pipeline.py`, LBR=F + HRC=F added to `futures_pipeline.py`.
+
+Full test suite: 313/313 pass (0 failures). Item 9 (options analytics staging merge)
+still pending.
+
 ## 2026-07-16 — analytics/options.py repair (implemented)
 
 Both functions in `analytics/options.py` were completely broken (KeyError on

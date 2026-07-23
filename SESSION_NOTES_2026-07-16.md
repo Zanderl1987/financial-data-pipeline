@@ -128,13 +128,13 @@ Zander reviews spec → approve/reject/edit → implement Group I first, then Gr
 
 ## Open threads (carried from 07-12 + 07-16 sessions)
 
-- `eia_hourly_grid` needs a schema entry in `validate.py` (pre-existing).
-- `analytics/options.py` repair is committed (`e52c6e0`).
-- `iv_summary` will return empty until Schwab OAuth lands chain data.
-- Spec 07-12 repair is fully implemented and committed.
 - Spec 07-16 expansion is implemented in staging, awaiting Zander review + merge.
 - Commodity build is complete (25 FRED series + 2 yfinance tickers). Needs backfill run:
   `python commodity_macro_pipeline.py --backfill` and `python futures_pipeline.py --backfill`.
+- All 10 code review findings from session 5 are fixed and committed (`a0b78b0`).
+- Lower-confidence "below the cut" items still open: finnhub supply_chain dict-shape
+  assumption, relevance.py id()-keyed regex cache, sec_edgar fake EDGAR_USER_AGENT,
+  alpha_vantage fetch_earnings_calendar bypassing rate-limit helper.
 
 ---
 
@@ -421,3 +421,71 @@ bypassing the shared rate-limit helper.
 
 Nothing has been committed yet — these are working-tree changes on top of the existing
 unpushed branch.
+
+## Session 7 — Committed and pushed everything to origin/master
+
+Per explicit user direction ("commit this" → confirmed "Everything (full working tree)"
+when asked, since the fixes shared files with the pre-existing wiring backlog and couldn't
+be cleanly separated), committed the entire working tree in two commits:
+
+1. `a0b78b0` — **Add 15 new free/public data pipelines and fix 10 bugs from full-scope
+   code review.** Bundles the Session 5/6 bug fixes together with the previously-pending
+   pipeline wiring backlog (Alpha Vantage fundamentals, BLS OES/QCEW + expansion, CoinGecko
+   expansion, EIA expansion/hourly-grid/petroleum-natgas, Finnhub expansion/fundamentals,
+   FRED macro/rates-gdp, SEC EDGAR, Tiingo corporate actions/fundamentals, Treasury Fiscal
+   Data) — 32 files, 8,507 insertions.
+2. `29f0cc2` — **Clean up stray scratch/cache artifacts.** Deleted `nonascii_out.txt`
+   (leftover scratch output from an ASCII-check scan, not real CLI output) and added
+   `storage/dividend_research_cache.json` + `storage/quality_reports/` to `.gitignore`,
+   matching the existing convention of excluding regenerable storage data.
+
+Deliberately left out of both commits (still untracked, by design): the two files above
+before the gitignore fix, and nothing else — `git status` is clean post-commit.
+
+Pushed both commits (plus 14 earlier already-local commits going back to 2026-07-06) to
+`origin/master`: `025cd2c..29f0cc2`, 16 commits, fast-forward, no conflicts. This is a
+private repo so pushing straight to `master` is the normal workflow here — no PR step.
+
+Full test suite verified green (313 passed) before committing; not re-run after push since
+push doesn't change file contents.
+
+---
+
+## Session 8 — Verification pass + commodity build
+
+### What happened
+
+User requested building items 1-9 from the prioritized build table. Delegation playbook
+applied: triage confirmed "big but mechanical" with known root causes. Launched 6 parallel
+explore agents to read all affected files simultaneously.
+
+### Result: all 8 code fixes already done
+
+Every finding from the session 5 code review was already fixed in sessions 5-6 and
+committed in session 7 (`a0b78b0`). Verified each against current code:
+
+| # | Finding | Current state | File:line |
+|---|---------|---------------|-----------|
+| 1 | eia_hourly_grid wiring | Fully wired in all 6 files | validate.py:1110, run_all.py:620, curated.py:159 |
+| 2 | finnhub dedup keys | Natural keys `['symbol', 'date']` / `['symbol', 'id']` | curated.py:176,180 |
+| 3 | treasury_fiscal pagination | Reads `total_pages`/`total-pages` | treasury_fiscal_pipeline.py:92 |
+| 4 | alpha_vantage dividends | Reads `data.get("data", [])` | alpha_vantage_fundamentals_pipeline.py:268 |
+| 5 | coingecko null crash | `or {}` guard | coingecko_expansion_pipeline.py:179,202 |
+| 6 | exposure.py OLS | Uses `np.linalg.pinv` (pseudo-inverse) | analytics/exposure.py:161 |
+| 7 | features.py tie-break | Breadth-based, backtest passes symbols | analytics/features.py:94, backtest.py:166 |
+| 8 | event_impact.py except | Catches only `NoQualifyingEventsError` | analytics/event_impact.py:401 |
+
+### Commodity build (from earlier this session)
+
+Added 25 FRED PPI series to `commodity_macro_pipeline.py` SERIES dict and
+LBR=F + HRC=F to `futures_pipeline.py` FUTURES dict. Both syntax-verified.
+
+### Verification
+
+Full test suite: 313/313 pass (0 failures). The pre-existing `eia_hourly_grid` test
+failure is resolved (fixed in session 6).
+
+### Remaining
+
+Item 9 (options analytics staging merge) still pending — 19 functions at
+`E:\AI_Projects\FinancialPipelineStagingUpdates\` awaiting review.

@@ -67,6 +67,8 @@ KEYS: dict[str, list[str]] = {
     "commodities":            ["series_id", "date"],
     "imf_commodities":        ["series_id", "date"],
     "metals_spot":            ["series_id", "date"],
+    # Omkar Cloud commodity spot (one row per commodity per fetch)
+    "omkar_commodity":        ["commodity"],
     # EIA gas tables are wide (one row per region/product/price_type per date)
     "gas_spot":               ["date", "series", "price_type", "product"],
     "gas_retail":             ["date", "duoarea", "product", "price_type"],
@@ -93,9 +95,7 @@ KEYS: dict[str, list[str]] = {
     "fhfa_hpi":               ["hpi_type", "hpi_flavor", "frequency", "level", "place_id", "date"],
     "zillow_zhvi":            ["region_id", "date"],
     "zillow_zori":            ["region_id", "date"],
-    # Shipping / logistics
-    "shipping_gscpi":         ["date"],
-    "shipping_freight_ppi":   ["series_id", "date"],
+    # Shipping / logistics (Iceberg-managed, no curated needed)
     # EIA refinery activity / crude trade
     "eia_refinery_activity":  ["series_id", "date"],
     "eia_crude_trade":        ["series_id", "date"],

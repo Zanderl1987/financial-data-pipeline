@@ -1,0 +1,3 @@
+﻿Weekly data-quality check FAILED on 2026-07-20 (exit=1).
+Summary: 96 PASS  |  18 FAIL  |  117 NO DATA
+Full report: C:\Users\zande\PycharmProjects\financial-data-pipeline\storage\quality_reports\validate_2026-07-20.txt

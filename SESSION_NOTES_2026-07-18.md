@@ -1,5 +1,21 @@
 # Session Notes — 2026-07-18
 
+## Cross-repo: earnings-surprise label-join derivation fix (custom_index_tool)
+
+The 07-16 automated EARNINGS pull hard-stopped because NVDA's fiscal-quarter
+derivation mapped both 2026-01-31 (real Q4 FY2026) and 2026-04-30 (Q1 FY2027)
+to "2026Q4". Root cause: Alpha Vantage's annualEarnings includes a stub row for
+the in-progress fiscal year, dated to the latest quarter's end (2026-04-30) with
+quarter-sized EPS — `derive_fiscal_quarters()` treated it as a real FYE candidate.
+
+**Fix** (commit `c95da93` in custom_index_tool): `_drop_stub_annual_rows()` filters
+annualEarnings to the majority FYE month (27:1 vote for January), so the 2026-04-30
+stub is excluded before boundary computation. Verified against the cached NVDA
+payload from the failed run; all 14 unit tests pass.
+
+`EARNINGS_PULL_FAILED.txt` cleared. Pull script ready for the next ~10:05 window
+(6 calls: NVDA cached, ORCL live verify, 5 study tickers).
+
 **Branch:** tv-rating-backtest (worktree at `.worktrees/tv-rating-backtest`)
 **Session model:** Claude Sonnet 5
 

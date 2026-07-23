@@ -119,6 +119,10 @@ EXPECTED_TABLES = [
     "eia_natgas_storage",
     "eia_crude_production",
     "eia_hourly_grid",
+    "index_members",
+    "securities",
+    "fund_holdings",
+    "identifier_map",
     # CoinGecko cryptocurrency
     "crypto_market",
     "crypto_history",
@@ -138,6 +142,8 @@ EXPECTED_TABLES = [
     "ecb_rates",
     # USGS critical minerals
     "usgs_minerals",
+    # Omkar Cloud commodity spot prices
+    "omkar_commodity",
     # UN Comtrade trade flows
     "comtrade_trade",
     # Fama-French factor returns + industry portfolios
@@ -336,12 +342,14 @@ class TestCatalogCompleteness:
 class TestCatalogPaths:
     def test_all_paths_under_storage_raw(self):
         storage_root = os.path.join(REPO_ROOT, "storage", "raw").replace("\\", "/")
+        iceberg_root = os.path.join(REPO_ROOT, "storage", "iceberg").replace("\\", "/")
         bad = {
             name: path
             for name, path in q.CATALOG.items()
             if storage_root.lower() not in path.lower()
+            and iceberg_root.lower() not in path.lower()
         }
-        assert not bad, f"CATALOG entries not under storage/raw: {bad}"
+        assert not bad, f"CATALOG entries not under storage/raw or storage/iceberg: {bad}"
 
     def test_all_paths_end_in_parquet_glob(self):
         bad = {
@@ -387,8 +395,8 @@ class TestDiscoveryHelpers:
     def test_tables_returns_all_catalog_entries(self):
         df = q.tables()
         registered = set(df["table"].tolist())
-        # Only tables with files are registered as views; all should appear in output
-        assert registered.issubset(set(q.CATALOG.keys()))
+        # Tables may include analytics views; check against both catalogs
+        assert registered.issubset(set(q.CATALOG.keys()) | set(q.ANALYTICS_VIEWS.keys()))
 
     def test_date_range_runs_without_error(self):
         df = q.date_range()

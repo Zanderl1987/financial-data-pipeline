@@ -87,6 +87,13 @@ COMMODITIES: dict[str, dict] = {
         "category":   "battery_materials",
         "notes":      "EV motor magnets (Nd, Pr, Dy); China dominant supplier",
     },
+    "iron_steel": {
+        "page_url": "https://www.usgs.gov/centers/national-minerals-information-center/iron-and-steel-statistics-and-information",
+        "mis_abbrev": None,
+        "category":   "industrial",
+        "notes":      "Iron ore + steel; 95% of global metal production by tonnage",
+        "myb_pattern": r"myb1-\d{4}-(iron-steel|feste)",
+    },
 }
 
 
@@ -328,7 +335,7 @@ def main(backfill: bool = False) -> None:
 
         # ── MYB branch (annual data) ────────────────────────────────────────
         else:
-            myb_pattern = r"myb1-\d{4}-"
+            myb_pattern = info.get("myb_pattern", r"myb1-\d{4}-")
             print(f"  Scraping commodity page for MYB files...")
             myb_urls = _scrape_xlsx_urls(page_url, pattern=myb_pattern)
             if not myb_urls:
