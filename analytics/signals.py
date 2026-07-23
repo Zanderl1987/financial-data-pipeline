@@ -14,7 +14,13 @@ Factors
 - momentum       : 12-1 price momentum (trailing 12m return, skipping last month)
 - value          : earnings yield (EPS / price) — cheap stocks score high
 - quality        : return on assets blended with gross margin
-- low_vol        : inverse trailing realized volatility (low-vol anomaly)
+- low_vol        : trailing realized volatility, long-side (higher = more
+                   volatile). Sign-flipped 2026-07-23: evaluate.py found the
+                   textbook low-vol anomaly inverted here — negative IC in
+                   every regime slice (bull/bear/high-vol/low-vol) and OOS,
+                   t=-15.27 @ h=21 pooled — so higher-vol names have
+                   persistently outperformed in this universe. Name kept for
+                   continuity; the factor now longs volatility, not calm.
 - growth         : YoY revenue growth (point-in-time)
 - short_pressure : inverse days-to-cover — lightly shorted stocks score high
                    (flip the weight sign to hunt squeeze candidates instead)
@@ -48,15 +54,20 @@ from analytics.features import feature_matrix
 
 # Default factor weights for the composite. Only factors actually present in the
 # data contribute; weights are renormalized over the available subset per row.
+# value/quality/sentiment/insider_flow zeroed 2026-07-23: evaluate.py found none
+# cleared statistical significance (Sharpe CIs straddling zero). short_pressure
+# and growth were also not significant but are left at 1.0 — short_pressure has
+# too little date coverage to judge yet (43 vs 121 registry rows), and growth's
+# result was borderline rather than clearly null; revisit both with more data.
 DEFAULT_WEIGHTS = {
     "momentum":       1.0,
-    "value":          1.0,
-    "quality":        1.0,
+    "value":          0.0,
+    "quality":        0.0,
     "low_vol":        1.0,
     "growth":         1.0,
     "short_pressure": 1.0,
-    "insider_flow":   1.0,
-    "sentiment":      1.0,
+    "insider_flow":   0.0,
+    "sentiment":      0.0,
 }
 
 _SIGNAL_COLS = list(DEFAULT_WEIGHTS)
@@ -103,9 +114,11 @@ def _raw_signals(fm: pd.DataFrame) -> pd.DataFrame:
         parts = [p for p in (roa, gm) if p is not None]
         df["quality"] = sum(parts) / len(parts)
 
-    # low_vol — inverse realized vol (higher score = calmer stock)
+    # low_vol — realized vol, long-side (higher score = more volatile). See
+    # module docstring: sign-flipped 2026-07-23 after evaluate.py showed the
+    # calmer-is-better assumption was inverted, not just noisy.
     if "vol_21d" in df:
-        df["low_vol"] = -df["vol_21d"]
+        df["low_vol"] = df["vol_21d"]
 
     # growth — point-in-time YoY revenue growth: each distinct reported revenue
     # level compared to the previously reported level for the same symbol.

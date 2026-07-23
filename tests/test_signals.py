@@ -69,8 +69,9 @@ class TestRawSignals:
         row = self.raw.iloc[0]
         assert row["value"] == pytest.approx(row["fund_eps"] / row["close"])
 
-    def test_low_vol_is_negated_vol(self):
-        assert (self.raw["low_vol"] == -self.raw["vol_21d"]).all()
+    def test_low_vol_tracks_vol(self):
+        # Sign-flipped 2026-07-23 — see analytics/signals.py docstring.
+        assert (self.raw["low_vol"] == self.raw["vol_21d"]).all()
 
     def test_quality_present(self):
         assert "quality" in self.raw.columns and self.raw["quality"].notna().any()
