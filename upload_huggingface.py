@@ -85,7 +85,7 @@ Each table is stored as a separate parquet file. Key columns:
 ## Build Info
 
 - **Generated**: {generated_date}
-- **Pipeline**: financial-data-pipeline (https://github.com/ZanderL1337/financial-data-pipeline)
+- **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
 - **Tables**: {n_tables}
 - **Total Rows**: {n_rows:,}
 - **Total Size**: {total_size_mb:.1f} MB
