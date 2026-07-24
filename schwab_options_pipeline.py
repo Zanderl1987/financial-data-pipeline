@@ -199,7 +199,7 @@ def main():
     out_path = write_partitioned(combined, OUTPUT_DIR, f"schwab_options_incremental_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
-    print(f"Saved {len(combined):,} contracts for {len(frames)} symbols → {out_path}")
+    print(f"Saved {len(combined):,} contracts for {len(frames)} symbols -> {out_path}")
     if failed:
         print(f"Failed ({len(failed)}): {', '.join(failed)}")
 

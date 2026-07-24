@@ -158,7 +158,7 @@ def main():
     out_path  = write_partitioned(df, OUTPUT_DIR, f"quotes_{today_str}.parquet")
 
     print(f"\n--- COMPLETE ---")
-    print(f"Saved {len(df)} rows → {out_path}")
+    print(f"Saved {len(df)} rows -> {out_path}")
     print(df[["symbol", "last", "pct_change", "pe_ratio", "div_yield"]].to_string(index=False))
 
 

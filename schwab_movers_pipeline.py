@@ -109,7 +109,7 @@ def main(indices=None):
     filename = write_partitioned(df, OUTPUT_DIR, f"schwab_movers_{stamp}.parquet")
 
     print(f"\n--- SCHWAB MOVERS PIPELINE COMPLETE ---")
-    print(f"Saved {len(df)} rows → {filename}")
+    print(f"Saved {len(df)} rows -> {filename}")
     top = df[df["sort"] == "PERCENT_CHANGE_UP"].nsmallest(5, "rank")
     if not top.empty:
         print(top[["index_symbol", "rank", "symbol", "net_pct_change"]]

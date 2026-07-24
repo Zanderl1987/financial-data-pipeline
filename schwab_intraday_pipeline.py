@@ -146,7 +146,7 @@ def main(freq=5, days=5, backfill=False, symbols=None):
         combined, OUTPUT_DIR, f"schwab_intraday_{freq}m_{mode}_{today}.parquet")
 
     print(f"\n--- SCHWAB INTRADAY PIPELINE COMPLETE ---")
-    print(f"Saved {len(combined):,} bars for {len(results)} symbols → {filename}")
+    print(f"Saved {len(combined):,} bars for {len(results)} symbols -> {filename}")
     if failed:
         print(f"Failed symbols ({len(failed)}): {', '.join(failed)}")
 

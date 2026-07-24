@@ -202,7 +202,7 @@ def main(days=30, backfill=False, years=10):
                               f"schwab_positions_{stamp}.parquet")
         n_real = (pos_df["symbol"] != "_ACCOUNT_TOTAL").sum()
         print(f"  [schwab_positions] {n_real} positions across "
-              f"{len(accounts)} account(s) → {f}")
+              f"{len(accounts)} account(s) -> {f}")
 
     # ── transactions ────────────────────────────────────────────────────
     end_dt = datetime.datetime.utcnow()
@@ -222,7 +222,7 @@ def main(days=30, backfill=False, years=10):
         txn_df = pd.DataFrame(txn_rows).drop_duplicates(subset=["activity_id"])
         f = write_partitioned(txn_df, TRANSACTIONS_DIR,
                               f"schwab_transactions_{mode}_{stamp}.parquet")
-        print(f"  [schwab_transactions] {len(txn_df)} transactions → {f}")
+        print(f"  [schwab_transactions] {len(txn_df)} transactions -> {f}")
     else:
         print("  [schwab_transactions] none in window")
 
