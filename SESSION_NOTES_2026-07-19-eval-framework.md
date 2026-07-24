@@ -838,3 +838,62 @@ Once the run finishes: fold into `curated.py`, verify via `query.py`,
 update `PROJECT_NOTES.md`'s status line with final counts, and decide
 whether/how to re-sync HuggingFace given the scale jump (270MB currently
 -> likely several GB once this lands).
+
+## Universe backfill: crash, resume, and a real OOM (2026-07-24 continued)
+
+The run crashed at 63.8% (18,750/29,374) — not what "check on progress"
+had been reporting healthy numbers for shortly before. Root cause:
+`fetch_with_backoff()` only retries on HTTP status codes (429, etc.); a
+raw `NameResolutionError`/`ConnectionError` from a DNS blip for
+`api.schwabapi.com` is a Python exception, not a status code, so it
+propagated straight up and killed the whole background process. Checked
+`nslookup` — DNS had already recovered by the time I looked. Fixed
+`schwab_universe_backfill.py`: wrapped the per-symbol fetch in its own
+try/except with 3 attempts (15/30/45s backoff), and split the failure
+bucket so persistent network failures land in a new `failed` list instead
+of being conflated with `empty` (Schwab-confirmed-no-data) — they mean
+different things for any future follow-up pass. Verified the crash hadn't
+silently corrupted or double-counted anything: the in-progress chunk was
+never checkpointed (progress is only saved after a full chunk completes),
+so resuming just re-did that one partial chunk cleanly. Resumed; finished
+clean at 27,759/29,374 with data, 1,616 empty, 0 failed.
+
+Folding into `curated.py` surfaced a second, unrelated problem:
+`compact_all()` got killed with zero output — not even a Python traceback,
+just silence, consistent with an OS-level OOM kill rather than a
+handleable exception. Isolated it by running `curated.compact('prices')`
+alone in a fresh process (full 32GB machine, no other tables' memory
+pressure) — still killed, this time with a visible DuckDB progress bar
+frozen partway through the *read*, before dedup logic even starts running.
+That pinned it down precisely: `q.load()` materializing 47.5M rows as a
+pandas DataFrame (mixed dtypes, several object/string columns) is what's
+blowing memory, not the `sort_values`/`drop_duplicates` step.
+
+Rather than touch `dedup()`/`compact()`'s core pandas path (used
+correctly by the other 147 tables, no reason to risk it), added a
+narrowly-scoped `_LARGE_TABLES = {"prices"}` branch: `_compact_large_table()`
+does the identical keyed dedup (`ROW_NUMBER() OVER (PARTITION BY symbol,
+date ORDER BY fetched_at DESC)`, keep rn=1) but as pure DuckDB SQL with a
+`COPY ... TO parquet`, which DuckDB can stream/spill instead of holding a
+pandas copy in RAM. Wired into both `compact()` (single-table API) and
+`compact_all()` (used by every other automation/test in this repo) with a
+name check at the top of the loop, falling through to the untouched
+original path for every other table. Tested `_compact_large_table('prices')`
+alone first (19s, 47,466,193 -> 46,950,543 rows) before trusting a full
+`curated.py` run, which then completed clean: 148 tables, no crash.
+
+Ran the full test suite scoped to curated/catalog tests: 34/35 passed, the
+one failure being the same pre-existing `test_storage_dirs_exist` false
+positive from earlier in this session (never-run pipelines, unrelated).
+`tests/test_curated.py` specifically: 11/11, including the parametrized
+`test_curated_views_have_no_duplicate_keys` check for `prices` against the
+*real* freshly-compacted data — that's the test that actually proves the
+new DuckDB path produces a correct, duplicate-free result, not just a
+fast one.
+
+Final state: `prices` is 46,950,543 rows across 27,759 symbols, spanning
+1985-2026, verified queryable via `query.py`. `PROJECT_NOTES.md` updated
+with the full incident writeup. HuggingFace re-sync deliberately not done
+yet — this is a much bigger jump than any prior update (270MB -> likely
+several GB) and deserves a considered decision, not a reflexive re-run of
+`upload_huggingface.py`.

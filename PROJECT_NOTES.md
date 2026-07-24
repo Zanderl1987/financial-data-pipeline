@@ -204,14 +204,39 @@ already-completed symbols. Smoke-tested on 8 real symbols (7/8 got data,
 launching the real run. Estimated total runtime ~4.5 hours at the 0.55s/
 request pacing already used elsewhere in this codebase.
 
-**Status as of this writing:** in progress, 52.8% done (15,500/29,374
-symbols handled: 14,702 with data, 798 empty, 0 failed) as of 2026-07-24
-03:30 ET, on pace with the ~4.5hr estimate. Noticed benign
-`RuntimeWarning: divide by zero/invalid value in log` noise in the run
-log — `compute_derived_columns`' `log_return` hitting zero-price days on
-some penny/OTC names now that we've expanded past the clean 63-symbol
-watchlist. Doesn't crash anything, just leaves `inf`/`NaN` in that column
-for those specific rows — a data-quality note for later, not a bug fix
-needed now. Will update this section with final counts once complete,
-then fold into `curated.py` and verify via `query.py` same as every other
-backfill this session.
+**Status: done, 2026-07-24.** Run crashed once at 63.8% on a transient DNS
+blip for `api.schwabapi.com` (`fetch_with_backoff` only retries HTTP error
+codes, not raw connection exceptions) — hardened `schwab_universe_backfill.py`
+with a per-symbol retry (3 attempts, 15/30/45s backoff) and a `failed`
+progress bucket distinct from `empty`, resumed cleanly from the last
+checkpoint (no work lost). Final result: **27,759 symbols with real price
+data, 1,616 empty (confirmed no data at Schwab), 0 failed**, out of 29,374.
+
+Folding into `curated.py` then hit a second, more fundamental problem:
+`compact()`'s normal path (`q.load()` into pandas, then `sort_values` +
+`drop_duplicates`) OOM-killed twice trying to materialize the resulting
+47.5M-row `prices` table — confirmed via isolated testing that it dies
+mid-load, before dedup logic even runs (machine has 32GB RAM, ~10.6GB free
+at the time). Fixed in `curated.py`: added `_compact_large_table()` for a
+new `_LARGE_TABLES` set (`prices` only, for now) — same keyed dedup logic
+(`ROW_NUMBER() PARTITION BY (symbol, date) ORDER BY fetched_at DESC`) but
+done entirely inside DuckDB via `COPY`, which streams/spills instead of
+holding everything as a pandas object-dtype DataFrame. Wired into both
+`compact()` and `compact_all()` as a name-based branch; the other 147
+tables are untouched, still on the original pandas path. Compacts `prices`
+in ~19 seconds now (47,466,193 -> 46,950,543 rows, 515,650 dupes removed)
+instead of crashing. Full test suite: 11/11 in `test_curated.py` pass,
+including the parametrized real-data duplicate-key check for `prices`.
+
+Also noticed benign `RuntimeWarning: divide by zero/invalid value in log`
+noise in the backfill log — `compute_derived_columns`' `log_return` hitting
+zero-price days on some penny/OTC names now in scope. Doesn't crash
+anything, just leaves `inf`/`NaN` in that column for those specific rows —
+a data-quality note for whenever this data actually gets used, not fixed
+now.
+
+`prices` table is now 46,950,543 rows across 27,759 symbols (1985-2026),
+verified queryable via `query.py`. Not yet re-synced to HuggingFace — that
+publish is manual (`upload_huggingface.py`) and this is now a much bigger
+jump in size than the 270MB→~300MB deltas so far; worth doing deliberately
+rather than as an afterthought given the scale change.
