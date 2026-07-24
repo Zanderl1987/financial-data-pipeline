@@ -693,3 +693,48 @@ Of the original 5-item roadmap, only item 3 (AV earnings backfill, quota-
 gated) remains. Two not-yet-started follow-on items are now open: the
 PatentsView rewrite (found earlier this session) and the Schwab full
 price-history backfill (newly unblocked by this OAuth fix).
+
+## AV earnings backfill pacing started (2026-07-24, same session continued)
+
+Zander asked to start pacing item 3. It was ~22:00 ET, well outside the
+"~10:05-10:30am safe window" noted in the constraints table for spending
+this repo's share of the AV quota before `custom_index_tool`'s TranscriptPull
+grabs it. Rather than assume the window had passed and the day's quota was
+gone, tested with a single live probe request (`EARNINGS` for AAPL) — it
+returned real data, no quota-exhaustion `Note`/`Information` field. So the
+10:05-10:30 guidance is apparently about avoiding *contention* with
+TranscriptPull, not a hard proof that quota resets right before then; quota
+was still available hours later.
+
+Ran `alpha_vantage_fundamentals_pipeline.py` (default incremental mode, no
+flags) rather than writing a one-off earnings-only script — the pipeline
+already has a rotating-subset pacing mechanism built in
+(`INCREMENTAL_EARNINGS_N=7`/day via day-of-year rotation) designed for
+exactly this. Used the existing mechanism instead of duplicating it.
+Consumed the full 20-request default budget: 7 company overviews, earnings
+history for GOOGL/AXP/AMGN/AMZN/AAPL/BA/CAT (1,017 records total), a full
+3-month earnings calendar (4,885 upcoming dates across the whole market,
+not just DJI), dividends for 2 symbols, insider transactions for 2 symbols.
+`news_sentiment` failed with an "Invalid inputs" error from the AV API,
+burning 1 request for nothing — not investigated, since the active
+`sentiment` factor already runs on local VADER, not this endpoint (see
+`CLAUDE.md`'s Open Work section from 2026-07-06).
+
+Confirmed neither this repo's run nor `custom_index_tool`'s exhausted the
+other's share today; not clear if there's real per-key headroom beyond 25
+or if `custom_index_tool` simply hadn't run yet tonight — didn't dig further
+since it wasn't necessary to complete the task.
+
+Reran `curated.py`: 148 tables (up from 143). Verified both target tables
+directly: `alpha_vantage_earnings` — 1,017 rows across the 7 fetched
+tickers (152 each for AAPL/AMGN/AXP/BA/CAT, 146 AMZN, 111 GOOGL — the
+`ticker` column, not `symbol`, caught that on the first check). 
+`alpha_vantage_earnings_calendar` — 4,885 rows, real upcoming report dates/
+estimates. `PROJECT_NOTES.md` updated: item 3 now "in progress" instead of
+"not yet run," with the specifics of this batch and a note that ~5 more
+daily runs will complete the 30-symbol DJI universe for earnings (other
+sections rotate on their own independent schedules).
+
+All 5 items of the original roadmap have now been started; item 3 needs a
+few more days of unattended manual runs to finish. Follow-on items still
+open: PatentsView rewrite, Schwab price-history backfill.

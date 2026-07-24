@@ -88,9 +88,27 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    in a print statement, after data was already saved) in all 5 Schwab
    pipelines — never surfaced before since none were runnable without valid
    tokens. Committed (pipeline fixes only; `tokens.db`/`.env` gitignored).
-3. Historical earnings — **AV path confirmed viable** (see constraints table);
-   full backfill of `alpha_vantage_earnings`/`alpha_vantage_earnings_calendar` not
-   yet run (quota-gated, needs pacing).
+3. Historical earnings — **pacing started 2026-07-24.** Ran
+   `alpha_vantage_fundamentals_pipeline.py` (incremental mode, default
+   20-request budget) late evening 2026-07-23 — the ~10:05-10:30am "safe
+   window" assumption in the constraints table turned out not to be a hard
+   requirement; a live probe request succeeded well outside that window,
+   confirming the day's shared AV quota wasn't already exhausted by
+   `custom_index_tool`'s automations. First batch: earnings history for
+   GOOGL/AXP/AMGN/AMZN/AAPL/BA/CAT (1,017 records), full earnings calendar
+   (4,885 upcoming dates, all tickers), plus overview (7 symbols), dividends
+   (2 symbols), insider transactions (2 symbols) — all from the pipeline's
+   built-in rotating-subset mechanism (`INCREMENTAL_EARNINGS_N=7`/day), which
+   will cover the full 30-symbol DJI universe over ~5 more daily runs. Not
+   wired into any scheduled automation — `scripts/daily_accumulators.ps1`
+   deliberately excludes it (AV pipelines are quota-sensitive, run manually/
+   paced by hand, not on a fixed schedule). `curated.py` verified: 148 tables
+   (up from 143), `alpha_vantage_earnings`/`alpha_vantage_earnings_calendar`
+   both queryable with real data. One unrelated bug surfaced: `news_sentiment`
+   section failed ("Invalid inputs", AV API) and burned 1 budget slot for
+   nothing — not investigated, since the sentiment factor already uses local
+   VADER (see `CLAUDE.md`), not this endpoint. Continue pacing on subsequent
+   days to complete the DJI universe.
 4. Factor evaluation pass — **done, and applied.** Only `momentum` cleared
    significance positive (Sharpe 0.55 [0.23, 0.88]). `low_vol` cleared
    significance *negative* (Sharpe -0.81 [-1.15, -0.51]) — confirmed a real,
@@ -128,7 +146,8 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    now done and verified — `curated.py` compacts 142 tables clean.
 
 **Initiative status:** items 1, 2, 4, and 5 (plus all follow-up fixes
-surfaced by 5, and the FDIC/PatentsView re-check) are complete. Only item 3
-remains — AV earnings backfill, quota-gated, needs pacing across multiple
-days. Schwab's full price-history backfill (deferred pending OAuth, see
-Storage section) is now unblocked too, just not yet started.
+surfaced by 5, and the FDIC/PatentsView re-check) are complete. Item 3 (AV
+earnings backfill) is in progress — first paced batch ran 2026-07-24, ~5
+more daily runs needed to cover the full DJI universe. All 5 original
+roadmap items have now been started; nothing left fully unstarted except
+follow-on work (Schwab price-history backfill, PatentsView rewrite).
