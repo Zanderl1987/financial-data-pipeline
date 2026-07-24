@@ -642,7 +642,13 @@ Reran `curated.py` after the FDIC refresh: 142 tables, clean, no partition
 errors. `PROJECT_NOTES.md`'s constraint table entry updated in place — split
 the old combined "PatentsView / FDIC failures (probably transient)" row into
 two: FDIC confirmed fixed, PatentsView confirmed a real dead endpoint
-pending rewrite.
+pending rewrite. Committed `bae8457`.
 
-No commit yet for this doc edit — pending Zander's go-ahead per this
-session's established pattern of only committing on explicit request.
+Checked sync against GitHub (`origin/master`): local was 7 commits ahead,
+0 behind — this whole roadmap initiative's worth of commits, unpushed.
+Zander confirmed; pushed all 7 (`ebc3bfb..bae8457`). Repo is now in sync.
+
+Of the original 5-item roadmap, only items 2 (Schwab OAuth) and 3 (AV
+earnings backfill) remain, both externally blocked as described above.
+PatentsView's rewrite (found this session, not part of the original 5) is
+a new, not-yet-started open item.
