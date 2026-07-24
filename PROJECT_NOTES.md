@@ -149,5 +149,19 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
 surfaced by 5, and the FDIC/PatentsView re-check) are complete. Item 3 (AV
 earnings backfill) is in progress — first paced batch ran 2026-07-24, ~5
 more daily runs needed to cover the full DJI universe. All 5 original
-roadmap items have now been started; nothing left fully unstarted except
-follow-on work (Schwab price-history backfill, PatentsView rewrite).
+roadmap items have now been started.
+
+**Schwab full price-history backfill — done, 2026-07-24.** Ran
+`price_history_pipeline.py --full --watchlist` (the standard 63-symbol
+watchlist from `tiingo_pipeline.DEFAULT_SYMBOLS` — DJI 30 + high-interest
+tech + broad market/sector/bond/commodity ETFs — not just the pipeline's
+DJI-30 default, since that's the universe `event_backtest`/`signals`
+actually run against). Fixed the same Windows cp1252 unicode-arrow crash
+found in the other 5 Schwab pipelines before running. 62/63 symbols
+succeeded, 473,916 rows, daily bars back to 1984-11-01 for the oldest DJI
+names (AXP, BA, MMM) and to each ETF/stock's actual listing date otherwise
+(e.g. PLTR from its 2020-09-30 IPO). `WBA` returned `{"empty":true}` from
+Schwab itself (HTTP 200, not an error) — likely delisted/inactive on their
+end, not a pipeline bug; not investigated further. `curated.py` verified:
+`prices` table now 484,371 rows, spans 1984-2026. This was the last item
+deferred pending Schwab OAuth (see Storage section) — fully done now.

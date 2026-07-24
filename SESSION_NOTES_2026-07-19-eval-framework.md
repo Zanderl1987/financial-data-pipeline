@@ -738,3 +738,39 @@ sections rotate on their own independent schedules).
 All 5 items of the original roadmap have now been started; item 3 needs a
 few more days of unattended manual runs to finish. Follow-on items still
 open: PatentsView rewrite, Schwab price-history backfill.
+
+## Schwab full price-history backfill (2026-07-24, same session continued)
+
+Zander asked to start this next. Found the same Windows cp1252
+unicode-arrow crash in `price_history_pipeline.py` as the other 5 Schwab
+pipelines (line 162, trailing success print) — fixed it before running,
+same as before.
+
+Decided the symbol universe before running: the pipeline's own default is
+DJI 30 (`get_dji_symbols()`), but `tiingo_pipeline.DEFAULT_SYMBOLS` (the
+63-symbol "standard watchlist" — DJI 30 + high-interest tech + broad
+market/sector/bond/commodity ETFs) is what `event_backtest.py` and
+`analytics/signals.py` actually operate on. Ran with `--full --watchlist`
+instead of the bare default so the backfill is actually useful to the
+existing analytics, not just DJI 30.
+
+62 of 63 symbols succeeded — 473,916 rows, daily bars back to 1984-11-01
+for the oldest names (AXP, BA, MMM), each ETF/later-IPO symbol back to its
+own start (e.g. PLTR from 2020-09-30). `WBA` came back
+`{"symbol":"WBA","empty":true,"candles":[]}` — HTTP 200, not an error;
+confirmed by hand with a direct `client.price_history()` call. Read as
+Schwab itself having no data for the symbol (likely delisted/inactive),
+not a pipeline bug — didn't dig further since there's nothing in this
+codebase to fix.
+
+`curated.py` verified: `prices` table now 484,371 rows total; spot-checked
+AAPL/JPM (1985-2026, ~10,470 daily bars each) and PLTR (2020-2026, 1,459
+bars) through `query.py`. `PROJECT_NOTES.md` updated — this was the last
+item that had been explicitly deferred pending Schwab OAuth; it's fully
+done now, no longer just "unblocked."
+
+Remaining open items: item 3 (AV earnings backfill, needs a few more paced
+days) and the PatentsView rewrite. Everything else from this whole
+multi-day initiative (daily automation, Schwab OAuth + all 5 pipeline
+fixes, low_vol sign-flip, full stage-1 backfill + its 3 follow-up bugs,
+FDIC/PatentsView re-check, and now this) is done.
