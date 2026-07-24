@@ -28,6 +28,7 @@ import os
 import time
 
 import pandas as pd
+import requests
 import schwabdev
 from dotenv import load_dotenv
 
@@ -90,10 +91,22 @@ def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE, progress_fi
         chunk = remaining[chunk_start:chunk_start + chunk_size]
         results = []
         for i, symbol in enumerate(chunk, 1):
-            df = fetch_symbol(client, symbol, start_ms, end_ms)
+            network_error = False
+            df = None
+            for attempt in range(1, 4):
+                try:
+                    df = fetch_symbol(client, symbol, start_ms, end_ms)
+                    network_error = False
+                    break
+                except requests.exceptions.RequestException as e:
+                    print(f"  Network error on {symbol} (attempt {attempt}/3): {e}")
+                    network_error = True
+                    time.sleep(15 * attempt)
             if df is not None and not df.empty:
                 results.append(df)
                 progress["done"].append(symbol)
+            elif network_error:
+                progress["failed"].append(symbol)
             else:
                 progress["empty"].append(symbol)
             time.sleep(REQUEST_INTERVAL)
