@@ -159,7 +159,7 @@ def main(backfill=False, full=False, start=None, symbols=None, watchlist=False):
     filename = write_partitioned(combined, OUTPUT_DIR, f"prices_{mode_tag}_{today}.parquet")
 
     print(f"\n--- COMPLETE ---")
-    print(f"Saved {len(combined)} rows for {len(results)} symbols → {filename}")
+    print(f"Saved {len(combined)} rows for {len(results)} symbols -> {filename}")
     if failed:
         print(f"Failed symbols ({len(failed)}): {', '.join(failed)}")
     if full or start:
