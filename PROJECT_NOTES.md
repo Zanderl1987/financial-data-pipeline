@@ -57,8 +57,9 @@ As of 2026-07-22 the curated snapshot is published publicly at
 `https://huggingface.co/datasets/ZanderL1337/financial-data-pipeline` (public HF
 dataset repos get effectively unlimited storage, ~1TB soft cap raised on request;
 private repos cap at 100GB free). This removes the storage constraint that
-previously gated the Schwab full price-history backfill — that backfill is now
-blocked only on Schwab OAuth (interactive, see above), not on disk budget.
+previously gated the Schwab full price-history backfill. Schwab OAuth is now
+also done (2026-07-24, see In-flight initiative below) — that backfill is
+fully unblocked, just not yet started.
 
 **Iceberg snapshot growth (watch this):** Iceberg keeps every historical
 metadata/manifest file with no expiration configured. The 2026-07-23 stage-1
@@ -74,9 +75,19 @@ Iceberg snapshot expiration before this grows unbounded in git history.
 Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfill:
 
 1. Daily automation (`ClaudeAuto-DailyAccumulators`) — **done**, see table above.
-2. Schwab OAuth — **waiting on Zander** to run
-   `schwab_quotes_pipeline.py` interactively (creates `tokens.db`, reused by all
-   other Schwab pipelines).
+2. Schwab OAuth — **done, 2026-07-24.** Old `tokens.db` refresh token (issued
+   2026-07-04) had passed Schwab's 7-day expiry. Completed the OAuth handshake
+   non-interactively: opened the auth URL, Zander authorized in-browser, then
+   fed the resulting (failed-to-load) `127.0.0.1:8182` redirect URL into
+   `schwabdev.Client(..., call_on_auth=lambda url: redirect_url,
+   open_browser_for_auth=False)` instead of the library's normal blocking
+   `input()` prompt. First attempt's code expired (~30s window) while
+   confirming the correct kwarg name; second attempt succeeded. Fresh
+   `tokens.db` verified live via `schwab_quotes_pipeline.py` (45 symbols,
+   real quote/PE data). Found and fixed a Windows cp1252 crash (unicode arrow
+   in a print statement, after data was already saved) in all 5 Schwab
+   pipelines — never surfaced before since none were runnable without valid
+   tokens. Committed (pipeline fixes only; `tokens.db`/`.env` gitignored).
 3. Historical earnings — **AV path confirmed viable** (see constraints table);
    full backfill of `alpha_vantage_earnings`/`alpha_vantage_earnings_calendar` not
    yet run (quota-gated, needs pacing).
@@ -116,7 +127,8 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    the `google_trends` missing-dependency fix. All three follow-up fixes are
    now done and verified — `curated.py` compacts 142 tables clean.
 
-**Initiative status:** items 1, 4, and 5 (plus all follow-up fixes surfaced
-by 5) are complete. Only externally-blocked items remain: item 2 (Schwab
-OAuth — needs Zander to run it interactively) and item 3 (AV earnings
-backfill — quota-gated, needs pacing across multiple days).
+**Initiative status:** items 1, 2, 4, and 5 (plus all follow-up fixes
+surfaced by 5, and the FDIC/PatentsView re-check) are complete. Only item 3
+remains — AV earnings backfill, quota-gated, needs pacing across multiple
+days. Schwab's full price-history backfill (deferred pending OAuth, see
+Storage section) is now unblocked too, just not yet started.

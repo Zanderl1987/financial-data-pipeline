@@ -652,3 +652,44 @@ Of the original 5-item roadmap, only items 2 (Schwab OAuth) and 3 (AV
 earnings backfill) remain, both externally blocked as described above.
 PatentsView's rewrite (found this session, not part of the original 5) is
 a new, not-yet-started open item.
+
+## Schwab OAuth completed (2026-07-24, same session continued)
+
+Zander asked to start the Schwab OAuth flow. The Chrome browser extension
+wasn't connected on this machine, so couldn't drive the login tab directly;
+instead constructed the auth URL from `.env` (`SCHWAB_API_KEY` +
+`SCHWAB_CALLBACK_URL`, formula copied from `schwabdev/tokens.py`) and had
+Zander open it, log in, and paste back the resulting (failed-to-load)
+`https://127.0.0.1:8182/?code=...` redirect URL.
+
+Rather than running `schwab_quotes_pipeline.py` interactively (which blocks
+on a terminal `input()` call this tool session can't supply), completed the
+token exchange programmatically: `schwabdev.Client(..., call_on_auth=lambda
+auth_url: redirect_url, open_browser_for_auth=False)`. First attempt used
+the wrong kwarg name (guessed `call_for_auth`; the real one, found by
+reading `schwabdev/client.py`, is `call_on_auth`) — by the time that was
+sorted out the ~30-second auth-code expiry had passed, so Zander had to
+redo the browser step once. Second attempt succeeded immediately.
+
+Verified `tokens.db`'s refresh token timestamp jumped from 2026-07-04
+(expired, Schwab refresh tokens last 7 days) to 2026-07-24, then ran
+`schwab_quotes_pipeline.py` live end-to-end: 45 symbols (DJI + sector ETFs)
+fetched successfully with real quote/PE/dividend data. The script then
+crashed — but *after* the parquet write, on a bare Unicode arrow (`→`) in
+the trailing print statement, which Windows' cp1252 console can't encode.
+This is the exact "ASCII-only CLI output" gotcha documented in `CLAUDE.md`;
+this script (and, checked via grep, all 4 other Schwab pipelines) predates
+that convention because none of them were ever runnable before without
+valid tokens, so the bug never surfaced. Fixed all 5 (`→` -> `->`).
+
+Reran `curated.py`: 143 tables (up from 142) — `schwab_quotes` now populated
+and verified queryable through `query.py` (45 rows, real AAPL/AMZN/etc.
+prices and PE ratios). Committed the 5 pipeline fixes. `PROJECT_NOTES.md`
+updated in place: item 2 of the original roadmap marked done, and the
+Storage section's note about the Schwab price-history backfill being
+"blocked on OAuth" corrected — it's now unblocked (just not started).
+
+Of the original 5-item roadmap, only item 3 (AV earnings backfill, quota-
+gated) remains. Two not-yet-started follow-on items are now open: the
+PatentsView rewrite (found earlier this session) and the Schwab full
+price-history backfill (newly unblocked by this OAuth fix).
