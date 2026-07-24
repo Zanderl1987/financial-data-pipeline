@@ -607,3 +607,42 @@ all of this; this file gets the narrative. Of the original 5-item roadmap
 initiative, only items 2 (Schwab OAuth) and 3 (AV earnings backfill) remain,
 both blocked on external factors (Zander's interactive action; AV quota
 pacing) rather than anything left to build.
+
+## PatentsView / FDIC re-check, session continued (2026-07-23, later same day)
+
+With items 2 and 3 both externally blocked (Schwab needs Zander at an
+interactive terminal; AV's shared daily quota window is ~10:05-10:30am and
+it was already 16:45 by this point), picked up the one open, unblocked
+thread from the stage-1 backfill notes: the `patents`/`fdic` DNS failures
+flagged as "likely transient, re-run before concluding broken."
+
+Re-ran both live. `fdic_pipeline.py` pulled clean — 4,255 institutions,
+98,669 financials rows, 4,115 failures — confirming that one really was a
+transient blip. `patents_pipeline.py` failed again with the identical
+`getaddrinfo failed` error for `search.patentsview.org` across all 6 CPC
+sectors. Before writing that off as "still transient, try again later,"
+checked with `nslookup`: `search.patentsview.org` is a genuine NXDOMAIN
+(non-existent domain), while `patentsview.org` itself and an unrelated
+control host (`www.google.com`) both resolve fine — ruling out a general
+local DNS/network problem.
+
+Used WebSearch + WebFetch to confirm why: PatentsView migrated to the USPTO
+Open Data Portal (`data.uspto.gov`) around March 2026 — `patentsview.org`
+now 301-redirects there, and reporting suggests the original API's
+endpoints return 410 Gone. `patents_pipeline.py`'s hardcoded
+`BASE_URL = "https://search.patentsview.org/api/v1/patent/"` is pointed at
+a hostname that no longer exists in DNS at all, not one that's merely
+rate-limiting or flaking. This is a real breaking change needing a pipeline
+rewrite against the new ODP API (different auth, `size`/`after` paging
+instead of `per_page`/`page`) — not attempted here, since it's a scoped
+rewrite job of its own, not a quick re-run check. Same class of problem as
+the `oecd` dead-endpoint finding from the backfill.
+
+Reran `curated.py` after the FDIC refresh: 142 tables, clean, no partition
+errors. `PROJECT_NOTES.md`'s constraint table entry updated in place — split
+the old combined "PatentsView / FDIC failures (probably transient)" row into
+two: FDIC confirmed fixed, PatentsView confirmed a real dead endpoint
+pending rewrite.
+
+No commit yet for this doc edit — pending Zander's go-ahead per this
+session's established pattern of only committing on explicit request.
