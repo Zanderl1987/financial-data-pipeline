@@ -165,3 +165,45 @@ Schwab itself (HTTP 200, not an error) — likely delisted/inactive on their
 end, not a pipeline bug; not investigated further. `curated.py` verified:
 `prices` table now 484,371 rows, spans 1984-2026. This was the last item
 deferred pending Schwab OAuth (see Storage section) — fully done now.
+
+## Full-universe expansion (started 2026-07-24)
+
+Zander's direction: grab as much data as possible for the *entire* symbol
+universe Schwab can see (not just the 63-symbol watchlist), using
+Schwab specifically because it has no daily quota (120 req/min hard cap
+only, vs. AV's 25/day) — quota-gated sources (AV, etc.) stay scoped to the
+watchlist/DJI-30 and get used "selectively" to fill in deeper data as
+specific projects need it. This is a baseline-breadth-first, depth-later
+strategy, not a one-time task.
+
+**Universe discovery:** Schwab's `instruments()` endpoint has no bulk-dump
+mode — it's regex-search only, minimum 2 literal characters, and results
+mix in mutual funds/options/notes alongside real equities. Swept all
+26x26 two-letter prefixes (676 calls) plus the 26 true single-letter
+tickers (exact match), filtered to `assetType` in {EQUITY, ETF}. Result:
+**29,374 unique symbols** (22,984 equities + 6,390 ETFs) across all
+exchanges Schwab tracks — 13,219 on major exchanges (NASDAQ 5,661 / NYSE
+2,975 / NYSE Arca 2,704 / Cboe BZX 1,543 / NYSE American 325 / MEMX 11)
+and 16,155 OTC/pink-sheet (OTC Markets 15,328 / Nasdaq OTCBB 827). Zander
+chose to include everything, reasoning the HuggingFace publish target has
+effectively no storage ceiling for this scale (~1TB soft cap; see Storage
+section — this pull is estimated at single-digit GB, nowhere close).
+Saved as `symbol_universe.csv` (repo root, git-tracked — this is now the
+reference definition of "our universe," not raw fetched data).
+
+**Backfill mechanics:** `schwab_universe_backfill.py` (new script) reuses
+`price_history_pipeline.fetch_symbol()` (same fetch/backoff/derived-columns
+logic) but can't reuse `main()`'s single-shot design — pulling full history
+for 29,374 symbols would produce 100M+ rows, too large to hold in memory or
+write in one parquet file. Instead: chunks of 250 symbols, writing (and
+checkpointing progress to `schwab_universe_backfill_progress.json`,
+gitignored — regenerable state, not data) after every chunk, so a
+multi-hour run survives interruption and can resume without re-fetching
+already-completed symbols. Smoke-tested on 8 real symbols (7/8 got data,
+1 empty) and verified the resume path skips already-handled symbols before
+launching the real run. Estimated total runtime ~4.5 hours at the 0.55s/
+request pacing already used elsewhere in this codebase.
+
+**Status as of this writing:** full run launched, in progress. Will update
+this section with final counts once complete, then fold into `curated.py`
+and verify via `query.py` same as every other backfill this session.

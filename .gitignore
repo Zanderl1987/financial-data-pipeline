@@ -23,3 +23,6 @@ Com95_16.txt
 annualof.txt
 
 storage/eval_registry/
+
+# Regenerable progress state for the long-running universe backfill
+schwab_universe_backfill_progress.json
