@@ -213,6 +213,53 @@ def _curated_path(table: str) -> str:
     return os.path.join(CURATED_ROOT, table, f"{table}.parquet").replace("\\", "/")
 
 
+# Tables too large to materialize as a pandas DataFrame (q.load() + drop_duplicates)
+# without risking OOM. `prices` hit this once the full symbol-universe backfill
+# pushed it to 47M+ raw rows -- these use a DuckDB-native window-function dedup
+# instead, which streams/spills instead of holding everything in memory at once.
+# Requires a fully-specified KEYS entry (no full-row-fallback support) and a
+# `fetched_at` column to order by.
+_LARGE_TABLES = {"prices"}
+
+
+def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
+    """DuckDB-native equivalent of compact() for oversized tables — returns
+    (out_path, raw_rows, curated_rows), or None if there's no raw data."""
+    import glob as glob_mod
+    import duckdb
+
+    key = KEYS[table]
+    glob_path = q.CATALOG[table]
+    if not glob_mod.glob(glob_path, recursive=True):
+        return None
+
+    out_path = _curated_path(table)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    partition_cols = ", ".join(key)
+    raw_scan = f"read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)"
+
+    con = duckdb.connect()
+    try:
+        raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
+        con.execute(f"""
+            COPY (
+                SELECT * EXCLUDE (_rn) FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY {partition_cols} ORDER BY fetched_at DESC
+                    ) AS _rn
+                    FROM {raw_scan}
+                )
+                WHERE _rn = 1
+            ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+        curated_rows = con.execute(
+            f"SELECT count(*) FROM read_parquet('{out_path}')"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    return out_path, raw_rows, curated_rows
+
+
 class _raw_reads:
     """
     Context manager that forces query.py to read the RAW dated-file globs.
@@ -276,6 +323,14 @@ def compact(table: str) -> "str | None":
     if table not in q.CATALOG:
         raise ValueError(f"Unknown table '{table}'. Available: {sorted(q.CATALOG)}")
 
+    if table in _LARGE_TABLES:
+        with _raw_reads():
+            result = _compact_large_table(table)
+        if result is None:
+            return None
+        q.reload()
+        return result[0]
+
     with _raw_reads():
         raw = q.load(table)
     if raw.empty:
@@ -299,6 +354,30 @@ def compact_all(tables: "list[str] | None" = None, verbose: bool = True) -> pd.D
     rows = []
     with _raw_reads():
         for name in names:
+            if name in _LARGE_TABLES:
+                try:
+                    result = _compact_large_table(name)
+                except Exception as e:  # noqa: BLE001 — surface, keep going
+                    if verbose:
+                        print(f"  {name:28s} ERROR {str(e)[:50]}")
+                    continue
+                if result is None:
+                    continue
+                out_path, raw_n, curated_n = result
+                removed = raw_n - curated_n
+                pct = round(100 * removed / raw_n, 1) if raw_n else 0.0
+                rows.append({
+                    "table": name,
+                    "raw_rows": raw_n,
+                    "curated_rows": curated_n,
+                    "removed": removed,
+                    "pct_removed": pct,
+                })
+                if verbose:
+                    flag = "  <-- dupes" if pct >= 5 else ""
+                    print(f"  {name:28s} {raw_n:>10,} -> {curated_n:>10,}  (-{pct:>4.1f}%){flag}")
+                continue
+
             try:
                 raw = q.load(name)
             except Exception as e:  # noqa: BLE001 — surface, keep going
