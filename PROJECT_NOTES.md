@@ -204,6 +204,14 @@ already-completed symbols. Smoke-tested on 8 real symbols (7/8 got data,
 launching the real run. Estimated total runtime ~4.5 hours at the 0.55s/
 request pacing already used elsewhere in this codebase.
 
-**Status as of this writing:** full run launched, in progress. Will update
-this section with final counts once complete, then fold into `curated.py`
-and verify via `query.py` same as every other backfill this session.
+**Status as of this writing:** in progress, 52.8% done (15,500/29,374
+symbols handled: 14,702 with data, 798 empty, 0 failed) as of 2026-07-24
+03:30 ET, on pace with the ~4.5hr estimate. Noticed benign
+`RuntimeWarning: divide by zero/invalid value in log` noise in the run
+log — `compute_derived_columns`' `log_return` hitting zero-price days on
+some penny/OTC names now that we've expanded past the clean 63-symbol
+watchlist. Doesn't crash anything, just leaves `inf`/`NaN` in that column
+for those specific rows — a data-quality note for later, not a bug fix
+needed now. Will update this section with final counts once complete,
+then fold into `curated.py` and verify via `query.py` same as every other
+backfill this session.

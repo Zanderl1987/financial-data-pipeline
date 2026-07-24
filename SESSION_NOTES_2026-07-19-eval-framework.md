@@ -774,3 +774,67 @@ days) and the PatentsView rewrite. Everything else from this whole
 multi-day initiative (daily automation, Schwab OAuth + all 5 pipeline
 fixes, low_vol sign-flip, full stage-1 backfill + its 3 follow-up bugs,
 FDIC/PatentsView re-check, and now this) is done.
+
+## Full-universe expansion (2026-07-24, same session continued)
+
+After confirming HuggingFace is a public downstream mirror (not the
+primary output — that's local `storage/curated/`, per `README.md`/
+`docs/ARCHITECTURE.md`; HF isn't mentioned in either), Zander asked to
+"grab as much data as we possibly can" for names beyond the 63-symbol
+watchlist, using quota-unlimited Schwab as the broad baseline layer and
+quota-gated sources (AV, etc.) selectively for depth as specific projects
+need it — a breadth-first-then-depth-on-demand strategy, not a one-time
+task.
+
+First had to find out what Schwab's actual symbol universe even is.
+`instruments()` has no bulk-dump endpoint — pure regex/exact search,
+2-character minimum, and results mix in mutual funds/options/structured
+notes alongside real tickers (a single `"AA.*"` test query returned
+29,207 raw hits, only 100 of which were EQUITY/ETF). Swept all 676
+two-letter A-Z prefixes plus the 26 true single-letter tickers (exact
+match, since regex has a length floor that excludes them), filtering to
+`assetType` in {EQUITY, ETF} — landed on 29,374 unique symbols (13,219
+major-exchange, 16,155 OTC/pink-sheet). First attempt at the sweep script
+crashed immediately (`KeyError: SCHWAB_API_KEY`) because `load_dotenv()`
+with no path arg didn't find `.env` when the background command's `cd`
+didn't carry over into the backgrounded process's actual working
+directory — fixed by passing absolute paths for both `.env` and
+`tokens.db`.
+
+Asked Zander to confirm scope (major-exchange-only vs. everything) given
+the 2x difference in runtime/storage — answer was everything, reasoning
+HuggingFace's effective storage ceiling (~1TB soft cap) makes the
+OTC/pink-sheet names' extra bulk a non-issue at this scale.
+
+Saved the list as `symbol_universe.csv` (repo root, git-tracked — this is
+now the definition of "our universe" going forward, distinct from raw
+fetched data). Built `schwab_universe_backfill.py` rather than just
+re-running `price_history_pipeline.py` with a huge `--symbols` list: the
+existing pipeline's single-shot design (fetch everything, concatenate,
+write once at the end) would need 100M+ rows in memory for the full
+universe, and a multi-hour run with no incremental writes means any
+interruption loses everything. New script reuses
+`price_history_pipeline.fetch_symbol()` (same fetch/backoff/derived-
+columns logic — didn't duplicate it) but writes in checkpointed batches
+of 250 symbols, tracking a gitignored progress-state JSON so a restart
+skips already-completed symbols. Smoke-tested on a real 8-symbol slice
+first (7/8 got data, 1 empty) and verified the resume path actually skips
+before committing to the full run.
+
+Launched the real run (~4.5hr estimate at the existing 0.55s/request
+pacing). Checked progress twice on request: 32.3% (9,500/29,374) then
+51.9% (15,250/29,374), both times healthy — steady advancement, zero
+hard failures, only benign `RuntimeWarning`s from `log_return` hitting
+zero-price days on some of the newly-included penny/OTC names (produces
+`inf`/`NaN` in that one column for those rows, not a crash — a
+data-quality note for whenever this gets used, not something fixed now).
+`PROJECT_NOTES.md` updated with the full mechanics and current progress
+snapshot. Committed `schwab_universe_backfill.py` + `symbol_universe.csv`
++ `.gitignore` entry for the progress file. Not yet committed: the docs
+update from this note (in progress as of this writing), and obviously not
+the backfill's output data itself (gitignored parquet, still running).
+
+Once the run finishes: fold into `curated.py`, verify via `query.py`,
+update `PROJECT_NOTES.md`'s status line with final counts, and decide
+whether/how to re-sync HuggingFace given the scale jump (270MB currently
+-> likely several GB once this lands).
