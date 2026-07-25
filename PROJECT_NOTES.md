@@ -109,6 +109,17 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    nothing — not investigated, since the sentiment factor already uses local
    VADER (see `CLAUDE.md`), not this endpoint. Continue pacing on subsequent
    days to complete the DJI universe.
+
+   **2026-07-25 batch:** ran again, 20/20 requests used. Earnings coverage
+   now 9/30 DJI symbols (added CSCO, CVX — AAPL/AMGN/AMZN/AXP/BA/CAT
+   re-fetched by the rotation but correctly deduped, not doubled: row
+   counts per symbol identical to the prior batch). 1,322 total earnings
+   records. `alpha_vantage_earnings_calendar` refreshed (4,767 upcoming
+   dates). `curated.py` re-verified clean at 148 tables. `news_sentiment`
+   failed again with the same "Invalid inputs" error — now confirmed
+   consistent/reproducible rather than a one-off, still not investigated
+   (out of scope, unused endpoint). ~3-4 more daily runs needed for full
+   DJI coverage at this rotation rate.
 4. Factor evaluation pass — **done, and applied.** Only `momentum` cleared
    significance positive (Sharpe 0.55 [0.23, 0.88]). `low_vol` cleared
    significance *negative* (Sharpe -0.81 [-1.15, -0.51]) — confirmed a real,
