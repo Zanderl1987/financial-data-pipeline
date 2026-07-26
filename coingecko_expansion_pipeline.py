@@ -292,25 +292,25 @@ def fetch_derivatives():
     if not data:
         return pd.DataFrame()
     for ticker in data:
-        exchange = ticker.get("exchange", {})
+        # CoinGecko's /derivatives response has no nested "exchange" object --
+        # the exchange is a flat "market" string, and several other fields
+        # this used to assume (base/target/index_price/last_updated) don't
+        # exist either. Mapped against a live sample response 2026-07-26.
         row = {
             "symbol": ticker.get("symbol"),
-            "base": ticker.get("base"),
-            "target": ticker.get("target"),
-            "trade_volume_24h_btc": ticker.get("trade_volume_24h_btc"),
-            "trade_volume_24h_btc_normalized": ticker.get("trade_volume_24h_btc_normalized"),
-            "bid_ask_spread_percentage": ticker.get("bid_ask_spread_percentage"),
-            "funding_rate": ticker.get("funding_rate"),
+            "index_id": ticker.get("index_id"),
+            "contract_type": ticker.get("contract_type"),
             "price": ticker.get("price"),
-            "index_price": ticker.get("index_price"),
-            "index_price_date": ticker.get("index_price_date"),
-            "exchange_name": exchange.get("name"),
-            "exchange_logo": exchange.get("logo"),
-            "exchange_centralization": exchange.get("centralization"),
-            "exchange_trust_score_rank": exchange.get("trust_score_rank"),
-            "exchange_country": exchange.get("country"),
-            "exchange_established_year": exchange.get("year_established"),
-            "last_updated": ticker.get("last_updated"),
+            "price_percentage_change_24h": ticker.get("price_percentage_change_24h"),
+            "index": ticker.get("index"),
+            "basis": ticker.get("basis"),
+            "spread": ticker.get("spread"),
+            "funding_rate": ticker.get("funding_rate"),
+            "open_interest": ticker.get("open_interest"),
+            "volume_24h": ticker.get("volume_24h"),
+            "exchange_name": ticker.get("market"),
+            "last_traded_at": ticker.get("last_traded_at"),
+            "expired_at": ticker.get("expired_at"),
         }
         all_rows.append(row)
     df = pd.DataFrame(all_rows)

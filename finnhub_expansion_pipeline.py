@@ -125,12 +125,14 @@ SOCIAL_SENTIMENT_RENAME = {
 }
 
 FILING_RENAME = {
-    "filingDate":     "filing_date",
+    # Finnhub's actual stock/filings response uses filedDate/reportUrl/filingUrl,
+    # not filingDate/url/primaryDocument -- verified against cached raw data 2026-07-26.
+    "filedDate":      "filing_date",
     "acceptedDate":   "accepted_date",
     "form":           "form_type",
-    "filedAt":        "filed_at",
-    "url":            "url",
-    "primaryDocument":"primary_document",
+    "accessNumber":   "access_number",
+    "reportUrl":      "report_url",
+    "filingUrl":      "filing_url",
 }
 
 LOBBYING_RENAME = {

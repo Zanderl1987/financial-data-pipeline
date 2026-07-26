@@ -400,7 +400,8 @@ def fetch_petroleum_supply_demand(start_date: str | None = None) -> pd.DataFrame
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df = df.rename(columns={"period": "date", "process": "process_code"})
+    df = df.rename(columns={"period": "date", "process": "process_code",
+                             "product": "product_code", "product-name": "product_name"})
     df["date"]         = pd.to_datetime(df["date"], errors="coerce")
     df["value"]        = pd.to_numeric(df["value"], errors="coerce")
     df["process_name"] = df["process_code"].map(PET_SNDPROCESS)
@@ -409,11 +410,11 @@ def fetch_petroleum_supply_demand(start_date: str | None = None) -> pd.DataFrame
     df["source"]       = "EIA"
     df["fetched_at"]   = datetime.datetime.utcnow().isoformat()
 
-    keep = ["date", "process_code", "process_name", "value", "units",
-            "frequency", "source", "fetched_at"]
+    keep = ["date", "process_code", "process_name", "product_code", "product_name",
+            "value", "units", "frequency", "source", "fetched_at"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["date", "value"])
-    return df.sort_values(["process_code", "date"]).reset_index(drop=True)
+    return df.sort_values(["process_code", "product_code", "date"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
