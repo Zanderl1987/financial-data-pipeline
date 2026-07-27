@@ -91,18 +91,68 @@ other repo's quota. Implemented:
 
 Verified: `tests/test_catalog.py` 13/13 pass, `run_all.py --dry-run` plan no longer
 lists the unwired pipelines, `validate.py` runs clean (148 PASS / 0 FAIL / 80 NO DATA,
-down from 83 NO DATA — exactly the 3 removed tables). Full `pytest tests/ -q` kicked
-off to confirm no collateral breakage; **not yet confirmed complete as of this note**
-— check before treating this as fully closed, and commit only after it passes.
+down from 83 NO DATA — exactly the 3 removed tables). Full suite confirmed clean:
+**454 passed, 0 failed** (was 453 passed / 1 failed). Committed `2463c79`, pushed.
+
+## Session 3 (same day): logging framework built
+
+User asked for "tests and logging framework for errors" since none existed —
+confirmed only 4 of ~90 pipeline files used Python's `logging` module at all (console
+only, no file persistence), and `run_all.py` only ever kept a one-line "exit 1" note
+per failure, discarding the actual stdout/stderr. Scoped with the user: this repo only
+(not `earnings_sentiment_tool`), a real structured file-logging layer (not just
+patching `run_all.py`'s one-liner), tests for the framework itself (not a pipeline-by-
+pipeline error-path retrofit).
+
+Built `logging_utils.py` (repo root, same tier as `storage_utils.py`):
+`get_logger(name)` — console + `RotatingFileHandler` (5MB x 5 backups) at
+`storage/logs/<name>.log`, idempotent (safe at import time, no duplicate handlers).
+`log_pipeline_failure(name, detail)` — writes a full-output snapshot to
+`storage/logs/failures/<name>_<timestamp>.log`, kept separate from the rotating log so
+a specific failure's full context survives rotation.
+
+Wired into `run_all.py`: `run_pipeline()` now uses `subprocess.run(..., capture_output=
+True, text=True)` instead of inheriting stdout/stderr — output is printed after the
+pipeline finishes (buffered per-pipeline, **not** streamed live character-by-character;
+a deliberate tradeoff so a run is always fully captured to disk, even a silent hang
+that times out with zero console output otherwise) and always handed to the logger. On
+FAIL or timeout, the captured output is persisted via `log_pipeline_failure()` and its
+path appended to `RunResult.note` (e.g. `exit 1 -- log: storage\logs\failures\
+foo_20260726_235144.log`) instead of just `exit 1`. `_print_summary()` also logs the
+run-level PASS/FAIL/SKIP counts to `storage/logs/run_all.log` on every run.
+`storage/logs/` added to `.gitignore`.
+
+Tests: `tests/test_logging.py` (12 tests) — logger has both handler types, idempotent,
+writes expected content/level to file, rotation config (5MB/5 backups),
+`log_pipeline_failure` content/path correctness, and 3 `run_all.py` integration tests
+using real throwaway pipeline scripts (nonzero exit, timeout with partial output,
+success leaves no failure log) verifying `RunResult.note` actually contains a working
+log path. All isolated from the real `storage/logs/` via a `tmp_path`-monkeypatched
+`LOG_DIR`/`FAILURE_DIR` **and** a rebound `ra.log` (the module-level logger is bound at
+import time, before any fixture runs — patching `lu.LOG_DIR` alone doesn't stop
+`run_all.py`'s own `log.error()` calls from hitting the real file; caught this via a
+leaked line in the real `storage/logs/run_all.log` during the first test run, fixed,
+cleaned up the leak).
+
+Live-verified end-to-end: ran the real (keyless) `ecb` pipeline through
+`run_all.py --only ecb` — console output still visible, `storage/logs/run_all.log`
+got the INFO summary line, PASS as expected. Full suite: **466 passed, 0 failed**
+(454 from Session 2 + the 12 new `test_logging.py` tests — exact match, confirming
+nothing else broke).
+
+Also refreshed CLAUDE.md's stale "133 CATALOG tables" line (now 148 PASS/80 NO DATA)
+and documented `logging_utils.py` in its Architecture section while touching the file.
+
+**Explicit limitation, not yet done**: individual `*.py` pipeline files were NOT
+retrofitted to call `get_logger()` — they still use bare `print()` or their own
+`logging.basicConfig()`. This covers the `run_all.py` orchestrator level only. A
+manually-run pipeline (outside `run_all.py`) still has no persisted log.
 
 ## State / Next Up
 
-- **Commit pending**: the `test_storage_dirs_exist` fix above is implemented and
-  spot-verified but not yet committed — waiting on the full test suite result.
-- `CLAUDE.md`'s "133 CATALOG tables" line is now well out of date — CATALOG has grown
-  past 148 PASS + 80 NO DATA (228+ registered, was 231+ before today's unwiring) with
-  no record here of when/how. Worth a `validate.py`-driven refresh of that line next
-  time this file is touched.
 - Cross-repo: `earnings_sentiment_tool`'s `label_join.py` depends on this repo via
   `FDP_REPO_PATH` for CAR computation — no action needed here, just noting the link
   survived the 2026-07-20 split of the NLP project out of `custom_index_tool`.
+- If useful later: retrofit individual pipeline files to `logging_utils.get_logger()`
+  so manual (non-`run_all.py`) runs also get persisted logs — deliberately out of
+  scope for the 2026-07-26 build (see Session 3 limitation above).

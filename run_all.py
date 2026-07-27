@@ -35,8 +35,11 @@ sys.path.insert(0, REPO_ROOT)
 
 import curated
 from validate import validate_table
+from logging_utils import get_logger, log_pipeline_failure
 
 load_dotenv()
+
+log = get_logger("run_all")
 
 
 # ── Pipeline registry ─────────────────────────────────────────────────────────
@@ -889,17 +892,34 @@ def run_pipeline(
 
     t0 = time.time()
     try:
-        result = subprocess.run(cmd, timeout=spec.timeout,
-                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        result = subprocess.run(
+            cmd, timeout=spec.timeout, capture_output=True, text=True,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
         duration = time.time() - t0
+        output = (result.stdout or "") + (result.stderr or "")
+        if output:
+            print(output, end="" if output.endswith("\n") else "\n")
         if result.returncode != 0:
-            return RunResult(spec.name, "FAIL", duration, f"exit {result.returncode}")
-    except subprocess.TimeoutExpired:
+            log.error("%s failed: exit %d", spec.name, result.returncode)
+            fail_path = log_pipeline_failure(spec.name, output)
+            return RunResult(spec.name, "FAIL", duration,
+                              f"exit {result.returncode} -- log: {fail_path}")
+    except subprocess.TimeoutExpired as exc:
         duration = time.time() - t0
-        return RunResult(spec.name, "FAIL", duration, f"timed out after {spec.timeout}s")
+        output = (exc.stdout or "") + (exc.stderr or "")
+        if output:
+            print(output, end="" if output.endswith("\n") else "\n")
+        log.error("%s timed out after %ds", spec.name, spec.timeout)
+        fail_path = log_pipeline_failure(
+            spec.name, output or "(no output captured before timeout)")
+        return RunResult(spec.name, "FAIL", duration,
+                          f"timed out after {spec.timeout}s -- log: {fail_path}")
     except Exception as exc:
         duration = time.time() - t0
-        return RunResult(spec.name, "FAIL", duration, str(exc))
+        log.exception("%s raised an unexpected error before completing", spec.name)
+        fail_path = log_pipeline_failure(spec.name, str(exc))
+        return RunResult(spec.name, "FAIL", duration, f"{exc} -- log: {fail_path}")
 
     # Post-run validation
     val_warnings = 0
@@ -945,6 +965,13 @@ def _print_summary(results: list[RunResult], backfill: bool, start_time: float) 
     if total_w:
         print(f"  |  {total_w} validation warning(s)", end="")
     print()
+
+    log_fn = log.warning if fail_n else log.info
+    log_fn("%s run complete (%s): %d PASS, %d FAIL, %d SKIP, %d validation warning(s)",
+           mode, wall_time, pass_n, fail_n, skip_n, total_w)
+    for r in results:
+        if r.status == "FAIL":
+            log.warning("  FAILED: %s -- %s", r.name, r.note)
 
 
 # ── Curated compaction ───────────────────────────────────────────────────────

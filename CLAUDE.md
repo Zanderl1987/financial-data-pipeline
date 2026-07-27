@@ -4,7 +4,7 @@ Free/public-source financial data pipelines → partitioned Parquet → DuckDB q
 analytics/factor signals → event backtesting. Owner: Zander (GitHub `Zanderl1987`, private,
 default branch `master`).
 
-**133 CATALOG tables, 273 tests passing** as of 2026-07-07. Verify with the
+**148 PASS / 80 NO DATA CATALOG tables, 454 tests passing** as of 2026-07-26. Verify with the
 commands below rather than trusting this line if it looks stale.
 
 ## Environment
@@ -45,6 +45,20 @@ C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest <name>   # 
 
 `run_all.py` auto-rebuilds curated after each run. **If you run a pipeline directly, run
 `curated.py` afterward** or analytics reads stale data.
+
+## Logging (`logging_utils.py`, added 2026-07-26)
+
+`get_logger(name)` returns a logger writing to console AND a rotating file at
+`storage/logs/<name>.log` (5MB x 5 backups, gitignored) — idempotent, safe to call at
+module import time. `run_all.py` uses it: every pipeline subprocess's stdout+stderr is
+captured, printed (buffered per-pipeline rather than streamed live — a deliberate
+tradeoff to guarantee a persisted log even for silent/hung runs), and on FAIL/timeout
+written to `storage/logs/failures/<name>_<timestamp>.log`, with that path appended to
+the `RunResult.note` so the console summary tells you exactly where to look instead of
+just "exit 1". Individual pipeline `*.py` files have NOT been retrofitted to use this
+(still use `print()`/their own `logging.basicConfig()`) — this covers the orchestrator
+level first; adopt it in a pipeline directly if you want persisted logs from a manual
+(non-`run_all.py`) run. Tests: `tests/test_logging.py`.
 
 ## Adding a new pipeline — wiring checklist
 
