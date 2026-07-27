@@ -325,16 +325,18 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=300,
     ),
-    PipelineSpec(
-        name="omkar_commodity",
-        file="omkar_commodity_pipeline.py",
-        desc="Omkar Cloud commodity futures prices -- 30 CME/NYMEX commodities (free 100 req/mo)",
-        stage=1,
-        tables=["omkar_commodity"],
-        requires_env=["OMKAR_API_KEY"],
-        backfill_args=["--backfill"],
-        timeout=120,
-    ),
+    # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
+    # Re-add if the key is obtained -- see omkar_commodity_pipeline.py.
+    # PipelineSpec(
+    #     name="omkar_commodity",
+    #     file="omkar_commodity_pipeline.py",
+    #     desc="Omkar Cloud commodity futures prices -- 30 CME/NYMEX commodities (free 100 req/mo)",
+    #     stage=1,
+    #     tables=["omkar_commodity"],
+    #     requires_env=["OMKAR_API_KEY"],
+    #     backfill_args=["--backfill"],
+    #     timeout=120,
+    # ),
     PipelineSpec(
         name="comtrade",
         file="comtrade_pipeline.py",
@@ -531,15 +533,17 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=300,
     ),
-    PipelineSpec(
-        name="fed_sentiment",
-        file="fed_sentiment_pipeline.py",
-        desc="Fed speeches/FOMC statements (RSS) scored hawkish/dovish via Claude",
-        stage=1,
-        tables=["fed_speeches", "fed_sentiment"],
-        requires_env=["ANTHROPIC_API_KEY"],
-        timeout=600,
-    ),
+    # Unwired 2026-07-26: requires ANTHROPIC_API_KEY, never set, pipeline never run.
+    # Re-add if the key is obtained -- see fed_sentiment_pipeline.py.
+    # PipelineSpec(
+    #     name="fed_sentiment",
+    #     file="fed_sentiment_pipeline.py",
+    #     desc="Fed speeches/FOMC statements (RSS) scored hawkish/dovish via Claude",
+    #     stage=1,
+    #     tables=["fed_speeches", "fed_sentiment"],
+    #     requires_env=["ANTHROPIC_API_KEY"],
+    #     timeout=600,
+    # ),
     PipelineSpec(
         name="fred_macro_extended",
         file="fred_macro_pipeline.py",

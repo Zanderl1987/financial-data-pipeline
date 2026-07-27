@@ -177,7 +177,8 @@ CATALOG: dict[str, str] = {
     # ── USGS critical mineral statistics ─────────────────────────────────────
     "usgs_minerals":           _glob("usgs_minerals/**/*.parquet"),
     # ── Omkar Cloud commodity spot prices ────────────────────────────────────
-    "omkar_commodity":         _glob("omkar_commodity/**/*.parquet"),
+    # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
+    # "omkar_commodity":       _glob("omkar_commodity/**/*.parquet"),
     # ── UN Comtrade international trade flows ─────────────────────────────────
     "comtrade_trade":          _glob("comtrade/**/*.parquet"),
     # ── Fama-French factor returns + industry portfolios ──────────────────────
@@ -239,8 +240,9 @@ CATALOG: dict[str, str] = {
     # ── News sentiment ────────────────────────────────────────────────────────
     "news_sentiment":          _glob("finnhub/news_sentiment/**/*.parquet"),
     # ── Fed sentiment (RSS speeches/statements + Claude hawkish/dovish) ──────
-    "fed_speeches":            _glob("fed/speeches/**/*.parquet"),
-    "fed_sentiment":           _glob("fed/sentiment/**/*.parquet"),
+    # Unwired 2026-07-26: requires ANTHROPIC_API_KEY, never set, pipeline never run.
+    # "fed_speeches":          _glob("fed/speeches/**/*.parquet"),
+    # "fed_sentiment":         _glob("fed/sentiment/**/*.parquet"),
     # ── Real estate (FHFA HPI + Zillow ZHVI/ZORI) ────────────────────────────
     "fhfa_hpi":                _glob("fhfa/hpi/**/*.parquet"),
     "zillow_zhvi":             _glob("zillow/zhvi/**/*.parquet"),

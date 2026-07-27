@@ -475,11 +475,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "table_title", "period", "value"],
         "date_col":    None,
     },
-    "omkar_commodity": {
-        "required":    ["commodity", "price_usd", "fetched_at"],
-        "critical_nn": ["commodity", "price_usd"],
-        "date_col":    None,
-    },
+    # Unwired 2026-07-26 (not in CATALOG): requires OMKAR_API_KEY, never set.
+    # "omkar_commodity": {
+    #     "required":    ["commodity", "price_usd", "fetched_at"],
+    #     "critical_nn": ["commodity", "price_usd"],
+    #     "date_col":    None,
+    # },
     # ── Fama-French factor returns ────────────────────────────────────────────
     "ff_factors": {
         "required":    ["date", "frequency", "factor", "value", "source", "fetched_at"],
@@ -735,17 +736,18 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
     },
     # ── Fed sentiment (RSS scrape + Claude hawkish/dovish scoring) ───────────
-    "fed_speeches": {
-        "required":    ["doc_id", "doc_type", "title", "link", "text", "fetched_at"],
-        "critical_nn": ["doc_id", "doc_type", "text"],
-        "date_col":    "date",
-    },
-    "fed_sentiment": {
-        "required":    ["doc_id", "doc_type", "stance", "hawkish_score", "fetched_at"],
-        "critical_nn": ["doc_id", "stance", "hawkish_score"],
-        "date_col":    "date",
-        "value_ranges": {"hawkish_score": (-1.0, 1.0), "confidence": (0.0, 1.0)},
-    },
+    # Unwired 2026-07-26 (not in CATALOG): requires ANTHROPIC_API_KEY, never set.
+    # "fed_speeches": {
+    #     "required":    ["doc_id", "doc_type", "title", "link", "text", "fetched_at"],
+    #     "critical_nn": ["doc_id", "doc_type", "text"],
+    #     "date_col":    "date",
+    # },
+    # "fed_sentiment": {
+    #     "required":    ["doc_id", "doc_type", "stance", "hawkish_score", "fetched_at"],
+    #     "critical_nn": ["doc_id", "stance", "hawkish_score"],
+    #     "date_col":    "date",
+    #     "value_ranges": {"hawkish_score": (-1.0, 1.0), "confidence": (0.0, 1.0)},
+    # },
     # ── Real estate: FHFA House Price Index ───────────────────────────────────
     "fhfa_hpi": {
         "required":    ["hpi_type", "level", "place_name", "date", "fetched_at"],

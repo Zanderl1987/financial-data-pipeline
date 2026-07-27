@@ -59,12 +59,50 @@ CATALOG but have apparently never actually been run: `omkar_commodity`,
 this session; flagged for a future pass (either run those pipelines once or address
 why they were wired without ever running).
 
+## Session 2 (same day): `test_storage_dirs_exist` resolved
+
+Diagnosed the 6 missing-storage-dir tables flagged above. None were bugs — all three
+distinct causes were "pipeline has genuinely never been run," each for a reason that
+needed a user decision rather than a silent fix:
+
+1. `omkar_commodity` — needs `OMKAR_API_KEY`, never added to `.env`.
+2. `fed_speeches`/`fed_sentiment` — needs `ANTHROPIC_API_KEY`, never added to `.env`
+   (matches the known gap already noted in CLAUDE.md).
+3. `alpha_vantage_income_statement`/`balance_sheet`/`cash_flow` — only populate via
+   `alpha_vantage_fundamentals_pipeline.py --backfill`, which the script's own
+   docstring calls "uncapped — vastly exceeds daily quota, expect multi-day runtime."
+   Running it would compete for Alpha Vantage's shared 25-req/day-per-IP budget
+   against `earnings_sentiment_tool`'s transcript and earnings-surprise pulls.
+
+User decided: **deliberately unwire** the first three (keys not being added right
+now), and **skip the AV backfill for now** rather than run it and collide with the
+other repo's quota. Implemented:
+
+- Commented out (not deleted) `omkar_commodity` / `fed_speeches` / `fed_sentiment`
+  wiring in `query.py` CATALOG, `run_all.py` PipelineSpecs, `validate.py` SCHEMAS,
+  `curated.py` KEYS, and `tests/test_catalog.py` EXPECTED_TABLES — each site has a
+  `# Unwired 2026-07-26: requires <KEY>, never set` comment so it's a one-line
+  re-enable if the key is ever added. Pipeline source files (`omkar_commodity_pipeline.py`,
+  `fed_sentiment_pipeline.py`) left untouched on disk.
+- Added a `NOT_YET_BACKFILLED` set to `TestCatalogPaths` in `tests/test_catalog.py`
+  that `test_storage_dirs_exist` skips, scoped to just the 3 AV statement tables,
+  with the quota-collision reasoning in a comment — not a blanket weakening of the
+  test.
+
+Verified: `tests/test_catalog.py` 13/13 pass, `run_all.py --dry-run` plan no longer
+lists the unwired pipelines, `validate.py` runs clean (148 PASS / 0 FAIL / 80 NO DATA,
+down from 83 NO DATA — exactly the 3 removed tables). Full `pytest tests/ -q` kicked
+off to confirm no collateral breakage; **not yet confirmed complete as of this note**
+— check before treating this as fully closed, and commit only after it passes.
+
 ## State / Next Up
 
+- **Commit pending**: the `test_storage_dirs_exist` fix above is implemented and
+  spot-verified but not yet committed — waiting on the full test suite result.
 - `CLAUDE.md`'s "133 CATALOG tables" line is now well out of date — CATALOG has grown
-  past 148 PASS + 83 NO DATA (231+ registered) with no record here of when/how. Worth
-  a `validate.py`-driven refresh of that line next time this file is touched.
-- `test_storage_dirs_exist` failure above — decide fix vs. deliberately-unwired.
+  past 148 PASS + 80 NO DATA (228+ registered, was 231+ before today's unwiring) with
+  no record here of when/how. Worth a `validate.py`-driven refresh of that line next
+  time this file is touched.
 - Cross-repo: `earnings_sentiment_tool`'s `label_join.py` depends on this repo via
   `FDP_REPO_PATH` for CAR computation — no action needed here, just noting the link
   survived the 2026-07-20 split of the NLP project out of `custom_index_tool`.

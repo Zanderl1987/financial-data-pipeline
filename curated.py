@@ -68,7 +68,8 @@ KEYS: dict[str, list[str]] = {
     "imf_commodities":        ["series_id", "date"],
     "metals_spot":            ["series_id", "date"],
     # Omkar Cloud commodity spot (one row per commodity per fetch)
-    "omkar_commodity":        ["commodity"],
+    # Unwired 2026-07-26 (not in CATALOG): requires OMKAR_API_KEY, never set.
+    # "omkar_commodity":      ["commodity"],
     # EIA gas tables are wide (one row per region/product/price_type per date)
     "gas_spot":               ["date", "series", "price_type", "product"],
     "gas_retail":             ["date", "duoarea", "product", "price_type"],
@@ -89,8 +90,9 @@ KEYS: dict[str, list[str]] = {
     # Dividends
     "dividends":              ["symbol", "ex_date"],
     # Fed sentiment — one doc per RSS link
-    "fed_speeches":           ["doc_id"],
-    "fed_sentiment":          ["doc_id"],
+    # Unwired 2026-07-26 (not in CATALOG): requires ANTHROPIC_API_KEY, never set.
+    # "fed_speeches":         ["doc_id"],
+    # "fed_sentiment":        ["doc_id"],
     # Real estate
     "fhfa_hpi":               ["hpi_type", "hpi_flavor", "frequency", "level", "place_id", "date"],
     "zillow_zhvi":            ["region_id", "date"],
