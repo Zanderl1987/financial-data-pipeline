@@ -53,6 +53,8 @@ SERIES = {
     "HSN1F":           ("New Home Sales (SAAR)",                       "monthly",  "Thousands of Units",  "housing"),
     "CSUSHPINSA":      ("Case-Shiller US National Home Price Index",   "monthly",  "Index (Jan 2000=100)","housing"),
     "MSPUS":           ("Median Sales Price of Houses Sold",           "quarterly","Thousands of Dollars","housing"),
+    "ASPUS":           ("Average Sales Price of Houses Sold",          "quarterly","Thousands of Dollars","housing"),
+    "MSACSR":          ("Monthly Supply of New Houses",                "monthly",  "Months' Supply",       "housing"),
 
     # ── Consumer Sentiment ─────────────────────────────────────────────────
     "UMCSENT":         ("U Mich Consumer Sentiment",                  "monthly",  "Index (1966=100)",    "sentiment"),

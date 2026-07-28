@@ -205,6 +205,12 @@ KEYS: dict[str, list[str]] = {
     "treasury_mts_outlays_by_agency":  ['record_date', 'line_code_nbr'],
     "treasury_dts_operating_cash":     ['record_date', 'src_line_nbr'],
     "treasury_mts_budget_comparison":  ['record_date', 'line_code_nbr'],
+    "retail_sentiment":                ['message_id'],
+    "retail_sentiment_daily":          ['date', 'symbol'],
+    "insider_sentiment":               ['accession_number'],
+    # dark_pool_volume omitted — FINRA response schema not yet verified against a
+    # live pull, so it falls back to safe full-row dedup rather than risking a
+    # wrong natural-key guess.
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw

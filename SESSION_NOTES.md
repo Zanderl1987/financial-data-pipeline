@@ -1,5 +1,58 @@
 # Session Notes — running log
 
+## 2026-07-28 — Reconciled a month-long diverged fork into origin/master
+
+A separate local checkout had fallen behind `origin/master` by 116 commits after a `git fetch`
+surfaced the divergence (common ancestor `4c5ee86`, 2026-06-29). Rather than merge blind, worked
+through it incrementally on a new `reconcile-onto-origin` branch (based on `origin/master`, not
+touching `master` or `origin/master` directly):
+
+- **Chose `origin/master` as the merge base** — it had ~30 more pipelines, a `logging_utils.py`
+  framework already wired into the runner, `curated.py` compaction, and interactive-OAuth handling
+  the fork lacked. The fork's own `pipeline_logging/` package (built 2026-07-19, migrated across
+  48 pipelines) and its `catalog.py` extraction are **not** being carried forward — superseded by
+  origin's simpler, already-established convention (pipelines use `print()`; `CATALOG` stays
+  inline in `query.py`). That full migration's session detail lives in the `local-catchup` branch
+  if ever needed.
+- **Verified rather than blindly ported the fork's "9 new pipelines" batch** — found 6 of 9
+  (`cds_spreads`, `freight_rates`, `housing`, `leveraged_loans`, `muni_bonds`, `semiconductor`)
+  were either duplicates of tables `origin/master` already pulls (e.g. `commodity_macro_pipeline.py`
+  already has the real `BAMLH0A0HYM2`/`BAMLC0A0CM` credit-spread series) or built on FRED series IDs
+  that don't match any real series (`BAMLC0A5YSP`, `BAMLH0A1HY0`, `LEVLPREI`, `MUNIYLD`, `ISMT`,
+  etc. — verified via web search; real ICE BofA series follow patterns like `BAMLH0A0HYM2` /
+  `BAMLH0A1HYBB`). `freight_rates_pipeline.py` also claimed FRED carries "Baltic Dry Index" data;
+  origin's own `shipping_pipeline.py` docstring explains why that's wrong (paid-license-only, hence
+  the FRED PPI-proxy approach it uses instead). Ported only the 3 that checked out —
+  `dark_pool_pipeline.py` (FINRA OTC Transparency), `retail_sentiment_pipeline.py` (Stocktwits),
+  `insider_sentiment_pipeline.py` (SEC EDGAR Form 4) — wired into `query.py` CATALOG, `validate.py`,
+  `run_all.py`, `curated.py`, and both catalog/pipeline test files. Added the 2 genuinely-new
+  housing series (`ASPUS`, `MSACSR`) directly into `fred_macro_pipeline.py` instead of standing up
+  a duplicate `housing_pipeline.py`.
+- **Same scrutiny caught a broken analytics suite** — all 11 modules in the fork's
+  `analytics/` (chokepoint_volatility, correlation_regime, geopolitical_risk, etc.) import
+  `get_connection` from `query.py`, which doesn't exist on either branch — a hard `ImportError`
+  that means this suite was never actually run. `chokepoint_volatility.py` also hand-builds a
+  `storage/raw/market/` glob path that doesn't match any real table. **Deferred, not ported** —
+  needs real per-module rework, not a merge. Tracked as a follow-up in
+  `FinancialDataPipeline_Future_Improvements.md`.
+- **Ported the 5 tooling scripts** — `cost_tracker.py`, `quota_tracker.py`, `storage_monitor.py` as-is
+  (no query/catalog dependency); `anomaly_detector.py` and `freshness_dashboard.py` needed one fix
+  each (`import catalog as c` → `import query as c`, since only `c.CATALOG` was used).
+- **Ported `ADVERSARIAL_REVIEW.md`** (22 findings from a 2026-07-27 review of the fork) with a
+  preamble noting which findings were spot-checked against current `origin/master` — 2 of 5
+  CRITICAL findings were already independently fixed there, 2 are still open, 1 unconfirmed. Its
+  "Missing Data Sources" table is the origin of the 9-pipeline batch above; treat any remaining
+  unbuilt item there with the same skepticism.
+- Full test suite on the reconcile branch: **467 passed, 4 skipped**, one pre-existing failure
+  (`test_storage_dirs_exist`, unrelated — storage dirs for origin's own newer pipelines that have
+  simply never been run in this fresh checkout).
+
+**Next step:** review `reconcile-onto-origin` and merge into `master` once satisfied; the deferred
+analytics suite and any remaining unverified "Missing Data Sources" ideas are follow-up work, not
+blockers.
+
+---
+
 ## 2026-07-20 (session 3) — FRED shipping expansion (+10 series)
 
 Expanded `FREIGHT_SERIES` in `shipping_pipeline.py` from 8 to 18 series, backfilled, curated, validated, tests pass (145/145).

@@ -80,6 +80,9 @@ PIPELINE_MODULES = [
     "tiingo_fundamentals_pipeline",
     "treasury_fiscal_pipeline",
     "omkar_commodity_pipeline",
+    "dark_pool_pipeline",
+    "retail_sentiment_pipeline",
+    "insider_sentiment_pipeline",
 ]
 
 

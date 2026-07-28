@@ -366,6 +366,10 @@ CATALOG: dict[str, str] = {
     "treasury_mts_outlays_by_agency":  _glob("treasury/mts_outlays_by_agency/**/*.parquet"),
     "treasury_dts_operating_cash":     _glob("treasury/dts_operating_cash/**/*.parquet"),
     "treasury_mts_budget_comparison":  _glob("treasury/mts_budget_comparison/**/*.parquet"),
+    "dark_pool_volume":                _glob("dark_pool/**/*.parquet"),
+    "retail_sentiment":                _glob("retail_sentiment/**/retail_sentiment_raw_*.parquet"),
+    "retail_sentiment_daily":          _glob("retail_sentiment/**/retail_sentiment_daily_*.parquet"),
+    "insider_sentiment":               _glob("insider_sentiment/**/*.parquet"),
 }
 
 # ---------------------------------------------------------------------------

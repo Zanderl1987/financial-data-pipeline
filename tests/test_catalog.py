@@ -316,6 +316,10 @@ EXPECTED_TABLES = [
     "treasury_mts_outlays_by_agency",
     "treasury_dts_operating_cash",
     "treasury_mts_budget_comparison",
+    "dark_pool_volume",
+    "retail_sentiment",
+    "retail_sentiment_daily",
+    "insider_sentiment",
 ]
 
 

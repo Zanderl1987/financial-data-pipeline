@@ -632,3 +632,53 @@ full watchlist — `--full` mode prints a per-symbol date-range/row-count estima
 first so storage can be sized before committing to the pull.
 
 ---
+
+### F. Finnhub Endpoint Expansion — DONE (via a different path)
+**Priority: N/A | Status: Superseded, no action needed**
+
+Originally scoped (2026-07-28, on a diverged fork) as adding analyst estimates, peers,
+executives, ownership, revenue-breakdown, filings-sentiment, and ETF composition to
+`finnhub_pipeline.py`. During reconciliation of that fork into this branch, found all of it
+already implemented here under `finnhub_fundamentals_pipeline.py` (estimates, ownership, splits,
+peers, executives, filing-sentiment, transcripts) and `finnhub_expansion_pipeline.py` (ESG,
+congressional trading, supply chain, insider/social sentiment, SEC filings, lobbying, patents,
+economic calendar). No further work needed here.
+
+---
+
+### G. FRED Labor-Market Gap-Fill
+**Priority: Medium | Effort: Low**
+
+3 of the originally-scoped 7 series (`M1SL`, `WALCL`, `CPILFESL`) are already in
+`fred_rates_gdp_pipeline.py`. Still missing: `PAYEMS` (Nonfarm Payrolls), `ICSA` (Initial Jobless
+Claims), `CCSA` (Continued Jobless Claims), `CIVPART` (Labor Force Participation Rate) — add these
+4 to `fred_rates_gdp_pipeline.py`'s series dict (pure dict addition, no new code path).
+
+---
+
+### H. Indeed Hiring Lab Pipeline
+**Priority: Medium | Effort: Low | Status: Design complete 2026-07-28, pending implementation**
+
+New `indeed_hiringlab_pipeline.py` — national/sector/state job-postings index from
+`github.com/hiring-lab`, direct CSV download, no API key. Verified live through 2026-07-17 (as of
+2026-07-28). See `docs/superpowers/specs/2026-07-28-data-expansion-design.md`.
+
+**Rejected candidate:** Opportunity Insights Economic Tracker — its spending/employment series are
+discontinued (stale since 2024/2025); see spec for detail.
+
+---
+
+### I. Fix and re-scope the geopolitical/supply-chain analytics suite
+**Priority: Low | Effort: Medium**
+
+A diverged fork built an 11-module `analytics/` suite (chokepoint_volatility, correlation_regime,
+freight_inflation, geopolitical_risk, macro_factor_model, oil_tanker_signal, options_macro,
+port_congestion, retail_vs_institutional, supply_chain_composite, trade_fx_signal) but every module
+imports `get_connection` from `query.py`, which doesn't exist — a hard `ImportError` before any
+module ever runs. At least one module (`chokepoint_volatility.py`) also hand-builds a
+`storage/raw/market/` glob path that doesn't match any real table (prices live under
+`storage/raw/prices/`). Deferred rather than ported as-is during the 2026-07-28 reconciliation —
+needs real per-module rework (add a public `get_connection()`/use `query.sql()`, fix hardcoded
+paths, verify each module's logic actually produces sensible output) before it's worth adopting.
+
+---
