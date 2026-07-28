@@ -1354,6 +1354,21 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['ticker', 'filing_date'],
         "date_col":    "filing_date",
     },
+    "indeed_job_postings_national": {
+        "required":    ['date', 'indeed_job_postings_index_sa', 'indeed_job_postings_index_nsa', 'variable', 'fetched_at'],
+        "critical_nn": ['date', 'indeed_job_postings_index_sa', 'indeed_job_postings_index_nsa'],
+        "date_col":    "date",
+    },
+    "indeed_job_postings_sector": {
+        "required":    ['date', 'sector', 'indeed_job_postings_index', 'variable', 'fetched_at'],
+        "critical_nn": ['date', 'sector', 'indeed_job_postings_index'],
+        "date_col":    "date",
+    },
+    "indeed_job_postings_state": {
+        "required":    ['date', 'state', 'indeed_job_postings_index', 'fetched_at'],
+        "critical_nn": ['date', 'state', 'indeed_job_postings_index'],
+        "date_col":    "date",
+    },
 }
 
 

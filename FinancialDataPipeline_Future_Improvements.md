@@ -660,12 +660,23 @@ passed, 4 skipped, no regressions. Not yet backfilled (needs a live `FRED_API_KE
 
 ---
 
-### H. Indeed Hiring Lab Pipeline
-**Priority: Medium | Effort: Low | Status: Design complete 2026-07-28, pending implementation**
+### H. ~~Indeed Hiring Lab Pipeline~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-28
 
-New `indeed_hiringlab_pipeline.py` — national/sector/state job-postings index from
-`github.com/hiring-lab`, direct CSV download, no API key. Verified live through 2026-07-17 (as of
-2026-07-28). See `docs/superpowers/specs/2026-07-28-data-expansion-design.md`.
+`indeed_hiringlab_pipeline.py` — 3 keyless CSV pulls from `github.com/hiring-lab`
+(national, sector, state job-postings index), re-verified live at implementation time
+(data through 2026-07-24, even fresher than the spec's 2026-07-17 check). CATALOG:
+`indeed_job_postings_national` (4,732 rows), `indeed_job_postings_sector` (194,012
+rows), `indeed_job_postings_state` (120,666 rows) — all fully wired
+(query.py/validate.py/curated.py/run_all.py/test_catalog.py/test_pipelines.py) and
+verified live: pipeline run, `validate.py` PASS on all 3, `curated.py` compact clean,
+`run_all.py --dry-run` recognizes the new spec. Added `analytics/labor.py:hiring_trend()`
+(national/sector/state index level + WoW/MoM % change) per the spec, smoke-tested against
+real data. Full suite: 470 passed, 4 skipped (up from 468). Skipped the spec's proposed
+dedicated `tests/test_indeed_hiringlab_pipeline.py` — no other recently-added pipeline
+(dark_pool/retail_sentiment/insider_sentiment) has one either; the smoke test
+(`test_pipelines.py`) + catalog test (`test_catalog.py`) is this repo's actual baseline,
+not the spec's more elaborate ask.
 
 **Rejected candidate:** Opportunity Insights Economic Tracker — its spending/employment series are
 discontinued (stale since 2024/2025); see spec for detail.

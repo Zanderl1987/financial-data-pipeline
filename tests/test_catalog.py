@@ -321,6 +321,9 @@ EXPECTED_TABLES = [
     "retail_sentiment",
     "retail_sentiment_daily",
     "insider_sentiment",
+    "indeed_job_postings_national",
+    "indeed_job_postings_sector",
+    "indeed_job_postings_state",
 ]
 
 

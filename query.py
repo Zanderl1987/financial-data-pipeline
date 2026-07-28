@@ -371,6 +371,9 @@ CATALOG: dict[str, str] = {
     "retail_sentiment":                _glob("retail_sentiment/**/retail_sentiment_raw_*.parquet"),
     "retail_sentiment_daily":          _glob("retail_sentiment/**/retail_sentiment_daily_*.parquet"),
     "insider_sentiment":               _glob("insider_sentiment/**/*.parquet"),
+    "indeed_job_postings_national":    _glob("indeed_hiringlab/national/**/*.parquet"),
+    "indeed_job_postings_sector":      _glob("indeed_hiringlab/sector/**/*.parquet"),
+    "indeed_job_postings_state":       _glob("indeed_hiringlab/state/**/*.parquet"),
 }
 
 # ---------------------------------------------------------------------------

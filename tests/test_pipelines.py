@@ -83,6 +83,7 @@ PIPELINE_MODULES = [
     "dark_pool_pipeline",
     "retail_sentiment_pipeline",
     "insider_sentiment_pipeline",
+    "indeed_hiringlab_pipeline",
 ]
 
 

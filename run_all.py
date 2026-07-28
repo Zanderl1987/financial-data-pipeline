@@ -749,6 +749,15 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=600,
     ),
+    PipelineSpec(
+        name="indeed_hiringlab",
+        file="indeed_hiringlab_pipeline.py",
+        desc="Indeed Hiring Lab job-postings index (national/sector/state, keyless)",
+        stage=1,
+        tables=["indeed_job_postings_national", "indeed_job_postings_sector", "indeed_job_postings_state"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
         name="openfigi",
