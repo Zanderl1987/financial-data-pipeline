@@ -24,6 +24,7 @@ annualof.txt
 
 storage/eval_registry/
 storage/logs/
+logs/
 
 # Regenerable progress state for the long-running universe backfill
 schwab_universe_backfill_progress.json

@@ -632,3 +632,151 @@ full watchlist — `--full` mode prints a per-symbol date-range/row-count estima
 first so storage can be sized before committing to the pull.
 
 ---
+
+### F. Finnhub Endpoint Expansion — DONE (via a different path)
+**Priority: N/A | Status: Superseded, no action needed**
+
+Originally scoped (2026-07-28, on a diverged fork) as adding analyst estimates, peers,
+executives, ownership, revenue-breakdown, filings-sentiment, and ETF composition to
+`finnhub_pipeline.py`. During reconciliation of that fork into this branch, found all of it
+already implemented here under `finnhub_fundamentals_pipeline.py` (estimates, ownership, splits,
+peers, executives, filing-sentiment, transcripts) and `finnhub_expansion_pipeline.py` (ESG,
+congressional trading, supply chain, insider/social sentiment, SEC filings, lobbying, patents,
+economic calendar). No further work needed here.
+
+---
+
+### G. ~~FRED Labor-Market Gap-Fill~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-28
+
+3 of the originally-scoped 7 series (`M1SL`, `WALCL`, `CPILFESL`) were already in
+`fred_rates_gdp_pipeline.py`. Added the remaining 4 as a new `labor` sub-category: `PAYEMS`
+(Nonfarm Payrolls), `ICSA` (Initial Jobless Claims), `CCSA` (Continued Jobless Claims),
+`CIVPART` (Labor Force Participation Rate) — a new sub-category means a new output table
+(`fred_rates_gdp_labor`), so wired it fully per the standard checklist: `query.py` CATALOG,
+`validate.py` SCHEMAS, `curated.py` KEYS, `run_all.py` PipelineSpec's `tables` list,
+`tests/test_catalog.py` EXPECTED_TABLES, plus the storage directory. Full suite: 468
+passed, 4 skipped, no regressions. Not yet backfilled (needs a live `FRED_API_KEY` run).
+
+---
+
+### H. ~~Indeed Hiring Lab Pipeline~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-28
+
+`indeed_hiringlab_pipeline.py` — 3 keyless CSV pulls from `github.com/hiring-lab`
+(national, sector, state job-postings index), re-verified live at implementation time
+(data through 2026-07-24, even fresher than the spec's 2026-07-17 check). CATALOG:
+`indeed_job_postings_national` (4,732 rows), `indeed_job_postings_sector` (194,012
+rows), `indeed_job_postings_state` (120,666 rows) — all fully wired
+(query.py/validate.py/curated.py/run_all.py/test_catalog.py/test_pipelines.py) and
+verified live: pipeline run, `validate.py` PASS on all 3, `curated.py` compact clean,
+`run_all.py --dry-run` recognizes the new spec. Added `analytics/labor.py:hiring_trend()`
+(national/sector/state index level + WoW/MoM % change) per the spec, smoke-tested against
+real data. Full suite: 470 passed, 4 skipped (up from 468). Skipped the spec's proposed
+dedicated `tests/test_indeed_hiringlab_pipeline.py` — no other recently-added pipeline
+(dark_pool/retail_sentiment/insider_sentiment) has one either; the smoke test
+(`test_pipelines.py`) + catalog test (`test_catalog.py`) is this repo's actual baseline,
+not the spec's more elaborate ask.
+
+**Rejected candidate:** Opportunity Insights Economic Tracker — its spending/employment series are
+discontinued (stale since 2024/2025); see spec for detail.
+
+---
+
+### I. Fix and re-scope the geopolitical/supply-chain analytics suite
+**Priority: Low | Effort: Medium**
+
+A diverged fork built an 11-module `analytics/` suite (chokepoint_volatility, correlation_regime,
+freight_inflation, geopolitical_risk, macro_factor_model, oil_tanker_signal, options_macro,
+port_congestion, retail_vs_institutional, supply_chain_composite, trade_fx_signal) but every module
+imports `get_connection` from `query.py`, which doesn't exist — a hard `ImportError` before any
+module ever runs. At least one module (`chokepoint_volatility.py`) also hand-builds a
+`storage/raw/market/` glob path that doesn't match any real table (prices live under
+`storage/raw/prices/`). Deferred rather than ported as-is during the 2026-07-28 reconciliation —
+needs real per-module rework (add a public `get_connection()`/use `query.sql()`, fix hardcoded
+paths, verify each module's logic actually produces sensible output) before it's worth adopting.
+
+---
+
+### J. Unified Eval Framework v2 — Transaction Costs / Slippage / Borrow
+**Priority: Medium | Effort: Medium**
+
+An audit (2026-07-28) confirmed the framework designed with Claude Fable 5
+(`docs/superpowers/specs/2026-07-18-unified-eval-framework-design.md`) is fully built,
+tested (95/95), merged, and already used for a real signal decision — this and items
+K–N below are its explicitly-deferred v2 scope, not unfinished v1 work. Portfolio
+(`evaluation/portfolio.py`) and trade (`evaluation/trades.py`) evaluations currently
+assume frictionless fills. Needed before any result is treated as investable rather
+than research-only.
+
+---
+
+### K. Unified Eval Framework v2 — Capital-Constrained Compounding Equity Curves
+**Priority: Medium | Effort: Medium**
+
+`evaluation/trades.py`'s trade simulation is flat-notional per trade ($10k default,
+per the `TradeRule` contract), not a compounding portfolio that sizes positions off
+available capital. Deferred in the original spec pending real usage of the simpler
+model first.
+
+---
+
+### L. Unified Eval Framework v2 — Live/Daily Refresh Wiring
+**Priority: Low | Effort: Low–Medium**
+
+No scheduled/automated re-run of `evaluate.py` against fresh curated data — every run
+today is manual (`evaluate.py --adapter ...`). Could follow the existing Task
+Scheduler pattern used for `ClaudeAuto-PipelineQuality`/`ClaudeAuto-TranscriptPull` if
+recurring factor re-evaluation becomes routine.
+
+---
+
+### M. Unified Eval Framework v2 — Config-YAML Declarative Runner
+**Priority: Low | Effort: Medium**
+
+The spec's "Approach C" layer (declarative YAML-driven runs instead of CLI flags +
+Python adapters) was deliberately deferred until the current programmatic interface
+proved out through real use. It now has ~2 months of usage behind it (the acceptance
+run plus the 2026-07-23 `low_vol` factor decision) — worth revisiting only if adapter
+proliferation or run repeatability becomes a real friction point, not preemptively.
+
+---
+
+### N. Unified Eval Framework v2 — Conditional/Compound Scenario Testing + Price-Volume Signal Family
+**Priority: Low | Effort: High (own design cycle)**
+
+Two items the spec explicitly scoped out as needing their own future brainstorm →
+spec → build cycle, not small add-ons: (1) conditional/compound scenario testing —
+`event_backtest.scenario()` exists as the seed but the eval framework doesn't call it
+yet; (2) a price-volume signal family, entirely unbuilt.
+
+---
+
+### O. Eval Registry Persistence
+**Priority: Low | Effort: Low**
+
+`storage/eval_registry/` and `storage/reports/eval/` are correctly gitignored and
+don't currently exist on disk — results from past runs were captured into session-note
+markdown instead of kept as artifacts, so `evaluation/registry.py`'s `compare()`/
+`population()` (used for Deflated Sharpe's "how many things were tried" denominator)
+reset every time a worktree is cleaned up rather than accumulating real history.
+Worth a conscious decision: keep a persistent (if gitignored) registry file — e.g. on
+the portable drive alongside the master `.env` — so repeated `evaluate.py` runs build
+up a real population over time.
+
+---
+
+### P. ~~Regression: `test_storage_dirs_exist` — ~100 missing CATALOG storage directories~~ ✓ RESOLVED
+**Status:** Fixed 2026-07-28
+
+`tests/test_catalog.py::TestCatalogPaths::test_storage_dirs_exist` was failing for 99
+CATALOG entries (EIA/BLS/FRED-expansion/Finnhub-expansion/Treasury/Tiingo/Coingecko/
+Alpha-Vantage/SEC-EDGAR tables, plus the older `fhfa_hpi`/`zillow_zhvi`/`zillow_zori`/
+`market_history`/`tv_ratings`/`sec_filings`/`tsa_checkpoint`) whose storage directories
+had never been created on this checkout — verified each had a real, existing backing
+pipeline file before touching anything (all 20 source pipelines confirmed present) so
+nothing fabricated got a directory. Fixed by creating the 99 missing
+`storage/raw/.../` directories with `.gitkeep` placeholders. Full suite: 468 passed,
+4 skipped (up from 466 — no regressions).
+
+---

@@ -288,6 +288,7 @@ CATALOG: dict[str, str] = {
     "fred_rates_gdp_exchange_rates":  _glob("fred_rates_gdp/exchange_rates/**/*.parquet"),
     "fred_rates_gdp_markets":         _glob("fred_rates_gdp/markets/**/*.parquet"),
     "fred_rates_gdp_federal_debt":    _glob("fred_rates_gdp/federal_debt/**/*.parquet"),
+    "fred_rates_gdp_labor":           _glob("fred_rates_gdp/labor/**/*.parquet"),
     "alpha_vantage_overview":              _glob("alpha_vantage/overview/**/*.parquet"),
     "alpha_vantage_income_statement":      _glob("alpha_vantage/income_statement/**/*.parquet"),
     "alpha_vantage_balance_sheet":         _glob("alpha_vantage/balance_sheet/**/*.parquet"),
@@ -366,6 +367,13 @@ CATALOG: dict[str, str] = {
     "treasury_mts_outlays_by_agency":  _glob("treasury/mts_outlays_by_agency/**/*.parquet"),
     "treasury_dts_operating_cash":     _glob("treasury/dts_operating_cash/**/*.parquet"),
     "treasury_mts_budget_comparison":  _glob("treasury/mts_budget_comparison/**/*.parquet"),
+    "dark_pool_volume":                _glob("dark_pool/**/*.parquet"),
+    "retail_sentiment":                _glob("retail_sentiment/**/retail_sentiment_raw_*.parquet"),
+    "retail_sentiment_daily":          _glob("retail_sentiment/**/retail_sentiment_daily_*.parquet"),
+    "insider_sentiment":               _glob("insider_sentiment/**/*.parquet"),
+    "indeed_job_postings_national":    _glob("indeed_hiringlab/national/**/*.parquet"),
+    "indeed_job_postings_sector":      _glob("indeed_hiringlab/sector/**/*.parquet"),
+    "indeed_job_postings_state":       _glob("indeed_hiringlab/state/**/*.parquet"),
 }
 
 # ---------------------------------------------------------------------------

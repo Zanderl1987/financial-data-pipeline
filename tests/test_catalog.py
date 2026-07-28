@@ -238,6 +238,7 @@ EXPECTED_TABLES = [
     "fred_rates_gdp_exchange_rates",
     "fred_rates_gdp_markets",
     "fred_rates_gdp_federal_debt",
+    "fred_rates_gdp_labor",
     "alpha_vantage_overview",
     "alpha_vantage_income_statement",
     "alpha_vantage_balance_sheet",
@@ -316,6 +317,13 @@ EXPECTED_TABLES = [
     "treasury_mts_outlays_by_agency",
     "treasury_dts_operating_cash",
     "treasury_mts_budget_comparison",
+    "dark_pool_volume",
+    "retail_sentiment",
+    "retail_sentiment_daily",
+    "insider_sentiment",
+    "indeed_job_postings_national",
+    "indeed_job_postings_sector",
+    "indeed_job_postings_state",
 ]
 
 

@@ -914,6 +914,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['series_id', 'date', 'value'],
         "date_col":    "date",
     },
+    "fred_rates_gdp_labor": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
     "alpha_vantage_overview": {
         "required":    ['Symbol', 'fetched_at'],
         "critical_nn": ['Symbol'],
@@ -1328,6 +1333,41 @@ SCHEMAS: dict[str, dict] = {
         "required":    ['record_date', 'line_code_nbr', 'current_month_dfct_sur_amt', 'fetched_at'],
         "critical_nn": ['record_date', 'line_code_nbr'],
         "date_col":    "record_date",
+    },
+    "dark_pool_volume": {
+        "required":    ['trade_date', 'fetched_at'],
+        "critical_nn": ['trade_date'],
+        "date_col":    "trade_date",
+    },
+    "retail_sentiment": {
+        "required":    ['symbol', 'date', 'created_at', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    "date",
+    },
+    "retail_sentiment_daily": {
+        "required":    ['date', 'symbol', 'message_count', 'bullish_ratio', 'fetched_at'],
+        "critical_nn": ['date', 'symbol'],
+        "date_col":    "date",
+    },
+    "insider_sentiment": {
+        "required":    ['ticker', 'cik', 'form_type', 'filing_date', 'transaction_class', 'fetched_at'],
+        "critical_nn": ['ticker', 'filing_date'],
+        "date_col":    "filing_date",
+    },
+    "indeed_job_postings_national": {
+        "required":    ['date', 'indeed_job_postings_index_sa', 'indeed_job_postings_index_nsa', 'variable', 'fetched_at'],
+        "critical_nn": ['date', 'indeed_job_postings_index_sa', 'indeed_job_postings_index_nsa'],
+        "date_col":    "date",
+    },
+    "indeed_job_postings_sector": {
+        "required":    ['date', 'sector', 'indeed_job_postings_index', 'variable', 'fetched_at'],
+        "critical_nn": ['date', 'sector', 'indeed_job_postings_index'],
+        "date_col":    "date",
+    },
+    "indeed_job_postings_state": {
+        "required":    ['date', 'state', 'indeed_job_postings_index', 'fetched_at'],
+        "critical_nn": ['date', 'state', 'indeed_job_postings_index'],
+        "date_col":    "date",
     },
 }
 

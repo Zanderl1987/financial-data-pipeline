@@ -126,6 +126,7 @@ KEYS: dict[str, list[str]] = {
     "fred_rates_gdp_exchange_rates":  ['series_id', 'date'],
     "fred_rates_gdp_markets":         ['series_id', 'date'],
     "fred_rates_gdp_federal_debt":    ['series_id', 'date'],
+    "fred_rates_gdp_labor":           ['series_id', 'date'],
     "alpha_vantage_overview":              ['Symbol', 'fetched_at'],
     "alpha_vantage_income_statement":      ['ticker', 'fiscalDateEnding', 'report_type'],
     "alpha_vantage_balance_sheet":         ['ticker', 'fiscalDateEnding', 'report_type'],
@@ -205,6 +206,15 @@ KEYS: dict[str, list[str]] = {
     "treasury_mts_outlays_by_agency":  ['record_date', 'line_code_nbr'],
     "treasury_dts_operating_cash":     ['record_date', 'src_line_nbr'],
     "treasury_mts_budget_comparison":  ['record_date', 'line_code_nbr'],
+    "retail_sentiment":                ['message_id'],
+    "retail_sentiment_daily":          ['date', 'symbol'],
+    "insider_sentiment":               ['accession_number'],
+    # dark_pool_volume omitted — FINRA response schema not yet verified against a
+    # live pull, so it falls back to safe full-row dedup rather than risking a
+    # wrong natural-key guess.
+    "indeed_job_postings_national":    ['date', 'variable'],
+    "indeed_job_postings_sector":      ['date', 'sector', 'variable'],
+    "indeed_job_postings_state":       ['date', 'state'],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
