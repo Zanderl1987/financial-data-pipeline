@@ -12,8 +12,7 @@ touching `master` or `origin/master` directly):
   the fork lacked. The fork's own `pipeline_logging/` package (built 2026-07-19, migrated across
   48 pipelines) and its `catalog.py` extraction are **not** being carried forward — superseded by
   origin's simpler, already-established convention (pipelines use `print()`; `CATALOG` stays
-  inline in `query.py`). That full migration's session detail lives in the `local-catchup` branch
-  if ever needed.
+  inline in `query.py`).
 - **Verified rather than blindly ported the fork's "9 new pipelines" batch** — found 6 of 9
   (`cds_spreads`, `freight_rates`, `housing`, `leveraged_loans`, `muni_bonds`, `semiconductor`)
   were either duplicates of tables `origin/master` already pulls (e.g. `commodity_macro_pipeline.py`
@@ -50,6 +49,31 @@ touching `master` or `origin/master` directly):
 **Next step:** review `reconcile-onto-origin` and merge into `master` once satisfied; the deferred
 analytics suite and any remaining unverified "Missing Data Sources" ideas are follow-up work, not
 blockers.
+
+### Landed: master reset to the reconciled branch, pushed, forks cleaned up
+
+A literal `git merge` of `reconcile-onto-origin` into `master` would have recreated every conflict
+above from scratch (their only common ancestor is `4c5ee86`, so git would 3-way merge master's 11
+orphaned commits against all 117 origin+reconcile commits). Instead: `git reset --hard
+reconcile-onto-origin` while on `master` — safe since nothing on the old `master` was unique or
+lost (its useful parts were already ported above; the rest was deliberately dropped). Verified
+clean (467 passed / 4 skipped / 1 unrelated pre-existing failure) then `git push origin master` —
+a plain fast-forward (`38caf4c..a377fe2`), no force needed. `master` and `origin/master` are now
+identical.
+
+Before deleting `local-catchup` (the pushed copy of the old fork), audited its full diff against
+the new `master` for anything not yet accounted for. Specifically checked for a backtesting-engine
+plan built earlier with Fable — found it's the "Unified Evaluation Framework"
+(`docs/superpowers/specs/2026-07-18-unified-eval-framework-design.md`, commits `dd23e12`/`5bd7815`,
+both `Co-Authored-By: Claude Fable 5`) plus its implementation (`evaluate.py`, `evaluation/`
+package, `backtest.py`, `event_backtest.py`) — all already ancestors of `master` via
+`origin/master`'s history, never part of the stale fork at all (the diff direction looked
+backwards at first glance: those files show as "deleted" going from `master` to `local-catchup`
+because `local-catchup` predates them, not because it holds a copy). Confirmed nothing else on
+`local-catchup` was unique beyond what's already listed above (the 6 dropped pipelines, the
+deferred analytics suite, the superseded logging/catalog infra). Deleted `local-catchup` (remote +
+local) and `reconcile-onto-origin` (local-only, never pushed). Only `master` remains, clean and in
+sync with `origin/master`.
 
 ---
 
