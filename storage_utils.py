@@ -40,6 +40,14 @@ def write_partitioned(df: pd.DataFrame, output_dir: str, filename: str) -> str:
 
 
 def find_parquet_files(directory: str) -> list[str]:
-    """Return sorted list of all .parquet files under directory (recursive)."""
+    """
+    Return all .parquet files under directory (recursive), sorted OLDEST to
+    NEWEST by modification time.
+
+    Filenames aren't a reliable date proxy -- see validate.py's _latest_file()
+    for the same bug this mirrors. Sort by mtime so any future "pick the
+    latest file" caller doesn't inherit that trap.
+    """
     pattern = os.path.join(directory, "**", "*.parquet")
-    return sorted(_glob.glob(pattern, recursive=True))
+    files = _glob.glob(pattern, recursive=True)
+    return sorted(files, key=os.path.getmtime)

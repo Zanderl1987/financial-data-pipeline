@@ -59,22 +59,28 @@ Verified after fixes: `run_all.py` parses clean, `tests/test_logging.py` +
 patched code path to confirm the fix actually resolves the mojibake/truncation, not
 just that it looks plausible.
 
-## Left as-is (reported, not fixed — user's call)
+## Minor findings — resolved 2026-07-28
 
-Four Minor findings from the reviews, not applied this session:
-- `run_all.py`'s generic-exception branch logs a full traceback to `run_all.log` but
-  only `str(exc)` (no traceback) to the per-failure snapshot file.
-- `log.*()` calls in `run_pipeline`/`_print_summary` aren't wrapped in try/except;
-  `RotatingFileHandler`'s rotation isn't multi-process-safe on Windows, so an
-  overlapping manual+scheduled run could in theory crash the orchestrator via the
-  logging layer itself.
-- `storage_utils.py:42-45`'s `find_parquet_files()` has the same alphabetical-not-mtime
-  sort shape as the bug fixed in `validate.py` — currently dead code (no caller), so
-  not live today, but a latent trap for a future "pick the latest file" caller.
+The three Minor findings listed as left-as-is (the notes said "four" but only ever
+listed three -- no fourth item recovered) were addressed in a follow-up session:
+
+- **Fixed** — `run_all.py`'s generic-exception branch now passes
+  `traceback.format_exc()` (not just `str(exc)`) to `log_pipeline_failure()`, so the
+  per-failure snapshot file carries the same traceback as `run_all.log`.
+- **Fixed** — `storage_utils.py`'s `find_parquet_files()` now sorts by
+  `os.path.getmtime` instead of alphabetically, matching `validate.py`'s
+  `_latest_file()`. Still dead code (no caller) but no longer a latent trap.
+- **Verified not a live issue, left as-is** — the claim that unwrapped `log.*()` calls
+  in `run_pipeline`/`_print_summary` could crash the orchestrator during a
+  `RotatingFileHandler` rollover was tested directly: `Handler.emit()` already wraps
+  `doRollover()` in a try/except that routes to `handleError()`, which prints to
+  stderr and does not propagate. Reproduced with a mocked `doRollover()` raising
+  `PermissionError` — the logger call survived. No fix applied; wrapping every log
+  call would be defensive code for a scenario the stdlib already prevents.
 
 ## State / Next Up
 
-- No open blockers from this session. The 4 Minor items above are cheap fixes if ever
-  picked up, but none are live bugs today.
+- No open blockers. All three real Minor findings closed out; the fourth was a
+  miscount in this file, not a missed item.
 - Cross-repo notes from 07-26 (earnings_sentiment_tool / FDP_REPO_PATH link,
   individual-pipeline logging retrofit) are unchanged — not touched this session.

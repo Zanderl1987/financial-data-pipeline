@@ -26,6 +26,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -924,7 +925,7 @@ def run_pipeline(
     except Exception as exc:
         duration = time.time() - t0
         log.exception("%s raised an unexpected error before completing", spec.name)
-        fail_path = log_pipeline_failure(spec.name, str(exc))
+        fail_path = log_pipeline_failure(spec.name, traceback.format_exc())
         return RunResult(spec.name, "FAIL", duration, f"{exc} -- log: {fail_path}")
 
     # Post-run validation
