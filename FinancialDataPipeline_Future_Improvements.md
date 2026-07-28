@@ -682,3 +682,89 @@ needs real per-module rework (add a public `get_connection()`/use `query.sql()`,
 paths, verify each module's logic actually produces sensible output) before it's worth adopting.
 
 ---
+
+### J. Unified Eval Framework v2 — Transaction Costs / Slippage / Borrow
+**Priority: Medium | Effort: Medium**
+
+An audit (2026-07-28) confirmed the framework designed with Claude Fable 5
+(`docs/superpowers/specs/2026-07-18-unified-eval-framework-design.md`) is fully built,
+tested (95/95), merged, and already used for a real signal decision — this and items
+K–N below are its explicitly-deferred v2 scope, not unfinished v1 work. Portfolio
+(`evaluation/portfolio.py`) and trade (`evaluation/trades.py`) evaluations currently
+assume frictionless fills. Needed before any result is treated as investable rather
+than research-only.
+
+---
+
+### K. Unified Eval Framework v2 — Capital-Constrained Compounding Equity Curves
+**Priority: Medium | Effort: Medium**
+
+`evaluation/trades.py`'s trade simulation is flat-notional per trade ($10k default,
+per the `TradeRule` contract), not a compounding portfolio that sizes positions off
+available capital. Deferred in the original spec pending real usage of the simpler
+model first.
+
+---
+
+### L. Unified Eval Framework v2 — Live/Daily Refresh Wiring
+**Priority: Low | Effort: Low–Medium**
+
+No scheduled/automated re-run of `evaluate.py` against fresh curated data — every run
+today is manual (`evaluate.py --adapter ...`). Could follow the existing Task
+Scheduler pattern used for `ClaudeAuto-PipelineQuality`/`ClaudeAuto-TranscriptPull` if
+recurring factor re-evaluation becomes routine.
+
+---
+
+### M. Unified Eval Framework v2 — Config-YAML Declarative Runner
+**Priority: Low | Effort: Medium**
+
+The spec's "Approach C" layer (declarative YAML-driven runs instead of CLI flags +
+Python adapters) was deliberately deferred until the current programmatic interface
+proved out through real use. It now has ~2 months of usage behind it (the acceptance
+run plus the 2026-07-23 `low_vol` factor decision) — worth revisiting only if adapter
+proliferation or run repeatability becomes a real friction point, not preemptively.
+
+---
+
+### N. Unified Eval Framework v2 — Conditional/Compound Scenario Testing + Price-Volume Signal Family
+**Priority: Low | Effort: High (own design cycle)**
+
+Two items the spec explicitly scoped out as needing their own future brainstorm →
+spec → build cycle, not small add-ons: (1) conditional/compound scenario testing —
+`event_backtest.scenario()` exists as the seed but the eval framework doesn't call it
+yet; (2) a price-volume signal family, entirely unbuilt.
+
+---
+
+### O. Eval Registry Persistence
+**Priority: Low | Effort: Low**
+
+`storage/eval_registry/` and `storage/reports/eval/` are correctly gitignored and
+don't currently exist on disk — results from past runs were captured into session-note
+markdown instead of kept as artifacts, so `evaluation/registry.py`'s `compare()`/
+`population()` (used for Deflated Sharpe's "how many things were tried" denominator)
+reset every time a worktree is cleaned up rather than accumulating real history.
+Worth a conscious decision: keep a persistent (if gitignored) registry file — e.g. on
+the portable drive alongside the master `.env` — so repeated `evaluate.py` runs build
+up a real population over time.
+
+---
+
+### P. Regression: `test_storage_dirs_exist` — ~100 missing CATALOG storage directories
+**Priority: Medium | Effort: Low (mechanical) | Status: Found 2026-07-28, not yet fixed**
+
+Not part of the eval-framework work — flagging separately so it doesn't get lost.
+`tests/test_catalog.py::TestCatalogPaths::test_storage_dirs_exist` currently fails:
+~100 CATALOG entries (mostly EIA/BLS/FRED-expansion/Finnhub-expansion/Treasury/Tiingo
+tables, plus the reconciliation's `dark_pool_volume`/`retail_sentiment`/
+`insider_sentiment`) point at storage directories that don't exist locally. This test
+was previously green after commit `2463c79` (2026-07-26, "fix: resolve
+test_storage_dirs_exist by unwiring key-blocked tables") but a much larger set of
+CATALOG entries has since been added (largely via `origin/master`'s history and the
+2026-07-28 fork reconciliation) without their storage dirs ever being created on this
+checkout. Fix is mechanical: create the missing `storage/raw/.../` directories (with
+`.gitkeep`) for tables that are genuinely wired and expected to have data, or add
+genuinely-not-yet-built ones to `TestCatalogPaths.NOT_YET_BACKFILLED`.
+
+---
