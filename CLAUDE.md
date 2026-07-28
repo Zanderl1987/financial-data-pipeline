@@ -4,7 +4,7 @@ Free/public-source financial data pipelines → partitioned Parquet → DuckDB q
 analytics/factor signals → event backtesting. Owner: Zander (GitHub `Zanderl1987`, private,
 default branch `master`).
 
-**148 PASS / 80 NO DATA CATALOG tables, 454 tests passing** as of 2026-07-26. Verify with the
+**148 PASS / 80 NO DATA CATALOG tables, 466 tests passing** as of 2026-07-26. Verify with the
 commands below rather than trusting this line if it looks stale.
 
 ## Environment
@@ -86,8 +86,9 @@ level first; adopt it in a pipeline directly if you want persisted logs from a m
   OAuth is interactive — Zander must run it in a real terminal (auth code expires ~30s).
   App has Market Data API only; Trader API (positions/transactions) 401s until enabled at
   developer.schwab.com. Schwab has NO historical options — chains are snapshot-only.
-- **`validate.py` printed row counts** spot-check only the alphabetically-latest raw file —
-  they look wrong right after a backfill. Trust `curated.py` counts.
+- **`validate.py` printed row counts** (fixed 2026-07-26) now spot-check the
+  mtime-latest raw file via `_latest_file()`. If counts ever look wrong right after a
+  backfill again, check for a regression here before distrusting `curated.py` counts.
 - **event_backtest.load_close()** keeps the LONGEST series across price tables so shallow
   watchlist pulls don't shadow deep history — preserve that invariant.
 - Alpha Vantage: 25 req/day/key. BLS: daily quota. SEC EDGAR: ≤10 req/s + EDGAR_USER_AGENT.
