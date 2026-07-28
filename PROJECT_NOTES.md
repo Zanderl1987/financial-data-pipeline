@@ -121,6 +121,10 @@ Working through `EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 backfil
    consistent/reproducible rather than a one-off, still not investigated
    (out of scope, unused endpoint). ~3-4 more daily runs needed for full
    DJI coverage at this rotation rate.
+
+   **2026-07-28 attempt:** 20/20 requests hit the "Information" (quota exhausted)
+   response — `custom_index_tool` automations likely consumed the daily AV quota
+   before this run. Still at 9/30 DJI symbols; retry later today or tomorrow.
 4. Factor evaluation pass — **done, and applied.** Only `momentum` cleared
    significance positive (Sharpe 0.55 [0.23, 0.88]). `low_vol` cleared
    significance *negative* (Sharpe -0.81 [-1.15, -0.51]) — confirmed a real,
@@ -248,7 +252,8 @@ a data-quality note for whenever this data actually gets used, not fixed
 now.
 
 `prices` table is now 46,950,543 rows across 27,759 symbols (1985-2026),
-verified queryable via `query.py`. Not yet re-synced to HuggingFace — that
-publish is manual (`upload_huggingface.py`) and this is now a much bigger
-jump in size than the 270MB→~300MB deltas so far; worth doing deliberately
-rather than as an afterthought given the scale change.
+verified queryable via `query.py`.
+
+**2026-07-28:** Re-synced to HuggingFace. 148 tables, 59,291,129 rows,
+2,208.1 MB uploaded to `https://huggingface.co/datasets/ZanderL1337/financial-data-pipeline`
+(public, updated from 2026-07-19's 114 tables / ~10M rows / 223.6 MB).

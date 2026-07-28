@@ -1,5 +1,14 @@
 # Session Notes — running log
 
+## 2026-07-28 — AV earnings pacing attempt + session task list created
+
+Ran `alpha_vantage_fundamentals_pipeline.py` in default incremental mode. All 20
+requests returned the Alpha Vantage "Information" (quota exhausted) message —
+`custom_index_tool` automations likely consumed the daily 25-request quota before
+this run. Still at 9/30 DJI symbols covered. Will retry later or tomorrow.
+
+Also created `TODO.md` with 6 prioritized items from PROJECT_NOTES.md open work.
+
 ## 2026-07-20 (session 3) — FRED shipping expansion (+10 series)
 
 Expanded `FREIGHT_SERIES` in `shipping_pipeline.py` from 8 to 18 series, backfilled, curated, validated, tests pass (145/145).
