@@ -751,20 +751,17 @@ up a real population over time.
 
 ---
 
-### P. Regression: `test_storage_dirs_exist` — ~100 missing CATALOG storage directories
-**Priority: Medium | Effort: Low (mechanical) | Status: Found 2026-07-28, not yet fixed**
+### P. ~~Regression: `test_storage_dirs_exist` — ~100 missing CATALOG storage directories~~ ✓ RESOLVED
+**Status:** Fixed 2026-07-28
 
-Not part of the eval-framework work — flagging separately so it doesn't get lost.
-`tests/test_catalog.py::TestCatalogPaths::test_storage_dirs_exist` currently fails:
-~100 CATALOG entries (mostly EIA/BLS/FRED-expansion/Finnhub-expansion/Treasury/Tiingo
-tables, plus the reconciliation's `dark_pool_volume`/`retail_sentiment`/
-`insider_sentiment`) point at storage directories that don't exist locally. This test
-was previously green after commit `2463c79` (2026-07-26, "fix: resolve
-test_storage_dirs_exist by unwiring key-blocked tables") but a much larger set of
-CATALOG entries has since been added (largely via `origin/master`'s history and the
-2026-07-28 fork reconciliation) without their storage dirs ever being created on this
-checkout. Fix is mechanical: create the missing `storage/raw/.../` directories (with
-`.gitkeep`) for tables that are genuinely wired and expected to have data, or add
-genuinely-not-yet-built ones to `TestCatalogPaths.NOT_YET_BACKFILLED`.
+`tests/test_catalog.py::TestCatalogPaths::test_storage_dirs_exist` was failing for 99
+CATALOG entries (EIA/BLS/FRED-expansion/Finnhub-expansion/Treasury/Tiingo/Coingecko/
+Alpha-Vantage/SEC-EDGAR tables, plus the older `fhfa_hpi`/`zillow_zhvi`/`zillow_zori`/
+`market_history`/`tv_ratings`/`sec_filings`/`tsa_checkpoint`) whose storage directories
+had never been created on this checkout — verified each had a real, existing backing
+pipeline file before touching anything (all 20 source pipelines confirmed present) so
+nothing fabricated got a directory. Fixed by creating the 99 missing
+`storage/raw/.../` directories with `.gitkeep` placeholders. Full suite: 468 passed,
+4 skipped (up from 466 — no regressions).
 
 ---
