@@ -238,6 +238,7 @@ EXPECTED_TABLES = [
     "fred_rates_gdp_exchange_rates",
     "fred_rates_gdp_markets",
     "fred_rates_gdp_federal_debt",
+    "fred_rates_gdp_labor",
     "alpha_vantage_overview",
     "alpha_vantage_income_statement",
     "alpha_vantage_balance_sheet",

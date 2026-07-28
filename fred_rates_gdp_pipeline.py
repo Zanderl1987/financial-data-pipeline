@@ -21,6 +21,7 @@ Output:
   storage/raw/fred_rates_gdp/exchange_rates/fred_rates_gdp_exchange_rates_{mode}_{YYYYMMDD}.parquet
   storage/raw/fred_rates_gdp/markets/fred_rates_gdp_markets_{mode}_{YYYYMMDD}.parquet
   storage/raw/fred_rates_gdp/federal_debt/fred_rates_gdp_federal_debt_{mode}_{YYYYMMDD}.parquet
+  storage/raw/fred_rates_gdp/labor/fred_rates_gdp_labor_{mode}_{YYYYMMDD}.parquet
 """
 
 import argparse
@@ -125,6 +126,12 @@ SERIES = {
 
     # ── Recession Indicator ─────────────────────────────────────────────────
     "USREC":           ("NBER Recession Indicator",                        "monthly",  "Binary (0/1)",        "interest_rates"),
+
+    # ── Labor Market ────────────────────────────────────────────────────────
+    "PAYEMS":          ("Nonfarm Payrolls",                                 "monthly",  "Thousands of Persons","labor"),
+    "ICSA":            ("Initial Jobless Claims",                          "weekly",   "Number",              "labor"),
+    "CCSA":            ("Continued Jobless Claims",                        "weekly",   "Number",              "labor"),
+    "CIVPART":         ("Labor Force Participation Rate",                  "monthly",  "Percent",             "labor"),
 }
 
 

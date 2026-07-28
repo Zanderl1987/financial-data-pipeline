@@ -914,6 +914,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['series_id', 'date', 'value'],
         "date_col":    "date",
     },
+    "fred_rates_gdp_labor": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
     "alpha_vantage_overview": {
         "required":    ['Symbol', 'fetched_at'],
         "critical_nn": ['Symbol'],

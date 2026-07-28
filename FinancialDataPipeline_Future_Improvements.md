@@ -646,13 +646,17 @@ economic calendar). No further work needed here.
 
 ---
 
-### G. FRED Labor-Market Gap-Fill
-**Priority: Medium | Effort: Low**
+### G. ~~FRED Labor-Market Gap-Fill~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-28
 
-3 of the originally-scoped 7 series (`M1SL`, `WALCL`, `CPILFESL`) are already in
-`fred_rates_gdp_pipeline.py`. Still missing: `PAYEMS` (Nonfarm Payrolls), `ICSA` (Initial Jobless
-Claims), `CCSA` (Continued Jobless Claims), `CIVPART` (Labor Force Participation Rate) — add these
-4 to `fred_rates_gdp_pipeline.py`'s series dict (pure dict addition, no new code path).
+3 of the originally-scoped 7 series (`M1SL`, `WALCL`, `CPILFESL`) were already in
+`fred_rates_gdp_pipeline.py`. Added the remaining 4 as a new `labor` sub-category: `PAYEMS`
+(Nonfarm Payrolls), `ICSA` (Initial Jobless Claims), `CCSA` (Continued Jobless Claims),
+`CIVPART` (Labor Force Participation Rate) — a new sub-category means a new output table
+(`fred_rates_gdp_labor`), so wired it fully per the standard checklist: `query.py` CATALOG,
+`validate.py` SCHEMAS, `curated.py` KEYS, `run_all.py` PipelineSpec's `tables` list,
+`tests/test_catalog.py` EXPECTED_TABLES, plus the storage directory. Full suite: 468
+passed, 4 skipped, no regressions. Not yet backfilled (needs a live `FRED_API_KEY` run).
 
 ---
 

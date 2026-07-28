@@ -288,6 +288,7 @@ CATALOG: dict[str, str] = {
     "fred_rates_gdp_exchange_rates":  _glob("fred_rates_gdp/exchange_rates/**/*.parquet"),
     "fred_rates_gdp_markets":         _glob("fred_rates_gdp/markets/**/*.parquet"),
     "fred_rates_gdp_federal_debt":    _glob("fred_rates_gdp/federal_debt/**/*.parquet"),
+    "fred_rates_gdp_labor":           _glob("fred_rates_gdp/labor/**/*.parquet"),
     "alpha_vantage_overview":              _glob("alpha_vantage/overview/**/*.parquet"),
     "alpha_vantage_income_statement":      _glob("alpha_vantage/income_statement/**/*.parquet"),
     "alpha_vantage_balance_sheet":         _glob("alpha_vantage/balance_sheet/**/*.parquet"),
