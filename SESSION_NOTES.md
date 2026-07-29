@@ -1,5 +1,59 @@
 # Session Notes — running log
 
+## 2026-07-29 — Cross-clone sync + full-universe factor-validation design (in progress)
+
+**Discovered a second diverging local clone.** Continuing eval-framework/backlog work
+(see `financial-data-pipeline/FinancialDataPipeline_Future_Improvements.md` items P/G/H)
+had all been happening in `C:\Users\zande\financial-data-pipeline`, a *different* local
+checkout from this one (`C:\Users\zande\PycharmProjects\financial-data-pipeline`) that
+also tracks `Zanderl1987/financial-data-pipeline`. That other clone's `storage/raw/` is
+thin (5.1MB — only pipelines run directly in it), while **this** clone holds the real
+27,759-symbol Schwab full-universe backfill (`prices`, 46.9M rows, 4.2GB). This clone was
+also 8 commits behind `origin/master` and had its own uncommitted local edits (an AV
+earnings-pacing log entry, an HF re-sync record, a new `TODO.md`).
+
+Resolved by: committing this clone's local edits (`4f59fa4`), merging `origin/master`
+in (`bc9caef`, one conflict in `SESSION_NOTES.md` — both sides had added a same-day
+entry; kept both), then fixing a `test_storage_dirs_exist` failure caused by 6 tables
+(`dark_pool_volume`, `retail_sentiment`, `retail_sentiment_daily`, `insider_sentiment`,
+plus the 3 new `indeed_job_postings_*` tables) that were merged in from origin but have
+never been run in *this* clone, so their storage dirs didn't exist yet — same fix
+pattern as before (`.gitkeep` placeholders). Full suite: 474 passed. Pushed `56358f5`.
+**Both clones are now in sync with `origin/master`.** No action taken to prevent this
+recurring — worth remembering next session that two local clones of this repo exist on
+this machine, and to check `git status`/`git log -1` in whichever one you're about to
+work in before assuming it's current.
+
+**Full-universe factor-validation design (in progress, not yet written to a spec).**
+User asked what to build next with the backtesting engine; landed on validating
+`momentum`/`low_vol` (the only two factors with real full-universe breadth — everything
+else needs fundamentals/short-interest/insider/sentiment data that only covers the
+69-symbol watchlist) against the full ~13,219-symbol exchange-listed universe
+(`symbol_universe.csv`, excluding OTC Markets/Nasdaq OTCBB) instead of the watchlist.
+User explicitly asked to avoid survivorship bias; scoped that into two distinct issues:
+(1) look-ahead from using *today's* liquidity to judge history — solvable with a
+point-in-time trailing dollar-volume filter; (2) delisted/bankrupt companies being
+entirely absent from `prices`/`symbol_universe.csv` (a 2026-07-24 snapshot of
+currently-tradable Schwab instruments) — NOT solvable without different source data,
+to be documented as an explicit limitation, not fixed.
+
+Proposed architecture (posted to user, awaiting confirmation before writing the spec):
+new `evaluation/universe.py` (`exchange_listed_symbols()` + `point_in_time_eligible()`,
+a single DuckDB rolling-dollar-volume query with no lookahead) + an additive
+`eligible=` param on `evaluation/adapters.py::from_signal_panel()` (default `None` =
+unchanged behavior) + two new opt-in CLI flags on `evaluate.py` (`--exclude-otc`,
+`--min-dollar-volume`). Key finding that shaped the design: `ic.py`/`stats.py` already
+operate per-date on whatever rows are in the panel, so "point-in-time dynamic universe"
+needs zero changes to the tested core (`data.py`/`ic.py`/`stats.py`/`runner.py`) — it's
+purely a Signal-construction concern. Acceptance plan: run momentum + low_vol over the
+filtered universe, compare against existing watchlist baselines via
+`registry.compare(allow_universe_mismatch=True)` (already exists for exactly this).
+**Next step:** get user sign-off on the design, then write
+`docs/superpowers/specs/2026-07-29-full-universe-factor-validation-design.md` and
+proceed to an implementation plan.
+
+---
+
 ## 2026-07-28 — Reconciled a month-long diverged fork into origin/master
 
 A separate local checkout had fallen behind `origin/master` by 116 commits after a `git fetch`
@@ -85,6 +139,28 @@ requests returned the Alpha Vantage "Information" (quota exhausted) message —
 this run. Still at 9/30 DJI symbols covered. Will retry later or tomorrow.
 
 Also created `TODO.md` with 6 prioritized items from PROJECT_NOTES.md open work.
+
+### HF dataset published to HuggingFace
+
+Ran `upload_huggingface.py`. Uploaded 148 tables, 59,291,129 rows, 2,208.1 MB
+to `https://huggingface.co/datasets/ZanderL1337/financial-data-pipeline` (public,
+updated from 2026-07-19's 114 tables / ~10M rows / 223.6 MB). Upload took ~17 min
+for the 2.05 GB `prices.parquet` file alone.
+
+### Fed SOMA full backfill completed
+
+Ran `fed_soma_pipeline.py --backfill` with extended timeout. Fetched 1,203 weekly
+report dates (2003-07-09 to 2026-07-22) for both tsy and agency asset types:
+- Treasury: 353,016 rows
+- Agency (MBS): 30,462,197 rows
+- Total: 30,815,213 rows
+Curated + validated PASS (148 PASS / 88 NO DATA). File: 345 MB.
+
+### Patents rewrite — blocked (needs ODP API key)
+
+Investigated USPTO ODP API (`https://api.uspto.gov`); requires `X-API-KEY`
+header and a USPTO.gov account. No key in `.env`. Skipped until Zander
+registers for one.
 
 ## 2026-07-20 (session 3) — FRED shipping expansion (+10 series)
 

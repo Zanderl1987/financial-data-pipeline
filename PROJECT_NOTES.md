@@ -18,6 +18,18 @@ Both catch up after boot if the machine was off (`StartWhenAvailable`). See
 `AUTOMATION.md` for full detail and management commands. Check both flag files at
 the start of any session that touches pipelines or analytics.
 
+## Two local clones exist on this machine
+
+Both `C:\Users\zande\PycharmProjects\financial-data-pipeline` (this one) and
+`C:\Users\zande\financial-data-pipeline` track the same `Zanderl1987/financial-data-pipeline`
+remote as independent local clones — not a worktree, not a fork, just two separate `git clone`s.
+**This one holds the real data** (`storage/raw/prices` alone is 4.2GB — the 27,759-symbol Schwab
+full-universe backfill lives here). The other clone's `storage/` is thin; work done there
+(pipeline runs, live verification) doesn't appear here until you `git pull`. Found 2026-07-29
+when both had drifted (this one 8 commits behind, with its own uncommitted edits) — see
+`SESSION_NOTES.md`'s 2026-07-29 entry for the resolution. Before starting substantial work,
+check `git log -1` / `git status` in whichever clone you're in; don't assume it's current.
+
 ## Known hard constraints (verified live, not assumed)
 
 | Source | Constraint | Verified |

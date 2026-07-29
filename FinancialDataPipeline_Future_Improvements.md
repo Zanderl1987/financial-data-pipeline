@@ -780,3 +780,38 @@ nothing fabricated got a directory. Fixed by creating the 99 missing
 4 skipped (up from 466 — no regressions).
 
 ---
+
+### Q. Full-Universe Factor Validation (momentum / low_vol)
+**Priority: Medium | Effort: Medium | Status: Design proposed 2026-07-29, awaiting user sign-off**
+
+Validate `momentum`/`low_vol` — the only two factors with real full-universe breadth, since
+`value`/`quality`/`growth`/`sentiment`/`insider_flow` all need fundamentals/short-interest/
+insider/sentiment data that only covers the 69-symbol watchlist — against the full
+~13,219-symbol exchange-listed universe (`symbol_universe.csv`, excluding OTC Markets/Nasdaq
+OTCBB) instead of the watchlist, using a point-in-time (no-lookahead) trailing dollar-volume
+eligibility filter rather than a static "liquid today" universe.
+
+Proposed architecture: new `evaluation/universe.py` (`exchange_listed_symbols()` +
+`point_in_time_eligible()`, one DuckDB rolling-dollar-volume query) + an additive `eligible=`
+param on `evaluation/adapters.py::from_signal_panel()` (default `None` = unchanged behavior,
+all 95 existing `test_evaluation.py` tests untouched) + two new opt-in CLI flags on
+`evaluate.py` (`--exclude-otc`, `--min-dollar-volume`). Zero changes needed to the tested core
+(`data.py`/`ic.py`/`stats.py`/`runner.py`) — they already operate per-date on whatever rows are
+in the panel, so this is purely a Signal-construction concern, not a framework rewrite.
+
+**Explicit, deliberately-unfixed limitation:** the point-in-time liquidity filter only solves
+look-ahead from using *today's* liquidity to judge history. It does NOT solve delisting
+survivorship — `prices`/`symbol_universe.csv` are a 2026-07-24 snapshot of currently-tradable
+Schwab instruments, so any company that delisted, was acquired, or went bankrupt before then is
+entirely absent from the data. Fixing that would need a different data source (e.g. a
+CRSP-style point-in-time constituent history) and is out of scope here — to be stated
+prominently in results, not glossed over.
+
+Acceptance plan: run momentum + low_vol over the filtered universe, compare against the
+existing watchlist baselines via `registry.compare(allow_universe_mismatch=True)` (already
+built for exactly this). See `SESSION_NOTES.md`'s 2026-07-29 entry for full detail.
+**Next step:** user reviews the design; once approved, write
+`docs/superpowers/specs/2026-07-29-full-universe-factor-validation-design.md` and proceed to
+an implementation plan.
+
+---
