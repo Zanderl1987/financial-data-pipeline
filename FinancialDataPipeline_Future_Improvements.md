@@ -602,24 +602,48 @@ low priority now that three working sources exist.
 
 ---
 
-### C. Scheduled Run + Freshness Dashboard
-**Priority: Medium | Effort: Low**
+### C. ~~Scheduled Run + Freshness Dashboard~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-29
 
-- Windows Task Scheduler entry to run `run_all.py` on a daily schedule with a run log
-- `python status.py` — one-command summary showing every CATALOG table's latest file date and row count in a clean table
+Scheduling half turned out to already exist (`ClaudeAuto-DailyAccumulators`, set up
+2026-07-06 per `AUTOMATION.md` — a full unattended `run_all.py` isn't feasible since
+Schwab OAuth is interactive, so the daily task deliberately targets just the
+permanent-gap accumulators: `tradingview`, `short_interest`, `finnhub_events`).
+
+Built the missing half: **`status.py`** — one-command freshness dashboard combining
+three already-existing signals (no new data logic): `q.tables()` row counts,
+`q.date_range()` max data dates, and file mtime via `validate.py`'s `_latest_file()`.
+```
+python status.py                    # every table, sorted stalest-first
+python status.py --stale-days 3     # only tables not written to in >= N days
+python status.py --table prices     # single-table detail
+```
+Live run: 236 CATALOG entries, 88 NO DATA, 148 PASS, correctly surfaces staleness
+(e.g. `fred_rates_gdp_*` tables at 5.8 days since last write).
 
 ---
 
-### D. Historical Earnings Backfill
-**Priority: High | Effort: Low**
+### D. ~~Historical Earnings Backfill~~ ✓ COMPLETED (via a different source than originally scoped)
+**Status:** Implemented 2026-07-29
 
-`earnings_calendar` only holds a ±6-week rolling window (Finnhub's default
-calendar endpoint), so `earnings_events()` in `event_backtest.py` currently has
-zero usable events — none of the ~26 stored reporters overlap the price store's
-history. Finnhub's `/calendar/earnings` endpoint accepts explicit `from`/`to`
-date ranges; extend `finnhub_events_pipeline.py` with a backfill loop (chunked
-by year, same pattern as the Schwab transactions chunking) to unlock earnings
-drift / PEAD event studies.
+Originally scoped as a chunked year-by-year backfill loop against Finnhub's
+`/calendar/earnings`. Verified live before building: that endpoint accepts arbitrary
+`from`/`to` ranges without erroring, but the free tier only actually returns rows for a
+recent rolling window — 2026-01/04/05 all returned 0 rows, 2026-06 returned 37
+(stragglers), 2015/2020/2022/2023 all 0. This matches `AUTOMATION.md`'s 2026-07-23 note
+that Finnhub's free tier "will not return earnings_calendar rows older than ~1 year even
+with `--backfill`" — a genuine dead end, not a code problem.
+
+Found the real fix instead: `alpha_vantage_earnings` (populated by
+`alpha_vantage_fundamentals_pipeline.py`'s daily rotating-subset accumulator, already
+running) has real historical earnings dates + actual EPS surprises back to 1996 for
+every symbol it's reached so far (9 so far; grows daily, quota-gated at 25 req/day).
+Rewired `event_backtest.earnings_events()` to source from it instead of
+`earnings_calendar`. Verified live: `earnings_events(min_surprise_pct=5)` now returns
+621 real historical events (1996–2026) instead of 0, and `event_study()` on them shows
+a real, decaying edge (1-day t-stat 4.02, mean +0.96%, decaying to +0.91%/t=2.89 by 10
+days) — this was previously impossible to compute at all. No schema/contract change for
+callers (same 5-column output). Full test suite re-run to confirm no regressions.
 
 ---
 
@@ -781,37 +805,104 @@ nothing fabricated got a directory. Fixed by creating the 99 missing
 
 ---
 
-### Q. Full-Universe Factor Validation (momentum / low_vol)
-**Priority: Medium | Effort: Medium | Status: Design proposed 2026-07-29, awaiting user sign-off**
+### R. Fixed correctness bug: `feature_matrix(start=...)` silently zeroed out all rolling-window factors
+**Status:** Fixed 2026-07-29
 
-Validate `momentum`/`low_vol` — the only two factors with real full-universe breadth, since
-`value`/`quality`/`growth`/`sentiment`/`insider_flow` all need fundamentals/short-interest/
-insider/sentiment data that only covers the 69-symbol watchlist — against the full
-~13,219-symbol exchange-listed universe (`symbol_universe.csv`, excluding OTC Markets/Nasdaq
-OTCBB) instead of the watchlist, using a point-in-time (no-lookahead) trailing dollar-volume
-eligibility filter rather than a static "liquid today" universe.
+Discovered while scoping item Q: `analytics/features.py::feature_matrix()` passed `start`
+straight into the price query (`_price_panel(pt, symbols, start, end)`) **before**
+computing rolling-window features (`mom_12_1` needs a 252-trading-day lookback,
+`ret_252d`/`vol_21d` similarly). Any call with an explicit `start` left-truncated the
+price history first, so every row in the requested window had insufficient trailing
+data — `mom_12_1` came back **100% NaN for the entire panel**, even for AAPL with 50+
+years of history on file. Confirmed live: `feature_matrix(symbols=['AAPL'],
+start='2026-06-01')` -> all-NaN `mom_12_1`; same call with no `start` -> correct values
+(e.g. 0.42). At full-universe scale (`symbols=None`, 22,950 symbols in a 2-month test
+window) the `momentum` column was **silently absent from `signal_panel()`'s output
+entirely** — this would have invalidated any full-universe or windowed momentum
+evaluation without raising an error.
 
-Proposed architecture: new `evaluation/universe.py` (`exchange_listed_symbols()` +
-`point_in_time_eligible()`, one DuckDB rolling-dollar-volume query) + an additive `eligible=`
-param on `evaluation/adapters.py::from_signal_panel()` (default `None` = unchanged behavior,
-all 95 existing `test_evaluation.py` tests untouched) + two new opt-in CLI flags on
-`evaluate.py` (`--exclude-otc`, `--min-dollar-volume`). Zero changes needed to the tested core
-(`data.py`/`ic.py`/`stats.py`/`runner.py`) — they already operate per-date on whatever rows are
-in the panel, so this is purely a Signal-construction concern, not a framework rewrite.
+**Fix:** pad the internal price query back 450 calendar days when `start` is set, compute
+rolling features over the padded panel, then trim to the true `start` before the
+(expensive) fundamentals/macro/short-interest/insider/sentiment joins run — a strict
+improvement, not just a correctness fix, since fewer padding rows now flow through those
+joins. Verified: `mom_12_1` for AAPL with `start='2026-06-01'` now matches the no-`start`
+baseline exactly; full-universe `signal_panel(symbols=None, start=..., end=...)` now
+returns a populated `momentum` column (558,961 non-null / 605,853 rows). This directly
+unblocks item Q, whose entire premise depends on `start=`/`end=`-windowed momentum
+evaluation. No test previously caught this — `tests/test_features.py` apparently doesn't
+exercise a rolling-window factor together with an explicit `start`; worth adding a
+regression test for exactly that combination.
 
-**Explicit, deliberately-unfixed limitation:** the point-in-time liquidity filter only solves
-look-ahead from using *today's* liquidity to judge history. It does NOT solve delisting
-survivorship — `prices`/`symbol_universe.csv` are a 2026-07-24 snapshot of currently-tradable
-Schwab instruments, so any company that delisted, was acquired, or went bankrupt before then is
-entirely absent from the data. Fixing that would need a different data source (e.g. a
-CRSP-style point-in-time constituent history) and is out of scope here — to be stated
-prominently in results, not glossed over.
+---
 
-Acceptance plan: run momentum + low_vol over the filtered universe, compare against the
-existing watchlist baselines via `registry.compare(allow_universe_mismatch=True)` (already
-built for exactly this). See `SESSION_NOTES.md`'s 2026-07-29 entry for full detail.
-**Next step:** user reviews the design; once approved, write
-`docs/superpowers/specs/2026-07-29-full-universe-factor-validation-design.md` and proceed to
-an implementation plan.
+### S. `_asof_fundamentals` OOMs at full-universe scale (unbounded `feature_matrix()` calls)
+**Priority: Low | Effort: Medium | Status: Documented 2026-07-29, worked around not fixed**
+
+Found while re-running `tests/test_features.py` after the item R fix: a fully unbounded
+`feature_matrix()` call (`symbols=None`, all blocks on) against this clone's real
+27,759-symbol / 46.9M-row `prices` table crashes with `numpy.core._exceptions.
+_ArrayMemoryError` inside `_asof_fundamentals()`'s `out.merge(joined, on=["symbol",
+"date"], how="left")` — a plain pandas merge run once per fundamentals metric against
+the full panel. `tests/test_features.py::TestFeatureMatrixIntegration::
+test_returns_dataframe` hit this directly; fixed by scoping the test to a small symbol
+subset (its actual intent — "does this run at all" — not "does the absolute worst case
+fit in memory"), not by touching `_asof_fundamentals` itself.
+
+**Not fixed at the source** because the real fix (doing the per-metric join inside
+DuckDB against the full panel instead of pandas `.merge()`, so nothing pandas-side ever
+materializes at 46.9M-row scale) is a real refactor of a widely-used core function, out
+of scope for a quick pass. **Workaround in place for item Q**: full-universe momentum/
+low_vol evaluation never needs the fundamentals/short-interest/insider/sentiment blocks
+in the first place (those factors are watchlist-only anyway), so `evaluation/
+universe.py`'s eligibility-filtered adapter calls `feature_matrix(..., fundamentals=
+False, short_interest=False, insider=False, sentiment=False)` — this sidesteps the OOM
+path entirely rather than fixing it. Revisit `_asof_fundamentals`'s merge strategy if a
+future need requires fundamentals at full-universe scale.
+
+---
+
+### Q. ~~Full-Universe Factor Validation (momentum / low_vol)~~ ✓ COMPLETED
+**Status:** Implemented 2026-07-29 — spec at `docs/superpowers/specs/2026-07-29-full-universe-factor-validation-design.md`
+
+Validates `momentum`/`low_vol` — the only two factors with real full-universe breadth,
+since `value`/`quality`/`growth`/`sentiment`/`insider_flow` all need fundamentals/
+short-interest/insider/sentiment data that only covers the 69-symbol watchlist — against
+the full ~13,219-symbol exchange-listed universe (`symbol_universe.csv`, excluding OTC
+Markets/Nasdaq OTCBB) instead of the watchlist, using a point-in-time (no-lookahead)
+trailing dollar-volume eligibility filter rather than a static "liquid today" universe.
+
+**Built:** `evaluation/universe.py` (`exchange_listed_symbols()` + `point_in_time_eligible()`
+— one DuckDB rolling-window query, parameterized not string-interpolated, padded 45 days
+before `start` so the trailing window isn't truncated at the boundary — same bug class as
+item R); additive `eligible=` param on `evaluation/adapters.py::from_signal_panel()`
+(default `None` reproduces prior behavior exactly — all 95 original `test_evaluation.py`
+tests pass unmodified); two new opt-in CLI flags on `evaluate.py` (`--exclude-otc`,
+`--min-dollar-volume`, wired to route through the light-`feature_matrix` / OOM-safe path
+any time either is set). Zero changes to the tested core (`data.py`/`ic.py`/`stats.py`/
+`runner.py`) — confirmed they already operate per-date on whatever rows are in the panel.
+
+New tests: `tests/test_universe.py` (OTC exclusion, no-look-ahead proof via a synthetic
+volume-spike series, empty-input edge case) + two new adapter tests in
+`tests/test_evaluation.py` (`eligible=` filters rows; `eligible=None` stays unfiltered).
+Live-verified: `exchange_listed_symbols()` → 13,218 symbols; `point_in_time_eligible()`
+on the real `prices` table (13,218 symbols, 7-week window) ran in 1.3s; the full adapter
+path (`--exclude-otc --min-dollar-volume 1000000`) correctly narrowed a momentum panel
+from 12,081 unfiltered symbols to 8,374 eligible ones over the same window.
+
+**Explicit, deliberately-unfixed limitation:** the point-in-time liquidity filter only
+solves look-ahead from using *today's* liquidity to judge history. It does NOT solve
+delisting survivorship — `prices`/`symbol_universe.csv` are a 2026-07-24 snapshot of
+currently-tradable Schwab instruments, so any company that delisted, was acquired, or
+went bankrupt before then is entirely absent from the data. Fixing that needs a different
+data source (e.g. a CRSP-style point-in-time constituent history) — out of scope here,
+stated prominently rather than glossed over.
+
+Scoping this out also surfaced and fixed two real bugs along the way — see items R
+(`feature_matrix(start=...)` silently zeroed rolling-window factors) and S
+(`_asof_fundamentals` OOMs at full-universe scale, worked around not fixed).
+
+**Acceptance run** (momentum + low_vol, full history, `registry.compare(
+allow_universe_mismatch=True)` against the watchlist baseline) — in progress; see
+`SESSION_NOTES.md`'s 2026-07-29 entry for the result once it completes.
 
 ---

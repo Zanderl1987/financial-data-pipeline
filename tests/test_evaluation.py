@@ -1055,6 +1055,32 @@ class TestAdapters:
         with pytest.raises(ValueError, match="factor"):
             ev_adapters.from_signal_panel(factor="nope")
 
+    def test_from_signal_panel_eligible_filters_rows(self, monkeypatch):
+        import analytics.signals as sig_mod
+        import analytics.features as feat_mod
+        monkeypatch.setattr(feat_mod, "feature_matrix",
+                            lambda *a, **k: pd.DataFrame())
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda fm=None, symbols=None, start=None, end=None:
+                            _fake_panel_frame())
+        dates = pd.bdate_range("2024-01-02", periods=10)
+        eligible = pd.DataFrame({
+            "symbol": ["AAA"] * len(dates) + ["BBB"] * len(dates),
+            "date": list(dates) * 2,
+            "eligible": [True] * len(dates) + [False] * len(dates),
+        })
+        s = ev_adapters.from_signal_panel(factor="momentum", eligible=eligible)
+        assert set(s.frame["symbol"]) == {"AAA"}
+        assert len(s.frame) == len(dates)
+
+    def test_from_signal_panel_eligible_none_is_unfiltered(self, monkeypatch):
+        import analytics.signals as sig_mod
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda symbols=None, start=None, end=None:
+                            _fake_panel_frame())
+        s = ev_adapters.from_signal_panel(factor="momentum", eligible=None)
+        assert set(s.frame["symbol"]) == {"AAA", "BBB"}
+
     def test_from_sentiment(self, monkeypatch):
         import sentiment_eval as se_mod
         fake = pd.DataFrame({"symbol": ["AAA", "BBB"],

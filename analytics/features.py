@@ -365,11 +365,23 @@ def feature_matrix(
     if pt is None:
         return pd.DataFrame()
 
-    panel = _price_panel(pt, symbols, start, end)
+    # Rolling price features need trailing history: 12-1 momentum looks back
+    # 252 trading days (+21 skipped), ret_252d needs the same. Querying from
+    # `start` directly left-truncates that lookback and makes every rolling
+    # column spuriously all-NaN for the entire requested range regardless of
+    # how much real history exists before `start` -- pad the query window and
+    # trim to the true start only after the rolling features are computed.
+    price_start = start
+    if start is not None:
+        price_start = (pd.Timestamp(start) - pd.Timedelta(days=450)).strftime("%Y-%m-%d")
+
+    panel = _price_panel(pt, symbols, price_start, end)
     if panel.empty:
         return panel
 
     panel = _add_price_features(panel)
+    if start is not None:
+        panel = panel[panel["date"] >= pd.Timestamp(start)].reset_index(drop=True)
     if fundamentals:
         panel = _asof_fundamentals(panel)
     if macro:

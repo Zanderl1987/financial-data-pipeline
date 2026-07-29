@@ -15,10 +15,30 @@ from evaluation.contracts import EventSet, Signal, TradeRule
 
 
 def from_signal_panel(factor: str = "composite", symbols=None,
-                      start=None, end=None) -> Signal:
-    """One factor column of analytics.signals.signal_panel as a Signal."""
+                      start=None, end=None,
+                      eligible: "pd.DataFrame | None" = None) -> Signal:
+    """
+    One factor column of analytics.signals.signal_panel as a Signal.
+
+    eligible : optional (symbol, date, eligible) frame, e.g. from
+        evaluation.universe.point_in_time_eligible(). When given, rows where
+        eligible=False are dropped before the Signal is built -- this is how
+        full-universe factor evaluation applies a point-in-time liquidity
+        filter without touching the engine. Default None reproduces the
+        original unfiltered behavior exactly. See docs/superpowers/specs/
+        2026-07-29-full-universe-factor-validation-design.md.
+    """
     from analytics import signals as _signals   # local import: monkeypatchable
-    panel = _signals.signal_panel(symbols=symbols, start=start, end=end)
+    if eligible is not None:
+        # Full-universe calls skip the fundamentals/short-interest/insider/
+        # sentiment blocks: those factors are watchlist-only anyway, and the
+        # default heavy panel OOMs at full-universe scale (backlog item S).
+        from analytics.features import feature_matrix
+        fm = feature_matrix(symbols, start=start, end=end, fundamentals=False,
+                            short_interest=False, insider=False, sentiment=False)
+        panel = _signals.signal_panel(fm=fm)
+    else:
+        panel = _signals.signal_panel(symbols=symbols, start=start, end=end)
     if panel.empty:
         raise ValueError("signal_panel returned no rows -- run pipelines / "
                          "curated.py first")
@@ -28,6 +48,11 @@ def from_signal_panel(factor: str = "composite", symbols=None,
     frame = panel[["symbol", "date"]].copy()
     frame["value"] = panel[factor].to_numpy()   # works for factor="value" too
     frame = frame.dropna(subset=["value"])
+    if eligible is not None:
+        frame = frame.merge(
+            eligible[eligible["eligible"]][["symbol", "date"]],
+            on=["symbol", "date"], how="inner",
+        )
     return Signal(name=f"factor_{factor}", frame=frame, lag_days=0,
                   direction=1, source="analytics.signals.signal_panel")
 

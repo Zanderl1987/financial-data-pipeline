@@ -406,20 +406,39 @@ def earnings_events(
     start: "str | None" = None,
 ) -> pd.DataFrame:
     """
-    Earnings reports from the earnings_calendar table (with actuals).
+    Earnings reports with real historical dates + EPS surprises, sourced from
+    alpha_vantage_earnings (deep per-symbol history back to the 1990s, quota-
+    gated coverage that grows daily via alpha_vantage_fundamentals_pipeline.py's
+    rotating symbol subset). earnings_calendar (Finnhub) is NOT used here —
+    verified live 2026-07-29 that its free tier only returns a rolling ~2-month
+    window and never has real historical actuals (2015/2020/2022/2023 and even
+    2026-01/04/05 all returned 0 rows).
 
     beat=True keeps beats, False keeps misses; min_surprise_pct filters by
-    |EPS surprise|. Columns: symbol, date, eps_estimate, eps_actual,
+    |EPS surprise %|. Columns: symbol, date, eps_estimate, eps_actual,
     surprise_pct. Note: use entry_lag=1 in event_study/scenario — report
     timing (BMO/AMC) isn't reliable enough to trade the same close.
     """
-    df = q.load("earnings_calendar", symbol=symbols, start=start)
+    df = q.load("alpha_vantage_earnings")
     if df.empty:
         return df
-    df = df.dropna(subset=["eps_actual", "eps_estimate"]).copy()
-    df = df[df["eps_estimate"] != 0]
-    df["surprise_pct"] = ((df["eps_actual"] - df["eps_estimate"])
-                          / df["eps_estimate"].abs() * 100).round(2)
+    df = df[df["report_type"] == "quarterly"].copy()
+    df = df.rename(columns={
+        "ticker": "symbol",
+        "reportedDate": "date",
+        "estimatedEPS": "eps_estimate",
+        "reportedEPS": "eps_actual",
+        "surprisePercentage": "surprise_pct",
+    })
+    for col in ("eps_estimate", "eps_actual", "surprise_pct"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date", "eps_actual", "eps_estimate", "surprise_pct"])
+    if symbols is not None:
+        symbols = [symbols] if isinstance(symbols, str) else list(symbols)
+        df = df[df["symbol"].isin(symbols)]
+    if start is not None:
+        df = df[df["date"] >= pd.Timestamp(start)]
     if beat is True:
         df = df[df["surprise_pct"] > 0]
     elif beat is False:

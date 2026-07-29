@@ -101,6 +101,12 @@ def main(argv=None) -> int:
                     help="business days between data date and availability")
     ap.add_argument("--direction", type=int, choices=[1, -1, 0], default=1)
     ap.add_argument("--universe", nargs="*", default=None)
+    ap.add_argument("--exclude-otc", action="store_true",
+                    help="signal-panel adapter: restrict to symbol_universe.csv's "
+                         "exchange-listed symbols (drops OTC Markets/Nasdaq OTCBB)")
+    ap.add_argument("--min-dollar-volume", type=float, default=None,
+                    help="signal-panel adapter: point-in-time trailing-21d dollar-"
+                         "volume floor (no look-ahead) -- see evaluation/universe.py")
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
     ap.add_argument("--benchmark", default="SPY")
@@ -125,9 +131,28 @@ def main(argv=None) -> int:
     if args.adapter:
         from evaluation import adapters
         if args.adapter == "signal-panel":
+            symbols = args.universe
+            eligible = None
+            if args.exclude_otc or args.min_dollar_volume is not None:
+                from evaluation import universe as _universe
+                # Route through the eligible= path (light feature_matrix, no
+                # fundamentals/short-interest/insider/sentiment blocks) any
+                # time OTC exclusion or a liquidity floor is requested -- both
+                # can select thousands of symbols, and the default heavy panel
+                # OOMs at that scale (backlog item S). A floor of 0 with only
+                # --exclude-otc still applies via this path so nothing bypasses
+                # the OOM-safe route.
+                if not symbols:
+                    symbols = _universe.exchange_listed_symbols(
+                        exclude_otc=args.exclude_otc)
+                floor = args.min_dollar_volume if args.min_dollar_volume is not None else 0.0
+                eligible = _universe.point_in_time_eligible(
+                    symbols, min_dollar_volume=floor,
+                    start=args.start, end=args.end)
             obj = adapters.from_signal_panel(factor=args.factor,
-                                             symbols=args.universe,
-                                             start=args.start, end=args.end)
+                                             symbols=symbols,
+                                             start=args.start, end=args.end,
+                                             eligible=eligible)
         elif args.adapter == "sentiment":
             obj = adapters.from_sentiment(start=args.start, end=args.end)
         elif args.adapter == "rating":
