@@ -106,6 +106,7 @@ KEYS: dict[str, list[str]] = {
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],
     "fund_holdings":          ["fund_ticker", "holding_ticker", "snapshot_date"],
+    "etf_holdings":           ["fund_ticker", "holding_ticker", "snapshot_date"],
     "identifier_map":         ["ticker"],
     # EIA refinery activity / crude trade
     "eia_refinery_activity":  ["series_id", "date"],

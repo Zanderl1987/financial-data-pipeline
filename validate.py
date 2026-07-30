@@ -1144,6 +1144,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['fund_ticker', 'holding_ticker'],
         "date_col":    "snapshot_date",
     },
+    "etf_holdings": {
+        "required":    ['fund_ticker', 'holding_ticker', 'source', 'fetched_at'],
+        "critical_nn": ['fund_ticker', 'holding_ticker'],
+        "date_col":    "snapshot_date",
+    },
     "identifier_map": {
         "required":    ['ticker', 'source', 'fetched_at'],
         "critical_nn": ['ticker'],

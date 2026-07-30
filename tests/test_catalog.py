@@ -122,6 +122,7 @@ EXPECTED_TABLES = [
     "index_members",
     "securities",
     "fund_holdings",
+    "etf_holdings",
     "identifier_map",
     # CoinGecko cryptocurrency
     "crypto_market",
