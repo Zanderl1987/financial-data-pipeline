@@ -380,6 +380,7 @@ Full detail in `SESSION_NOTES_2026-07-03.md` (Parts 2-5); summary here for the r
    - `MUTUAL_FUND_UNIVERSE`: 10 → **52 mutual funds** (Vanguard 21, Fidelity 9, Schwab 5, PIMCO 3, American Funds 5, T. Rowe Price 4, DFA 3).
 4. **Wired `etf_holdings`** into: `validate.py` SCHEMAS, `curated.py` KEYS, `query.py` CATALOG, `run_all.py` PipelineSpec, `tests/test_catalog.py`, `tests/test_pipelines.py`.
 5. **Created Iceberg table** `constituents.etf_holdings` (DoubleType for float fields).
+6. **Wired error logging** into both pipelines' `write_to_iceberg()` — catalog load, Arrow schema conversion, per-ticker overwrite, and verification query each wrapped in `try/except` with `log.error()`/`log.warning()`. Per-ticker overwrite continues on individual failures rather than aborting the batch.
 
 ### Key findings
 - SecuritiesDB (`securitiesdb.com/api/v1/etfs/{ticker}/holdings`) works with no auth, returns up to ~500 holdings per ETF. ~1% cash/derivative rows filtered automatically.
@@ -387,7 +388,7 @@ Full detail in `SESSION_NOTES_2026-07-03.md` (Parts 2-5); summary here for the r
 - PyIceberg on Windows needs `DoubleType` (not `FloatType`) to match `pa.float64()`. Also crashes on Windows terminal when rendering schema-diff Unicode tables (cp1252).
 
 ### Test results
-- `tests/test_catalog.py` + `tests/test_pipelines.py`: **153 passed** (wiring verified).
+- `tests/test_catalog.py` + `tests/test_pipelines.py`: **155 passed** (wiring verified, up from 153).
 
 ## For Claude (Technical Pickup Notes)
 
