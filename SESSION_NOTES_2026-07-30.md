@@ -176,5 +176,55 @@ Verified live: all 4 funds' row counts match BlackRock's own reported
 security counts exactly. `validate.py` PASS, curated rebuild preserves all
 17,772 bond rows, full test suite 484 passed.
 
-### Next up in this sweep
-- [ ] OpenFIGI full backfill (~5-10K tickers)
+### 4. OpenFIGI full backfill (~5-10K tickers) — running, plus a data-loss bug fix
+
+Real universe turned out to be 19,119 unique tickers (index_members 3,057 +
+fund_holdings 12,882 + securities 10,479, deduped) — bigger than the backlog's
+"~5-10K" estimate. No `OPENFIGI_API_KEY` configured, so this runs at the free
+tier (25 req/min, 10 tickers/batch) — ~90-100 min total, running in background.
+
+**Found and fixed a real data-loss bug before launching it**: `write_to_iceberg()`
+did a full `table.overwrite(AlwaysTrue())` every run, but `main()`'s default
+(non-`--backfill`) mode only resolves tickers not already in `identifier_map`.
+Since `run_all.py` always calls this pipeline without `--backfill`, the next
+run to find even one new ticker (routine — the source tables grow over time)
+would have overwritten the whole table with just that small incremental batch,
+silently deleting every previously-resolved ticker (3,056 already mapped before
+this fix). Changed to `table.append()`, matching every other Iceberg table's
+pattern; `curated.py` already dedupes `identifier_map` by ticker on read.
+
+(Process note: first backfill launch attempt died silently from a shell job-
+control mistake — `cmd & sleep 15; kill %1; wait` doesn't behave as plain POSIX
+job control inside this tool's background-command wrapping. Relaunched cleanly
+via the tool's own `run_in_background` parameter instead; confirmed via
+`Get-Process` that a real python process was alive this time before trusting
+the log output.)
+
+### 5. Portfolio analytics module (Phase 5 of the original constituents plan) — DONE (commit `9cf85f1`)
+
+While the OpenFIGI backfill ran, picked up the next item from the same original
+backlog (`E:\...\SESSION_NOTES_2026-07-17.md`'s "Remaining TODO" list, item 7):
+"Analytics layer — DuckDB views joining Iceberg tables for portfolio analytics."
+Built `analytics/portfolio.py` matching the existing `analytics/*.py` module
+conventions (thin wrappers over `q.load()`, return empty DataFrame gracefully,
+signature + empty-data tests in `test_analytics.py`):
+
+- `sector_exposure(fund_ticker)`, `sector_overweight(fund_ticker,
+  benchmark_ticker)` — implements the spec's own example, "what sectors does
+  IWM overweight vs SPX"
+- `top_holdings(fund_ticker, n)`, `holdings_overlap(fund_a, fund_b)`
+- `bond_duration_profile(fund_ticker)` — weight-weighted duration/YTM/coupon/
+  maturity, using the 5 bond-specific columns added earlier this session
+
+A fund's holdings can live in either `fund_holdings` (BlackRock) or
+`etf_holdings` (SecuritiesDB) depending on which pipeline built it, so lookups
+check both. **Found and documented (not fixed) a real analytical gotcha**
+while testing live: the two source tables use different, non-normalized
+sector taxonomies (BlackRock "Health Care" vs SecuritiesDB "Healthcare", etc.)
+— `sector_overweight('IWM', 'SPY')` (cross-source) produces implausible
+double-counted rows, while `sector_overweight('IWM', 'IVV')` (both BlackRock)
+is clean and correctly summed. Documented as a known limitation in the module
+docstring rather than silently returning misleading numbers; a real fix would
+need a sector-name normalization mapping, out of scope for this pass.
+
+10 new tests, full suite 494 passed (was 484), no regressions.
