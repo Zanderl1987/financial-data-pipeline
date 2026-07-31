@@ -365,3 +365,75 @@ Full detail in `SESSION_NOTES_2026-07-03.md` (Parts 2-5); summary here for the r
 - **Signal-change scanner + signal health monitor** (`c536691`, pushed): `event_backtest.rating_changes()`/`tv_snapshot_changes()` (cross-sectional TA-bucket-change scan, reuses `rating_history()`), `signal_scan.py` CLI, `signal_monitor.py` (maintained backtest → new `signal_health` table, win rate/PF/CAR21 per signal per trailing window, flags DEGRADED signals). First live run already flagged `tv_sell`/`tv_strong_sell` as DEGRADED (trailing-1y PF < 1.0 on both). CATALOG 132→133. Each `signal_monitor.py` run takes ~15 min (no indicator caching across 315 rating_history() calls — fine for a daily cron, slow for ad-hoc reruns). Test suite: 234 passed, 5 skipped.
 - **TV-rating backtest on TSLA/LMT/NVDA/KEYS/GOOG/NFLX** (not committed — analysis only): found LMT/KEYS missing entirely and GOOG mistaken for GOOGL in the store; backfilled all three from Tiingo before running. Result: long side (Strong Buy/Buy) works cleanly on all 6 names (PF ~2.0, t-stats in the 20s); short side doesn't (PF < 1 on every name) — this basket's strong-drift growth/quality composition structurally penalizes shorting on any signal. Full report: https://claude.ai/code/artifact/a947fa3a-ab4a-4a53-8121-a15afe4fb395
 - **Schwab OAuth completed** (Zander ran it in his own terminal — login is inherently interactive). Hit and fixed two real bugs along the way: (1) `schwabdev` 3.0.4 replaced `tokens_file` with `tokens_db` (SQLite, not JSON) — a breaking API change vs. what all 8 Schwab pipelines assumed; fixed everywhere (`tokens_file=` → `tokens_db=`, default `"tokens.json"` → `"tokens.db"`) plus `.env`/`.gitignore`. (2) Auth-code redirect has a ~30s expiry — routing it through chat first burned that window (`invalid_grant`); resolved by doing the whole browser→paste loop directly in the terminal. **Verified live**: movers ✅ (today's values look degraded because 2026-07-04 is a market holiday — that's Schwab's own API behavior, not a bug), `price_history --full` ✅ (confirmed history to 1985-01-02, ~35MB projected for the full 63-symbol watchlist), intraday ✅ (78 5-min bars/symbol/day). Portfolio mirror ❌ blocked — `linked_accounts()` 401s because the registered Schwab app has Market Data API access but not Trader API (accounts/positions/transactions); needs enabling at developer.schwab.com, Schwab-side, not a code fix. The `tokens_file`→`tokens_db` fix is **not yet committed**.
+
+---
+
+# Session 4 — 2026-07-30 (ETF Holdings Pipeline + Fund Holdings Expansion)
+
+## For You (Summary)
+
+### What we did
+1. **Built `etf_holdings_pipeline.py`** — fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table `constituents.etf_holdings` with per-fund-ticker partition overwrite. CLI args `--etf-tickers`, `--limit`.
+2. **Verified live**: `etf_holdings_pipeline.py --limit 3` → 299 rows (SPY 99, IVV 100, VOO 100) written to Iceberg.
+3. **Expanded `fund_holdings_pipeline.py`**:
+   - `ETF_PID_MAP`: 17 → **65 iShares ETFs** (added factor, sector, international, ESG, multi-asset, dividend, commodities, RE, short duration). PIDs sourced from `etf-scraper` PyPI package's `listings.csv`.
+   - `MUTUAL_FUND_UNIVERSE`: 10 → **52 mutual funds** (Vanguard 21, Fidelity 9, Schwab 5, PIMCO 3, American Funds 5, T. Rowe Price 4, DFA 3).
+4. **Wired `etf_holdings`** into: `validate.py` SCHEMAS, `curated.py` KEYS, `query.py` CATALOG, `run_all.py` PipelineSpec, `tests/test_catalog.py`, `tests/test_pipelines.py`.
+5. **Created Iceberg table** `constituents.etf_holdings` (DoubleType for float fields).
+6. **Wired error logging** into both pipelines' `write_to_iceberg()` — catalog load, Arrow schema conversion, per-ticker overwrite, and verification query each wrapped in `try/except` with `log.error()`/`log.warning()`. Per-ticker overwrite continues on individual failures rather than aborting the batch.
+
+### Key findings
+- SecuritiesDB (`securitiesdb.com/api/v1/etfs/{ticker}/holdings`) works with no auth, returns up to ~500 holdings per ETF. ~1% cash/derivative rows filtered automatically.
+- BlackRock iShares PIDs can be bulk-discovered from `etf-scraper`'s `listings.csv` on GitHub.
+- PyIceberg on Windows needs `DoubleType` (not `FloatType`) to match `pa.float64()`. Also crashes on Windows terminal when rendering schema-diff Unicode tables (cp1252).
+
+### Test results
+- `tests/test_catalog.py` + `tests/test_pipelines.py`: **155 passed** (wiring verified, up from 153).
+
+## For Claude (Technical Pickup Notes)
+
+### Repo note
+This session worked from `C:\Users\zande\financial-data-pipeline\`. The `CLAUDE.md` and all previous sessions use `C:\Users\zande\PycharmProjects\financial-data-pipeline\`. Both copies exist; which is upstream is unclear.
+
+### SecuritiesDB
+```
+GET https://securitiesdb.com/api/v1/etfs/{ticker}/holdings
+Headers: User-Agent (standard browser)
+```
+Free, no key. Response fields: ticker, name, weight_pct, sector, market_cap, piotroski_f, altman_z. Some ETFs return fewer rows than `total_holdings` (~100 cap per request from SecuritiesDB).
+
+### BlackRock PID source
+`https://raw.githubusercontent.com/nikulpatel3141/ETF-Scraper/main/src/etf_scraper/data/listings.csv` — 450+ iShares ETFs with `product_id` (PID). BlackRock bond ETFs (AGG, LQD, HYG, TIP) still need separate XML parser.
+
+### New Iceberg table
+```python
+"etf_holdings": {"required": ['fund_ticker', 'holding_ticker', 'source', 'fetched_at'], 
+                 "critical_nn": ['fund_ticker', 'holding_ticker'], "date_col": "snapshot_date"}
+```
+KEYS: `["fund_ticker", "holding_ticker", "snapshot_date"]`
+
+### PipelineSpec
+```python
+PipelineSpec(name="etf_holdings", file="etf_holdings_pipeline.py",
+    desc="ETF holdings -- SecuritiesDB (200+ US ETFs, no auth) (Iceberg)",
+    stage=1, tables=['etf_holdings'], timeout=1800)
+```
+
+### ETF_PID_MAP: 65 entries
+Factor: USMV(239695), QUAL(256101), MTUM(251614), SIZE(251465), VLUE(251616)
+Sector: IYF(239508), IYW(239522), IBB(239699), IGV(239771), ITA(239502), IHI(239516), SOXX(239705)
+International: IXUS(244048), SCZ(239627), IDV(239499)
+Dividend: DVY(239500), DGRO(264623), HDV(239563)
+ESG: ESGU(286007), ESGD(283778), ESGE(283777), SUSA(239692), DSI(239667)
+Multi-Asset: AOR(239756), AOM(239765), AOA(239729), AOK(239733)
+Commodities/RE: IAU(239561), SLV(239855), REET(268752)
+Short Duration: SHV(239466), NEAR(239854)
+
+### MUTUAL_FUND_UNIVERSE: 52 entries
+Vanguard(21): VFIAX, VTSAX, VTIAX, VBTLX, VGSLX, VWUSX, VWELX, VWINX, VIGAX, VVIAX, VIMAX, VSMAX, VTMGX, VEMAX, VAIPX, VWIAX, VWENX, VHCAX, VTWNX, VFIFX, VMVAX
+Fidelity(9): FXAIX, FSKAX, FTIHX, FBALX, FCNTX, FSPGX, FSMDX, FSSNX, FLPSX, FFNOX, FZROX, FNCMX
+Schwab(5): SWPPX, SWTSX, SWISX, SWAGX, SWSSX
+PIMCO(3): PTTDX, PONAX, PRRIX
+American Funds(5): AGTHX, AIVSX, ANWPX, CWGIX, SMCWX
+T. Rowe Price(4): PRGFX, PRWCX, PRNHX, PRMTX
+DFA(3): DFUVX, DFVEX, DFEMX

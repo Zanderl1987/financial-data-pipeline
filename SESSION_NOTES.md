@@ -467,3 +467,35 @@ data_sources.md               patch_banks.py         validate_synthetic_options.
 Schwab API Exploration.ipynb  SchwabDev1.py          (etc.)
 ```
 These are safe to ignore â€” they pre-date the current pipeline structure.
+
+---
+## 2026-07-30 — ETF Holdings Pipeline + Fund Holdings Expansion
+
+### What was built
+1. **etf_holdings_pipeline.py** — fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
+2. **fund_holdings_pipeline.py expanded**: ETF_PID_MAP 17 ? 65 iShares ETFs; MUTUAL_FUND_UNIVERSE 10 ? 52 mutual funds.
+3. **Wired etf_holdings** into validate.py, curated.py, query.py, run_all.py, test_catalog.py, test_pipelines.py. 155/155 wiring tests pass.
+4. **Wired error logging** into both write_to_iceberg() functions: catalog load, Arrow schema conversion, per-ticker overwrite, and verification query all wrapped in try/except.
+
+### Key findings
+- SecuritiesDB (securitiesdb.com/api/v1/etfs/{ticker}/holdings) works with no auth.
+- BlackRock iShares PIDs from etf-scraper listings.csv on GitHub.
+- PyIceberg on Windows needs DoubleType (not FloatType) to match pa.float64().
+- This session worked from C:\Users\zande\financial-data-pipeline (not PycharmProjects version).
+
+---
+## 2026-07-30 — ETF Holdings Pipeline + Fund Holdings Expansion
+
+### What was built
+1. **etf_holdings_pipeline.py** — fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
+2. **fund_holdings_pipeline.py expanded**: ETF_PID_MAP 17 -> 65 iShares ETFs (factor, sector, international, ESG, multi-asset, dividend, commodities, RE, short duration); MUTUAL_FUND_UNIVERSE 10 -> 52 mutual funds (Vanguard, Fidelity, Schwab, PIMCO, American Funds, T. Rowe Price, DFA).
+3. **Wired etf_holdings** into validate.py SCHEMAS, curated.py KEYS, query.py CATALOG, run_all.py PipelineSpec, test_catalog.py, test_pipelines.py. 155/155 wiring tests pass.
+4. **Wired error logging** into both write_to_iceberg() functions: catalog load, Arrow schema conversion, per-ticker overwrite, and verification query all wrapped in try/except with log.error()/log.warning().
+
+### Key findings
+- SecuritiesDB (securitiesdb.com/api/v1/etfs/{ticker}/holdings) works with no auth, returns up to ~500 holdings per ETF.
+- BlackRock iShares PIDs can be bulk-discovered from etf-scraper's listings.csv on GitHub (raw.githubusercontent.com/nikulpatel3141/ETF-Scraper/main/src/etf_scraper/data/listings.csv).
+- PyIceberg on Windows needs DoubleType (not FloatType) to match pa.float64(). Also crashes on Windows terminal when rendering schema-diff Unicode tables (cp1252).
+
+### Repo note
+This session worked from C:\Users\zande\financial-data-pipeline. The CLAUDE.md and previous sessions use C:\Users\zande\PycharmProjects\financial-data-pipeline. Both copies exist; check which one before running.

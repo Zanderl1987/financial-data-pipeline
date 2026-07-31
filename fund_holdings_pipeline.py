@@ -81,6 +81,9 @@ ETF_PID_MAP = {
     # US Equity — Style
     "IWF":  {"pid": "239706", "name": "iShares Russell 1000 Growth ETF"},
     "IWD":  {"pid": "239708", "name": "iShares Russell 1000 Value ETF"},
+    "IVW":  {"pid": "239725", "name": "iShares S&P 500 Growth ETF"},
+    "IUSV": {"pid": "239715", "name": "iShares Core S&P US Value ETF"},
+    "IUSG": {"pid": "239713", "name": "iShares Core S&P US Growth ETF"},
     # US Equity — Mid/Small Cap
     "IJH":  {"pid": "239763", "name": "iShares Core S&P Mid-Cap ETF"},
     "IJR":  {"pid": "239774", "name": "iShares Core S&P Small-Cap ETF"},
@@ -89,12 +92,51 @@ ETF_PID_MAP = {
     "IWM":  {"pid": "239710", "name": "iShares Russell 2000 ETF"},
     "IWO":  {"pid": "239709", "name": "iShares Russell 2000 Growth ETF"},
     "IWN":  {"pid": "239712", "name": "iShares Russell 2000 Value ETF"},
+    # US Equity — Factor
+    "USMV": {"pid": "239695", "name": "iShares MSCI USA Min Vol Factor ETF"},
+    "QUAL": {"pid": "256101", "name": "iShares MSCI USA Quality Factor ETF"},
+    "MTUM": {"pid": "251614", "name": "iShares MSCI USA Momentum Factor ETF"},
+    "SIZE": {"pid": "251465", "name": "iShares MSCI USA Size Factor ETF"},
+    "VLUE": {"pid": "251616", "name": "iShares MSCI USA Value Factor ETF"},
+    # US Sector
+    "IYF":  {"pid": "239508", "name": "iShares US Financials ETF"},
+    "IYW":  {"pid": "239522", "name": "iShares US Technology ETF"},
+    "IBB":  {"pid": "239699", "name": "iShares Biotechnology ETF"},
+    "IGV":  {"pid": "239771", "name": "iShares Expanded Tech-Software Sector ETF"},
+    "ITA":  {"pid": "239502", "name": "iShares US Aerospace & Defense ETF"},
+    "IHI":  {"pid": "239516", "name": "iShares US Medical Devices ETF"},
+    "SOXX": {"pid": "239705", "name": "iShares PHLX Semiconductor Sector ETF"},
+    # US Dividend
+    "DVY":  {"pid": "239500", "name": "iShares Select Dividend ETF"},
+    "DGRO": {"pid": "264623", "name": "iShares Core Dividend Growth ETF"},
+    "HDV":  {"pid": "239563", "name": "iShares Core High Dividend ETF"},
     # International
     "IEFA": {"pid": "244049", "name": "iShares Core MSCI EAFE ETF"},
     "IEMG": {"pid": "244050", "name": "iShares Core MSCI Emerging Markets ETF"},
     "EFA":  {"pid": "239623", "name": "iShares MSCI EAFE ETF"},
     "EEM":  {"pid": "239637", "name": "iShares MSCI Emerging Markets ETF"},
     "ACWI": {"pid": "239600", "name": "iShares MSCI ACWI ETF"},
+    "IXUS": {"pid": "244048", "name": "iShares Core MSCI Total International Stock ETF"},
+    "SCZ":  {"pid": "239627", "name": "iShares MSCI EAFE Small-Cap ETF"},
+    "IDV":  {"pid": "239499", "name": "iShares International Select Dividend ETF"},
+    # ESG
+    "ESGU": {"pid": "286007", "name": "iShares ESG Aware MSCI USA ETF"},
+    "ESGD": {"pid": "283778", "name": "iShares ESG Aware MSCI EAFE ETF"},
+    "ESGE": {"pid": "283777", "name": "iShares ESG Aware MSCI Emerging Markets ETF"},
+    "SUSA": {"pid": "239692", "name": "iShares MSCI USA ESG Select ETF"},
+    "DSI":  {"pid": "239667", "name": "iShares MSCI KLD 400 Social ETF"},
+    # Multi-Asset
+    "AOR":  {"pid": "239756", "name": "iShares Core Growth Allocation ETF"},
+    "AOM":  {"pid": "239765", "name": "iShares Core Moderate Allocation ETF"},
+    "AOA":  {"pid": "239729", "name": "iShares Core Aggressive Allocation ETF"},
+    "AOK":  {"pid": "239733", "name": "iShares Core Conservative Allocation ETF"},
+    # Commodities & Real Estate
+    "IAU":  {"pid": "239561", "name": "iShares Gold Trust"},
+    "SLV":  {"pid": "239855", "name": "iShares Silver Trust"},
+    "REET": {"pid": "268752", "name": "iShares Global REIT ETF"},
+    # Short Duration
+    "SHV":  {"pid": "239466", "name": "iShares Short Treasury Bond ETF"},
+    "NEAR": {"pid": "239854", "name": "iShares Short Duration Bond Active ETF"},
     # Fixed Income — REMOVED: bond ETFs have different XML column structure
     # AGG, LQD, HYG, TIP need a separate parser (different header row format)
     # "AGG":  {"pid": "239458", "name": "iShares Core U.S. Aggregate Bond ETF"},
@@ -105,16 +147,66 @@ ETF_PID_MAP = {
 
 # Mutual funds to fetch via EdgarTools N-PORT
 MUTUAL_FUND_UNIVERSE = {
+    # --- Vanguard ---
     "VFIAX": "Vanguard 500 Index Fund",
     "VTSAX": "Vanguard Total Stock Market Index Fund",
     "VTIAX": "Vanguard Total International Stock Index Fund",
     "VBTLX": "Vanguard Total Bond Market Index Fund",
     "VGSLX": "Vanguard Real Estate Index Fund",
+    "VWUSX": "Vanguard U.S. Growth Fund",
+    "VWELX": "Vanguard Wellington Fund",
+    "VWINX": "Vanguard Wellesley Income Fund",
+    "VIGAX": "Vanguard Growth Index Fund",
+    "VVIAX": "Vanguard Value Index Fund",
+    "VIMAX": "Vanguard Mid-Cap Index Fund",
+    "VSMAX": "Vanguard Small-Cap Index Fund",
+    "VTMGX": "Vanguard Developed Markets Index Fund",
+    "VEMAX": "Vanguard Emerging Markets Stock Index Fund",
+    "VAIPX": "Vanguard Inflation-Protected Securities Fund",
+    "VWIAX": "Vanguard Wellesley Income Fund Admiral",
+    "VWENX": "Vanguard Wellington Fund Admiral",
+    "VHCAX": "Vanguard Capital Appreciation Fund",
+    "VTWNX": "Vanguard Target Retirement 2020 Fund",
+    "VFIFX": "Vanguard Target Retirement 2050 Fund",
+    "VMVAX": "Vanguard Mid-Cap Value Index Fund",
+    # --- Fidelity ---
     "FXAIX": "Fidelity 500 Index Fund",
     "FSKAX": "Fidelity Total Market Index Fund",
     "FTIHX": "Fidelity Total International Index Fund",
     "FBALX": "Fidelity Blue Chip Growth Fund",
-    "VWUSX": "Vanguard U.S. Growth Fund",
+    "FCNTX": "Fidelity Contrafund",
+    "FSPGX": "Fidelity Large Cap Growth Index Fund",
+    "FSMDX": "Fidelity Mid Cap Index Fund",
+    "FSSNX": "Fidelity Small Cap Index Fund",
+    "FLPSX": "Fidelity Low-Priced Stock Fund",
+    "FFNOX": "Fidelity Four-in-One Index Fund",
+    "FZROX": "Fidelity ZERO Total Market Index Fund",
+    "FNCMX": "Fidelity Nasdaq Composite Index Fund",
+    # --- Schwab ---
+    "SWPPX": "Schwab S&P 500 Index Fund",
+    "SWTSX": "Schwab Total Stock Market Index Fund",
+    "SWISX": "Schwab International Index Fund",
+    "SWAGX": "Schwab U.S. Aggregate Bond Index Fund",
+    "SWSSX": "Schwab Small-Cap Index Fund",
+    # --- PIMCO ---
+    "PTTDX": "PIMCO Total Return Fund Institutional",
+    "PONAX": "PIMCO Income Fund A",
+    "PRRIX": "PIMCO Real Return Fund Institutional",
+    # --- American Funds ---
+    "AGTHX": "American Funds Growth Fund of America A",
+    "AIVSX": "American Funds Investment Company of America A",
+    "ANWPX": "American Funds New Perspective Fund A",
+    "CWGIX": "American Funds Capital World Growth and Income A",
+    "SMCWX": "American Funds Small Cap World Fund A",
+    # --- T. Rowe Price ---
+    "PRGFX": "T. Rowe Price Growth Stock Fund",
+    "PRWCX": "T. Rowe Price Capital Appreciation Fund",
+    "PRNHX": "T. Rowe Price New Horizons Fund",
+    "PRMTX": "T. Rowe Price Mid-Cap Growth Fund",
+    # --- Dimensional (DFA) ---
+    "DFUVX": "DFA US Vector Equity Fund Institutional",
+    "DFVEX": "DFA US Targeted Value Fund Institutional",
+    "DFEMX": "DFA Emerging Markets Core Equity Fund Institutional",
 }
 
 
@@ -342,13 +434,17 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
     log.info("[Iceberg] Writing %d rows across %d funds...",
              len(combined), combined["fund_ticker"].nunique())
 
-    catalog = load_catalog(
-        "constituents",
-        type="sql",
-        uri=f"sqlite:///{CATALOG_DB.as_posix()}",
-        warehouse=f"file://{ICEBERG_WAREHOUSE.as_posix()}",
-    )
-    table = catalog.load_table("constituents.fund_holdings")
+    try:
+        catalog = load_catalog(
+            "constituents",
+            type="sql",
+            uri=f"sqlite:///{CATALOG_DB.as_posix()}",
+            warehouse=f"file://{ICEBERG_WAREHOUSE.as_posix()}",
+        )
+        table = catalog.load_table("constituents.fund_holdings")
+    except Exception as e:
+        log.error("[Iceberg] Failed to load catalog/table: %s", e)
+        return 0
 
     # Prepare DataFrame
     df = combined.copy()
@@ -388,28 +484,45 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
             df[col] = None
     df = df[col_order]
 
-    arrow_table = pa.Table.from_pandas(df, schema=arrow_schema, preserve_index=False)
+    try:
+        arrow_table = pa.Table.from_pandas(df, schema=arrow_schema, preserve_index=False)
+    except Exception as e:
+        log.error("[Iceberg] Arrow schema conversion failed: %s", e)
+        return 0
 
     # Overwrite per fund_ticker — replace today's data for each fund
     total_written = 0
+    write_errors = []
     for fund_ticker in sorted(df["fund_ticker"].unique()):
-        fund_df = arrow_table.filter(pa.compute.equal(arrow_table.column("fund_ticker"), fund_ticker))
-        table.overwrite(fund_df, overwrite_filter=EqualTo("fund_ticker", fund_ticker))
-        total_written += len(fund_df)
-        log.info("[Iceberg]   %s: %d rows written", fund_ticker, len(fund_df))
+        try:
+            fund_df = arrow_table.filter(pa.compute.equal(arrow_table.column("fund_ticker"), fund_ticker))
+            table.overwrite(fund_df, overwrite_filter=EqualTo("fund_ticker", fund_ticker))
+            total_written += len(fund_df)
+            log.info("[Iceberg]   %s: %d rows written", fund_ticker, len(fund_df))
+        except Exception as e:
+            log.error("[Iceberg]   %s: write FAILED: %s", fund_ticker, e)
+            write_errors.append(fund_ticker)
 
-    log.info("[Iceberg] Total written: %d rows across %d funds",
-             total_written, df["fund_ticker"].nunique())
+    if write_errors:
+        log.warning("[Iceberg] Write errors (%d): %s", len(write_errors), ", ".join(write_errors))
 
-    # Verify
-    import duckdb
-    result = duckdb.sql(
-        f"SELECT count(*) FROM read_parquet("
-        f"'{ICEBERG_WAREHOUSE.as_posix()}/constituents/fund_holdings/**/*.parquet', "
-        f"hive_partitioning=true)"
-    ).fetchone()
-    log.info("[Iceberg] Total rows in fund_holdings: %d", result[0])
-    return result[0]
+    if total_written > 0:
+        log.info("[Iceberg] Partial written: %d rows",
+                 total_written)
+
+        # Verify
+        try:
+            import duckdb
+            result = duckdb.sql(
+                f"SELECT count(*) FROM read_parquet("
+                f"'{ICEBERG_WAREHOUSE.as_posix()}/constituents/fund_holdings/**/*.parquet', "
+                f"hive_partitioning=true)"
+            ).fetchone()
+            log.info("[Iceberg] Total rows in fund_holdings: %d", result[0])
+        except Exception as e:
+            log.warning("[Iceberg] Verification query failed: %s", e)
+
+    return total_written
 
 
 # ---------------------------------------------------------------------------

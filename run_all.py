@@ -673,6 +673,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=1200,
     ),
     PipelineSpec(
+        name="etf_holdings",
+        file="etf_holdings_pipeline.py",
+        desc="ETF holdings -- SecuritiesDB free ETF holdings (200+ US ETFs, no auth) (Iceberg table)",
+        stage=1,
+        tables=['etf_holdings'],
+        timeout=1800,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, congressional trading, lobbying, patents, econ calendar, etc",

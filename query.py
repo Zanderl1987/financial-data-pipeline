@@ -154,6 +154,7 @@ CATALOG: dict[str, str] = {
     "index_members":           _iceberg_glob("constituents/index_members/**/*.parquet"),
     "securities":              _iceberg_glob("constituents/securities/**/*.parquet"),
     "fund_holdings":           _iceberg_glob("constituents/fund_holdings/**/*.parquet"),
+    "etf_holdings":            _iceberg_glob("constituents/etf_holdings/**/*.parquet"),
     "identifier_map":          _iceberg_glob("constituents/identifier_map/**/*.parquet"),
     # ── TSA checkpoint travel volumes ──────────────────────────────────────────
     "tsa_checkpoint":          _glob("tsa/**/*.parquet"),
