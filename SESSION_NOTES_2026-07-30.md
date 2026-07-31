@@ -58,3 +58,24 @@ this repo's staging-batch status.
   list, never picked up: OpenFIGI full backfill (~5-10K tickers), bond-ETF parser for
   AGG/LQD/HYG/TIP (different BlackRock XML shape), Phase 5 portfolio analytics on the
   Iceberg constituents tables.
+
+## Session 2: OECD pipeline finish + cross-session merge (same day, later)
+
+1. **`oecd_pipeline.py` uncommitted rewrite (flagged above) — finished, verified, committed
+   (`df0387c`).** It was a complete rework, not a mid-edit: switched from querying each of
+   the 7 KEI indicators individually against the new SDMX Data Explorer API to 2 wildcard
+   queries (KEI + LFS dataflows) with local pandas filtering. Ran live: 5,240 deduped rows,
+   8 indicators (7 KEI + LFS unemployment), 14 countries. `validate.py`: `oecd_macro` PASS.
+   Full suite: 482 passed, no regressions.
+
+2. **`git push` rejected — this clone was behind `origin/master` without knowing it.**
+   `git status` had shown a clean "ahead 1" at session start because no `fetch` had run;
+   another session pushed 2 commits earlier the same day (16:53/17:11) — `etf_holdings_pipeline.py`
+   (new pipeline, SecuritiesDB) + `fund_holdings_pipeline.py` expansion (65 ETFs + 52 MFs),
+   plus error-logging wiring and Iceberg metadata. Confirmed no file-path overlap with the
+   local commits (session notes + `oecd_pipeline.py`) before merging — clean merge, no
+   conflicts. Full suite after merge: **484 passed** (482 + 2 new tests from the ETF work),
+   same 8 expected warnings. Pushed: `aed01cb..0a39b36`.
+   **Fix applied**: added a note to CLAUDE.md's Environment section — always `git fetch
+   origin` at the start of a session before trusting `git status` ahead/behind counts,
+   since this repo is worked on from multiple sessions/devices.

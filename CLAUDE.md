@@ -17,6 +17,13 @@ commands below rather than trusting this line if it looks stale.
   needs ANTHROPIC_API_KEY (news sentiment is local VADER, no key).
 - (The old warning about `C:\Users\zande` being an accidental git repo is resolved —
   the vestigial empty `.git` was removed 2026-07-11.)
+- **This repo gets worked on from multiple sessions/devices.** `git status` only shows
+  "behind" once you've fetched — run `git fetch origin` at the start of any session before
+  trusting ahead/behind counts, or you can push into a rejection (or worse, stay unaware
+  origin has moved). Happened 2026-07-30: a session pushed 2 commits (ETF holdings
+  pipeline) while this clone was mid-session; the next session's `git status` looked like
+  a clean "ahead 1" until `git push` was rejected. Merged fine (no file overlap) once
+  caught — see SESSION_NOTES_2026-07-30.md.
 
 ## Commands
 
