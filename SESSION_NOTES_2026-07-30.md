@@ -148,6 +148,33 @@ data returned" in the incremental window — checked directly against FRED's API
 legitimately discontinued-but-valid series, not broken IDs, and weren't part of
 the original 9. `commodities`/`macro`/`oecd_macro` all PASS in validate.py.
 
+### 3. Bond-ETF parser for AGG/LQD/HYG/TIP — DONE (commit `40f482e`)
+
+BlackRock's fixed-income Holdings worksheets have no Ticker column (bonds are
+identified by Name only) and bond-specific fields instead of equity's Ticker/
+Sector layout — confirmed by fetching AGG/LQD/HYG/TIP live and inspecting the
+raw XML header row directly. Built `fetch_blackrock_bond_holdings()` +
+`BOND_ETF_PID_MAP`, refactored the shared fetch/XML-parse logic out of the
+equity function into `_fetch_blackrock_holdings_rows()`. Extended the
+`fund_holdings` Iceberg table with 5 new nullable columns (par_value,
+maturity_date, coupon_pct, duration, ytm_pct) via schema evolution — no
+rewrite of the existing ~231K rows. Wired into CLI (`--skip-bonds`,
+`--bond-tickers`).
+
+Testing live end-to-end (not just unit-level) surfaced two real bugs that
+would have silently corrupted this data on first use:
+- `curated.py`'s dedup key `(fund_ticker, holding_ticker, snapshot_date)`
+  collapsed every bond in a fund down to 1 row, since `holding_ticker` is
+  always null for bonds. Verified `(holding_name, maturity_date, coupon_pct,
+  par_value)` is exactly unique per position against live data (13,299/3,145/
+  1,328/48 total vs. distinct, before vs. after par_value) before adopting it.
+- `validate.py`'s schema had `holding_ticker` in `critical_nn` (fails if
+  >50% null) — a bond-only raw file is 100% null there by design. Removed
+  from `critical_nn`, kept in `required` (column should still exist).
+
+Verified live: all 4 funds' row counts match BlackRock's own reported
+security counts exactly. `validate.py` PASS, curated rebuild preserves all
+17,772 bond rows, full test suite 484 passed.
+
 ### Next up in this sweep
-- [ ] Bond-ETF parser for AGG/LQD/HYG/TIP
 - [ ] OpenFIGI full backfill (~5-10K tickers)
