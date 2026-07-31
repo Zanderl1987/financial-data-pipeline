@@ -5,21 +5,18 @@ OECD Macro Indicators Pipeline (revised 2026-07-29).
 Uses the OECD SDMX 2.1 REST API via CSV format (the old stats.oecd.org/SDMX-JSON
 endpoint was decommissioned Jan 2025).
 
-Two dataflows:
-  - OECD.SDD.STES/DSD_KEI@DF_KEI (Key Economic Indicators) for most series
-  - OECD.SDD.TPS/DSD_LFS@DF_IALFS_UNE_M (Labour Force Survey) for unemployment
-
+Strategy: 2 wildcard queries (KEI + LFS), filter locally.
 Keyless — no API key required.
 
-Indicators:
-  UNEMP     Unemployment rate (%, monthly, SA)
-  CP        CPI inflation (YoY %, monthly)
-  MANM      Industrial production index (2015=100, monthly, SA)
-  IRLT      Long-term interest rate (%, monthly)
-  IR3TIB    Short-term interest rate (%, monthly)
-  B1GQ_Q    GDP growth (YoY %, quarterly, SA)
-  CC        Consumer confidence (normal=100, monthly, SA)
-  CA_GDP    Current account balance (% of GDP, quarterly)
+Indicators (mapped from old MEI codes to new KEI/LFS MEASURE codes):
+  LRHUTTTT -> UNEMP (LFS dataflow)
+  CP01000  -> CP    (KEI dataflow)
+  PRMNTO01 -> MANM  (KEI)
+  IRLT     -> IRLT  (KEI)
+  IR3TBB01 -> IR3TIB (KEI)
+  NAEXKP01 -> B1GQ_Q (KEI)
+  CCRETT01 -> CC    (KEI)
+  BPBLTD02 -> CA_GDP (KEI)
 
 Countries: USA GBR DEU FRA JPN CAN ITA ESP NLD CHE SWE AUS KOR CHN
 
@@ -41,90 +38,60 @@ import pandas as pd
 import requests
 from storage_utils import write_partitioned
 
-BASE_KEI       = "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_KEI@DF_KEI,4.0"
-BASE_LFS       = "https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS,DSD_LFS@DF_IALFS_UNE_M,1.0"
-OECD_DIR       = os.path.join("storage", "raw", "oecd")
-REQUEST_DELAY  = 1.5
-MAX_RETRIES    = 3
+KEI_WILDCARD  = "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_KEI@DF_KEI,4.0/."
+LFS_WILDCARD  = "https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS,DSD_LFS@DF_IALFS_UNE_M,1.0/........."
+OECD_DIR      = os.path.join("storage", "raw", "oecd")
+MAX_RETRIES   = 3
+RETRY_DELAY   = 60
 
-COUNTRIES = ["USA", "GBR", "DEU", "FRA", "JPN", "CAN", "ITA", "ESP", "NLD", "CHE", "SWE", "AUS", "KOR", "CHN"]
+COUNTRIES = {"USA", "GBR", "DEU", "FRA", "JPN", "CAN", "ITA", "ESP", "NLD", "CHE", "SWE", "AUS", "KOR", "CHN"}
 
-INDICATORS = [
-    {
-        "id": "LRHUTTTT",
-        "description": "Unemployment Rate",
-        "unit": "Percent",
-        "base_url": BASE_LFS,
-        "dims": lambda c: f"{c}.UNE_LF_M.PT_LF_SUB._Z.N._T.Y_GE15._Z.M",
-        "freq": "M",
-    },
-    {
-        "id": "CP01000",
-        "description": "CPI Total YoY",
-        "unit": "Percent change",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.M.CP.GR._Z._Z.GY",
-        "freq": "M",
-    },
-    {
-        "id": "PRMNTO01",
-        "description": "Industrial Production Index",
-        "unit": "Index 2015=100",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.M.MANM.IX._Z.Y._Z",
-        "freq": "M",
-    },
-    {
-        "id": "IRLT",
-        "description": "Long-Term Interest Rate 10Y Govt Bond",
-        "unit": "Percent per annum",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.M.IRLT.PA._Z._Z._Z",
-        "freq": "M",
-    },
-    {
-        "id": "IR3TBB01",
-        "description": "Short-Term Interest Rate 3M Interbank",
-        "unit": "Percent per annum",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.M.IR3TIB.PA._Z._Z._Z",
-        "freq": "M",
-    },
-    {
-        "id": "NAEXKP01",
-        "description": "GDP Growth Rate Quarterly Volume",
-        "unit": "Percent change",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.Q.B1GQ_Q.GR._T.Y.GY",
-        "freq": "Q",
-    },
-    {
-        "id": "CCRETT01",
-        "description": "Consumer Confidence Index",
-        "unit": "Normal=100",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.M.CC.XDC_USD._Z._Z._Z",
-        "freq": "M",
-    },
-    {
-        "id": "BPBLTD02",
-        "description": "Current Account Balance Pct GDP",
-        "unit": "Percent of GDP",
-        "base_url": BASE_KEI,
-        "dims": lambda c: f"{c}.Q.CA_GDP.PT_B1GQ._T.Y._Z",
-        "freq": "Q",
-    },
-]
+# Maps old indicator id -> (kei_measure, unit, unit_measure, adjustment, transformation, activity)
+KEI_FILTERS = {
+    "CP01000":  ("CP",     "Percent change",     "GR", "_Z", "GY", "_Z"),
+    "PRMNTO01": ("MANM",   "Index 2015=100",     "IX", "Y",  "_Z", "_Z"),
+    "IRLT":     ("IRLT",   "Percent per annum",   "PA", "_Z", "_Z", "_Z"),
+    "IR3TBB01": ("IR3TIB", "Percent per annum",   "PA", "_Z", "_Z", "_Z"),
+    "NAEXKP01": ("B1GQ_Q", "Percent change",      "GR", "Y",  "GY", "_T"),
+    "CCRETT01": ("CC",     "Normal=100",          "XDC_USD", "_Z", "_Z", "_Z"),
+    "BPBLTD02": ("CA_GDP", "Percent of GDP",      "PT_B1GQ", "Y",  "_Z", "_T"),
+}
+
+# Old -> new indicator descriptions for KEI measures
+KEI_DESCRIPTIONS = {
+    "CP01000": "CPI Total YoY",
+    "PRMNTO01": "Industrial Production Index",
+    "IRLT": "Long-Term Interest Rate 10Y Govt Bond",
+    "IR3TBB01": "Short-Term Interest Rate 3M Interbank",
+    "NAEXKP01": "GDP Growth Rate Quarterly Volume",
+    "CCRETT01": "Consumer Confidence Index",
+    "BPBLTD02": "Current Account Balance Pct GDP",
+}
+
+LFS_FILTER = {
+    "id": "LRHUTTTT",
+    "description": "Unemployment Rate",
+    "unit": "Percent",
+    "measure": "UNE_LF_M",
+    "unit_measure": "PT_LF_SUB",
+    "transformation": "_Z",
+    "adjustment": "N",
+    "sex": "_T",
+    "age": "Y_GE15",
+    "activity": "_Z",
+    "freq": "M",
+}
 
 
-def _fetch_csv(url):
+def _fetch_csv(url, start_period):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = requests.get(url, timeout=60)
+            params = {"startPeriod": start_period, "format": "csvfilewithlabels"}
+            resp = requests.get(url, params=params, timeout=120)
             if resp.status_code == 200:
                 return resp.text
             if resp.status_code == 429:
-                wait = 60 * attempt
+                wait = RETRY_DELAY * attempt
                 print(f"    Rate limited, waiting {wait}s...")
                 time.sleep(wait)
                 continue
@@ -132,50 +99,107 @@ def _fetch_csv(url):
             return None
         except requests.RequestException as exc:
             print(f"    Request error (attempt {attempt}): {exc}")
-            time.sleep(20 * attempt)
+            time.sleep(RETRY_DELAY)
     return None
 
 
-def _parse_csv(csv_text, indicator_id, description, unit):
+def _normalize_date(period):
+    if "-Q" in str(period):
+        yr, q = str(period).split("-Q")
+        return f"{yr}-{(int(q) - 1) * 3 + 1:02d}-01"
+    if len(str(period)) == 4:
+        return f"{period}-01-01"
+    if len(str(period)) == 7 and "-" in str(period):
+        return f"{period}-01"
+    return str(period)
+
+
+def _extract_kei(csv_text, start_period):
+    """Parse KEI wildcard CSV and filter to target indicators/countries."""
     if not csv_text:
         return pd.DataFrame()
-    try:
-        df = pd.read_csv(io.StringIO(csv_text))
-    except Exception as exc:
-        print(f"    CSV parse error: {exc}")
+    df = pd.read_csv(io.StringIO(csv_text))
+    if "OBS_VALUE" not in df.columns:
+        return pd.DataFrame()
+    obs = df[df["OBS_VALUE"].notna()].copy()
+
+    # Filter to our target countries
+    obs = obs[obs["REF_AREA"].isin(COUNTRIES)]
+    if obs.empty:
         return pd.DataFrame()
 
-    obs_col = "OBS_VALUE"
-    if obs_col not in df.columns:
+    rows = []
+    for old_id, (measure, unit, unit_m, adj, transf, activity) in KEI_FILTERS.items():
+        mask = (
+            (obs["MEASURE"] == measure)
+            & (obs["UNIT_MEASURE"] == unit_m)
+            & (obs["ADJUSTMENT"] == adj)
+            & (obs["TRANSFORMATION"] == transf)
+            & (obs["ACTIVITY"] == activity)
+        )
+        subset = obs[mask].copy()
+        if subset.empty:
+            continue
+        # Only keep M/Q frequency depending on indicator
+        freq = "M" if old_id in ("CP01000", "PRMNTO01", "IRLT", "IR3TBB01", "CCRETT01") else "Q"
+        subset = subset[subset["FREQ"] == freq]
+        if subset.empty:
+            continue
+        subset["country_code"] = subset["REF_AREA"]
+        subset["indicator"] = old_id
+        subset["description"] = KEI_DESCRIPTIONS[old_id]
+        subset["date"] = subset["TIME_PERIOD"].apply(_normalize_date)
+        subset["value"] = pd.to_numeric(subset["OBS_VALUE"], errors="coerce")
+        subset["unit"] = unit
+        rows.append(subset)
+
+    if not rows:
+        return pd.DataFrame()
+    result = pd.concat(rows, ignore_index=True)
+    result = result[["country_code", "indicator", "description", "date", "value", "unit"]]
+    result = result.dropna(subset=["value"])
+    result["value"] = result["value"].astype(float)
+    return result.reset_index(drop=True)
+
+
+def _extract_lfs(csv_text):
+    """Parse LFS wildcard CSV and filter to unemployment rate data."""
+    if not csv_text:
+        return pd.DataFrame()
+    df = pd.read_csv(io.StringIO(csv_text))
+    if "OBS_VALUE" not in df.columns:
+        return pd.DataFrame()
+    obs = df[df["OBS_VALUE"].notna()].copy()
+
+    # Filter to our target countries and the right dimension combo
+    obs = obs[obs["REF_AREA"].isin(COUNTRIES)]
+    if obs.empty:
         return pd.DataFrame()
 
-    data = df[df[obs_col].notna()].copy()
-    if data.empty:
+    f = LFS_FILTER
+    mask = (
+        (obs["MEASURE"] == f["measure"])
+        & (obs["UNIT_MEASURE"] == f["unit_measure"])
+        & (obs["TRANSFORMATION"] == f["transformation"])
+        & (obs["ADJUSTMENT"] == f["adjustment"])
+        & (obs["SEX"] == f["sex"])
+        & (obs["AGE"] == f["age"])
+        & (obs["ACTIVITY"] == f["activity"])
+        & (obs["FREQ"] == f["freq"])
+    )
+    subset = obs[mask].copy()
+    if subset.empty:
         return pd.DataFrame()
 
-    country_col = "REF_AREA"
-    time_col = "TIME_PERIOD"
-    if country_col not in data.columns or time_col not in data.columns:
-        return pd.DataFrame()
+    subset["country_code"] = subset["REF_AREA"]
+    subset["indicator"] = f["id"]
+    subset["description"] = f["description"]
+    subset["date"] = subset["TIME_PERIOD"].apply(_normalize_date)
+    subset["value"] = pd.to_numeric(subset["OBS_VALUE"], errors="coerce")
+    subset["unit"] = f["unit"]
 
-    def _normalize_date(period):
-        if "-Q" in str(period):
-            yr, q = str(period).split("-Q")
-            return f"{yr}-{(int(q) - 1) * 3 + 1:02d}-01"
-        if len(str(period)) == 4:
-            return f"{period}-01-01"
-        if len(str(period)) == 7 and "-" in str(period):
-            return f"{period}-01"
-        return str(period)
-
-    data["country_code"] = data[country_col]
-    data["indicator"] = indicator_id
-    data["description"] = description
-    data["date"] = data[time_col].apply(_normalize_date)
-    data["value"] = pd.to_numeric(data[obs_col], errors="coerce")
-    data["unit"] = unit
-
-    result = data[["country_code", "indicator", "description", "date", "value", "unit"]].dropna(subset=["value"]).copy()
+    result = subset[["country_code", "indicator", "description", "date", "value", "unit"]]
+    result = result.dropna(subset=["value"])
     result["value"] = result["value"].astype(float)
     return result.reset_index(drop=True)
 
@@ -189,34 +213,42 @@ def main():
     today_str = now.strftime("%Y%m%d")
     fetched_at = now.isoformat()
     mode = "backfill" if args.backfill else "incremental"
-    start_period = "1960" if args.backfill else f"{now.year - 5}"
+    start = "1960" if args.backfill else f"{now.year - 5}"
 
-    print(f"OECD Pipeline  mode={mode}  start={start_period}")
-    print(f"Countries: {', '.join(COUNTRIES)}\n")
+    print(f"OECD Pipeline  mode={mode}  start={start}")
+    print(f"Countries: {', '.join(sorted(COUNTRIES))}\n")
     os.makedirs(OECD_DIR, exist_ok=True)
 
     all_frames = []
-    for ind in INDICATORS:
-        iid = ind["id"]
-        desc = ind["description"]
-        print(f"  [{iid}] {desc}...")
 
-        country_frames = []
-        for country in COUNTRIES:
-            dims = ind["dims"](country)
-            url = f"{ind['base_url']}/{dims}?startPeriod={start_period}&format=csvfilewithlabels"
-            csv_text = _fetch_csv(url)
-            df = _parse_csv(csv_text, iid, desc, ind["unit"])
-            if not df.empty:
-                country_frames.append(df)
-            time.sleep(REQUEST_DELAY)
-
-        if country_frames:
-            combined = pd.concat(country_frames, ignore_index=True)
-            all_frames.append(combined)
-            print(f"    {len(combined):,} rows, {combined['country_code'].nunique()} countries")
+    # 1. KEI wildcard -> 7 indicators
+    print("  [KEI] Fetching Key Economic Indicators...")
+    kei_csv = _fetch_csv(KEI_WILDCARD, start)
+    if kei_csv:
+        kei_df = _extract_kei(kei_csv, start)
+        if not kei_df.empty:
+            all_frames.append(kei_df)
+            n_inds = kei_df["indicator"].nunique()
+            n_ctry = kei_df["country_code"].nunique()
+            print(f"    {len(kei_df):,} rows, {n_inds} indicators, {n_ctry} countries")
         else:
-            print(f"    No data returned")
+            print("    No data after filtering")
+    else:
+        print("    Failed to fetch KEI data")
+
+    # 2. LFS wildcard -> unemployment
+    print("  [LFS] Fetching Labour Force Survey (unemployment)...")
+    lfs_csv = _fetch_csv(LFS_WILDCARD, start)
+    if lfs_csv:
+        lfs_df = _extract_lfs(lfs_csv)
+        if not lfs_df.empty:
+            all_frames.append(lfs_df)
+            n_ctry = lfs_df["country_code"].nunique()
+            print(f"    {len(lfs_df):,} rows, {n_ctry} countries")
+        else:
+            print("    No data after filtering")
+    else:
+        print("    Failed to fetch LFS data")
 
     if not all_frames:
         print("\nNo data returned.")
