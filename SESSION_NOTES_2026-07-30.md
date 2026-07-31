@@ -132,7 +132,22 @@ What looked like "300+ untracked metadata files" was two real bugs:
   mid-investigation, once after returning to the correct directory) — 484 passed both
   times, no regressions. Pushed `c034fbe`.
 
+### 2. 9 broken FRED series IDs — already resolved, verified live (no new work needed)
+
+Turned out commit `9813469` (2026-07-29, the same commit that did the first OECD
+rewrite pass) already fixed this: 2 series got working replacement IDs
+(`PCU3311103311101`→`PCU331110331110`, `PCU3272133272131`/`PCU3272153272151`→
+`PCU327213327213`/`PCU327215327215`), the other 7 (gold/palladium/platinum IBA
+series, `WPU1019A2S`, `PCU3272143272141`, `WPU0619`) were removed outright with
+documented reasoning — FRED deleted the IBA precious-metals series in Jan 2022 and
+discontinued the BLS glass/steel series in Jul 2025, no direct replacements exist.
+Ran `commodity_macro_pipeline.py` live today to confirm: zero HTTP 400s across all
+58 series. Two unrelated series (`PCU3259103259101`, `PCU3312223312221`) show "No
+data returned" in the incremental window — checked directly against FRED's API
+(200 OK, but last observations from 2017 and 2010 respectively) — these are
+legitimately discontinued-but-valid series, not broken IDs, and weren't part of
+the original 9. `commodities`/`macro`/`oecd_macro` all PASS in validate.py.
+
 ### Next up in this sweep
-- [ ] 9 broken FRED series IDs — find replacements
 - [ ] Bond-ETF parser for AGG/LQD/HYG/TIP
 - [ ] OpenFIGI full backfill (~5-10K tickers)
