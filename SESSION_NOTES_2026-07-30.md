@@ -79,3 +79,60 @@ this repo's staging-batch status.
    **Fix applied**: added a note to CLAUDE.md's Environment section — always `git fetch
    origin` at the start of a session before trusting `git status` ahead/behind counts,
    since this repo is worked on from multiple sessions/devices.
+
+## Session 3: build-item sweep (Iceberg gitignore gap, FRED IDs, bond-ETF parser, OpenFIGI)
+
+User asked to work through 4 backlog items incrementally: the Iceberg metadata
+gitignore gap, 9 broken FRED series IDs, a bond-ETF parser for AGG/LQD/HYG/TIP, and an
+OpenFIGI full backfill.
+
+### 1. Iceberg metadata gitignore gap — DONE, turned out much bigger than framed (commit `c034fbe`)
+
+What looked like "300+ untracked metadata files" was two real bugs:
+
+- **Snapshot-per-partition bloat**: `fund_holdings_pipeline.py`/`etf_holdings_pipeline.py`
+  called `table.overwrite()` once per `fund_ticker` in a loop — each call is its own
+  Iceberg snapshot + `metadata.json` version. `fund_holdings` hit 467 metadata files
+  after a handful of runs. Fixed by batching all per-ticker overwrites into one
+  `table.transaction()` (verified live: 2-ticker batched write → 1 new metadata.json,
+  not 2). Added `iceberg_utils.expire_old_snapshots()` (30-day retention) as a backstop,
+  called after every write in both pipelines — trims the logical snapshot log, though
+  pyiceberg 0.11.1's Python client has no on-disk orphan-file GC, so old data/manifest
+  files already written aren't reclaimed.
+
+- **Cross-clone phantom table (the real find)**: investigating why `etf_holdings`
+  showed a full snapshot history but read zero rows uncovered that its Iceberg table
+  `location` was baked in at creation time to the *other* local clone
+  (`C:\Users\zande\financial-data-pipeline` — see PROJECT_NOTES.md's "Two local clones"
+  note). Because Iceberg metadata (small JSON/AVRO) wasn't gitignored but the actual
+  parquet data was (same rule as every other `storage/` table), the table's metadata
+  synced via git and merge and made this clone's catalog look fully populated while
+  every query silently returned zero rows — no error either way. Recovered the real
+  7,723-row dataset (119 tickers) from the other clone, deduped on natural key, dropped
+  the stale catalog entry, recreated the table fresh in this clone (verified
+  `table.location()` contains "PycharmProjects" before writing), removed 10 orphaned
+  bootstrap files from the old broken table. `fund_holdings` and the other 5
+  Iceberg-backed tables were unaffected (created from this clone originally).
+
+  Root-cause fix: `storage/iceberg/**/metadata/` and the SQLite catalog DB
+  (`constituents_catalog.db`) are now gitignored — same treatment as `storage/raw/`'s
+  parquet data. The whole Iceberg warehouse is local, regenerable state per clone, not
+  git-synced. This is what actually prevents the phantom-table failure mode from
+  recurring on any of the 7 Iceberg tables. Untracked 202 already-committed files (kept
+  on disk, just stopped tracking).
+
+  **Process note**: lost significant time to a stray `cd` earlier in the session (to
+  check the other clone's git log) that persisted across Bash tool calls — several
+  "verification" commands using relative paths were silently reading the wrong clone,
+  making a working fix look broken. Documented in CLAUDE.md's new Iceberg section as a
+  standing gotcha: use absolute paths for Iceberg-state checks after any `cd`, or
+  re-run `pwd` first.
+
+  Verified: `validate.py` PASS for both tables, full test suite run twice (once
+  mid-investigation, once after returning to the correct directory) — 484 passed both
+  times, no regressions. Pushed `c034fbe`.
+
+### Next up in this sweep
+- [ ] 9 broken FRED series IDs — find replacements
+- [ ] Bond-ETF parser for AGG/LQD/HYG/TIP
+- [ ] OpenFIGI full backfill (~5-10K tickers)
