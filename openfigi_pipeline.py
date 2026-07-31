@@ -254,10 +254,15 @@ def resolve_tickers(tickers: list[str]) -> pd.DataFrame:
 # Write to Iceberg
 # ---------------------------------------------------------------------------
 def write_to_iceberg(df: pd.DataFrame) -> int:
-    """Write identifier_map to Iceberg (full replace — reference table)."""
+    """Append resolved tickers to Iceberg; curated.py dedupes by ticker on
+    read (keeps latest fetched_at), same pattern as every other Iceberg-
+    backed table. NOTE: this must NOT be a full-table overwrite -- main()'s
+    default (non-backfill) mode only resolves *new* unmapped tickers each
+    run, so overwriting the whole table with just that small incremental
+    batch would silently delete every previously-resolved ticker the next
+    time run_all.py's openfigi stage finds anything new to resolve."""
     import pyarrow as pa
     from pyiceberg.catalog import load_catalog
-    from pyiceberg.expressions import AlwaysTrue
 
     if df.empty:
         log.warning("[Iceberg] No data to write.")
@@ -304,8 +309,8 @@ def write_to_iceberg(df: pd.DataFrame) -> int:
 
     arrow_table = pa.Table.from_pandas(df, schema=arrow_schema, preserve_index=False)
 
-    table.overwrite(arrow_table, overwrite_filter=AlwaysTrue())
-    log.info("[Iceberg] Successfully wrote %d rows to constituents.identifier_map",
+    table.append(arrow_table)
+    log.info("[Iceberg] Successfully appended %d rows to constituents.identifier_map",
              len(arrow_table))
 
     # Verify
