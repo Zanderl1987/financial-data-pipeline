@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 Fund Holdings Pipeline:
-  Fetches ETF holdings (BlackRock varnish API) and mutual fund holdings (EdgarTools N-PORT).
+  Fetches ETF holdings (BlackRock varnish API, equity + fixed-income) and
+  mutual fund holdings (EdgarTools N-PORT).
   Writes to Iceberg table: constituents.fund_holdings
 
   Data sources:
-    1. BlackRock varnish API — iShares ETF holdings (XML Spreadsheet)
-    2. EdgarTools — SEC N-PORT filings for mutual funds
+    1. BlackRock varnish API — iShares equity ETF holdings (XML Spreadsheet)
+    2. BlackRock varnish API — iShares bond ETF holdings (AGG/LQD/HYG/TIP;
+       different Holdings worksheet shape — no Ticker column, bond-specific
+       fields instead: par_value, maturity_date, coupon_pct, duration, ytm_pct)
+    3. EdgarTools — SEC N-PORT filings for mutual funds
 
   Catalog:  storage/iceberg/constituents_catalog.db
   Warehouse: storage/iceberg/constituents/
@@ -137,12 +141,18 @@ ETF_PID_MAP = {
     # Short Duration
     "SHV":  {"pid": "239466", "name": "iShares Short Treasury Bond ETF"},
     "NEAR": {"pid": "239854", "name": "iShares Short Duration Bond Active ETF"},
-    # Fixed Income — REMOVED: bond ETFs have different XML column structure
-    # AGG, LQD, HYG, TIP need a separate parser (different header row format)
-    # "AGG":  {"pid": "239458", "name": "iShares Core U.S. Aggregate Bond ETF"},
-    # "LQD":  {"pid": "239566", "name": "iShares iBoxx $ Investment Grade Corporate Bond ETF"},
-    # "HYG":  {"pid": "239565", "name": "iShares iBoxx $ High Yield Corporate Bond ETF"},
-    # "TIP":  {"pid": "239467", "name": "iShares TIPS Bond ETF"},
+}
+
+# Fixed-income iShares ETFs — same BlackRock varnish API, but a different
+# Holdings worksheet shape: no Ticker column at all (bonds are identified by
+# Name only), and bond-specific fields (Duration, YTM, Maturity, Coupon, ...)
+# instead of a Ticker/Sector-only equity layout. Needs fetch_blackrock_bond_
+# holdings() rather than fetch_blackrock_etf_holdings().
+BOND_ETF_PID_MAP = {
+    "AGG": {"pid": "239458", "name": "iShares Core U.S. Aggregate Bond ETF"},
+    "LQD": {"pid": "239566", "name": "iShares iBoxx $ Investment Grade Corporate Bond ETF"},
+    "HYG": {"pid": "239565", "name": "iShares iBoxx $ High Yield Corporate Bond ETF"},
+    "TIP": {"pid": "239467", "name": "iShares TIPS Bond ETF"},
 }
 
 # Mutual funds to fetch via EdgarTools N-PORT
@@ -210,12 +220,10 @@ MUTUAL_FUND_UNIVERSE = {
 }
 
 
-def fetch_blackrock_etf_holdings(ticker: str) -> pd.DataFrame:
-    """Fetch ETF holdings from BlackRock varnish API."""
-    info = ETF_PID_MAP[ticker]
-    pid = info["pid"]
-    fund_name = info["name"]
-    log.info("[ETF:%s] Fetching from BlackRock (pid=%s)...", ticker, pid)
+def _fetch_blackrock_holdings_rows(ticker: str, pid: str) -> list:
+    """Fetch a fund's Holdings worksheet from the BlackRock varnish API and
+    return it as a list of non-empty rows (each a list of cell strings)."""
+    log.info("[%s] Fetching from BlackRock (pid=%s)...", ticker, pid)
 
     api_url = (
         f"https://www.blackrock.com/varnish-api/blk-one01-product-data/"
@@ -250,6 +258,14 @@ def fetch_blackrock_etf_holdings(ticker: str) -> pd.DataFrame:
             cells.append(data_elem.text if data_elem is not None else None)
         if any(c for c in cells):
             rows_data.append(cells)
+    return rows_data
+
+
+def fetch_blackrock_etf_holdings(ticker: str) -> pd.DataFrame:
+    """Fetch equity ETF holdings from BlackRock varnish API."""
+    info = ETF_PID_MAP[ticker]
+    fund_name = info["name"]
+    rows_data = _fetch_blackrock_holdings_rows(ticker, info["pid"])
 
     # Find header row
     header_idx = None
@@ -326,6 +342,109 @@ def fetch_all_etf_holdings(only_tickers: list[str] | None = None) -> list[pd.Dat
             frames.append(fetch_blackrock_etf_holdings(ticker))
         except Exception as e:
             log.error("[ETF:%s] FAILED: %s", ticker, e)
+        time.sleep(BLACKROCK_SLEEP)
+    return frames
+
+
+def fetch_blackrock_bond_holdings(ticker: str) -> pd.DataFrame:
+    """Fetch fixed-income ETF holdings from BlackRock varnish API.
+
+    Bond funds' Holdings worksheet has no Ticker column (bonds are identified
+    by Name only) and carries bond-specific fields (Duration, YTM, Maturity,
+    Coupon, ...) instead of the equity layout's Ticker/Sector columns.
+    """
+    info = BOND_ETF_PID_MAP[ticker]
+    fund_name = info["name"]
+    rows_data = _fetch_blackrock_holdings_rows(ticker, info["pid"])
+
+    # Find header row (bond sheets have no "ticker" column, so key off Name +
+    # Weight + a bond-specific field instead)
+    header_idx = None
+    for i, row in enumerate(rows_data):
+        row_text = " ".join(str(c).lower() for c in row if c)
+        if "name" in row_text and "weight" in row_text and "maturity" in row_text:
+            header_idx = i
+            break
+    if header_idx is None:
+        raise RuntimeError(f"Could not find header row for {ticker}")
+
+    headers_row = [str(c).strip() for c in rows_data[header_idx]]
+    data_rows = rows_data[header_idx + 1:]
+    df = pd.DataFrame(data_rows, columns=headers_row[: len(headers_row)])
+
+    name_col = next((c for c in df.columns if c.lower() == "name"), df.columns[0])
+    sector_col = next((c for c in df.columns if c.lower() == "sector"), None)
+    asset_class_col = next((c for c in df.columns if "asset class" in c.lower()), None)
+    weight_col = next((c for c in df.columns if "weight" in c.lower()), None)
+    market_value_col = next((c for c in df.columns if c.lower() == "market value"), None)
+    par_value_col = next((c for c in df.columns if c.lower() == "par value"), None)
+    location_col = next((c for c in df.columns if c.lower() == "location"), None)
+    maturity_col = next((c for c in df.columns if c.lower() == "maturity"), None)
+    coupon_col = next((c for c in df.columns if "coupon" in c.lower()), None)
+    duration_col = next((c for c in df.columns if c.lower() == "duration"), None)
+    ytm_col = next((c for c in df.columns if c.lower() == "ytm (%)"), None)
+
+    # Cash/derivative sweep line has Asset Class == "Money Market" (real
+    # positions are "Fixed Income"); Sector == "Cash and/or Derivatives" too.
+    before = len(df)
+    if asset_class_col:
+        df = df[~df[asset_class_col].astype(str).str.contains(
+            "money market", case=False, na=False
+        )]
+    if sector_col:
+        df = df[~df[sector_col].astype(str).str.contains(
+            "cash and/or derivatives", case=False, na=False
+        )]
+    dropped = before - len(df)
+    if dropped > 0:
+        log.info("[BOND:%s] Filtered %d non-security rows (cash, etc.)", ticker, dropped)
+
+    maturity = pd.to_datetime(df[maturity_col], errors="coerce").dt.date if maturity_col else None
+
+    result = pd.DataFrame({
+        "snapshot_date": SNAPSHOT_DATE,
+        "fund_ticker": ticker,
+        "fund_name": fund_name,
+        "fund_cik": None,
+        "holding_ticker": None,  # bonds have no ticker in this feed
+        "holding_name": df[name_col].str.strip() if name_col else None,
+        "cusip": None,
+        "isin": None,
+        "figi": None,
+        "sedol": None,
+        "weight_pct": pd.to_numeric(df[weight_col], errors="coerce") if weight_col else None,
+        "market_value_usd": pd.to_numeric(df[market_value_col], errors="coerce") if market_value_col else None,
+        "shares_held": None,
+        "asset_category": df[asset_class_col].str.strip() if asset_class_col else None,
+        "sector": df[sector_col].str.strip() if sector_col else None,
+        "country": df[location_col].str.strip() if location_col else None,
+        "issuer_name": df[name_col].str.strip() if name_col else None,
+        "filing_date": None,
+        "reporting_period_end": None,
+        "par_value": pd.to_numeric(df[par_value_col], errors="coerce") if par_value_col else None,
+        "maturity_date": maturity,
+        "coupon_pct": pd.to_numeric(df[coupon_col], errors="coerce") if coupon_col else None,
+        "duration": pd.to_numeric(df[duration_col], errors="coerce") if duration_col else None,
+        "ytm_pct": pd.to_numeric(df[ytm_col], errors="coerce") if ytm_col else None,
+        "source": f"blackrock:{ticker}",
+        "fetched_at": FETCHED_AT,
+    })
+    log.info("[BOND:%s] Output: %d holdings", ticker, len(result))
+    return result
+
+
+def fetch_all_bond_etf_holdings(only_tickers: list[str] | None = None) -> list[pd.DataFrame]:
+    """Fetch holdings for fixed-income ETFs in BOND_ETF_PID_MAP."""
+    targets = only_tickers if only_tickers else list(BOND_ETF_PID_MAP.keys())
+    frames = []
+    for ticker in targets:
+        if ticker not in BOND_ETF_PID_MAP:
+            log.warning("[BOND:%s] Not in BOND_ETF_PID_MAP — skipping", ticker)
+            continue
+        try:
+            frames.append(fetch_blackrock_bond_holdings(ticker))
+        except Exception as e:
+            log.error("[BOND:%s] FAILED: %s", ticker, e)
         time.sleep(BLACKROCK_SLEEP)
     return frames
 
@@ -448,7 +567,7 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
 
     # Prepare DataFrame
     df = combined.copy()
-    for col in ["snapshot_date", "filing_date", "reporting_period_end"]:
+    for col in ["snapshot_date", "filing_date", "reporting_period_end", "maturity_date"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
     df["fetched_at"] = pd.Timestamp.now(tz="UTC")
@@ -476,6 +595,12 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
         pa.field("reporting_period_end", pa.date32(), nullable=True),
         pa.field("source", pa.string(), nullable=False),
         pa.field("fetched_at", pa.timestamp("us", tz="UTC"), nullable=False),
+        # Fixed-income fields (bond ETFs only; null for equity/mutual-fund rows)
+        pa.field("par_value", pa.float64(), nullable=True),
+        pa.field("maturity_date", pa.date32(), nullable=True),
+        pa.field("coupon_pct", pa.float64(), nullable=True),
+        pa.field("duration", pa.float64(), nullable=True),
+        pa.field("ytm_pct", pa.float64(), nullable=True),
     ])
 
     col_order = [f.name for f in arrow_schema]
@@ -547,8 +672,10 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
 def main(
     skip_etf: bool = False,
     skip_mf: bool = False,
+    skip_bonds: bool = False,
     etf_tickers: list[str] | None = None,
     mf_tickers: list[str] | None = None,
+    bond_tickers: list[str] | None = None,
 ):
     log.info("=" * 60)
     log.info("Fund Holdings Pipeline — %s", SNAPSHOT_DATE)
@@ -562,6 +689,13 @@ def main(
         frames.extend(fetch_all_etf_holdings(only_tickers=etf_tickers))
     else:
         log.info("--- Skipping ETF holdings ---")
+
+    # Fixed-income ETF holdings via BlackRock (separate parser, see BOND_ETF_PID_MAP)
+    if not skip_bonds:
+        log.info("--- Bond ETF Holdings (BlackRock varnish API) ---")
+        frames.extend(fetch_all_bond_etf_holdings(only_tickers=bond_tickers))
+    else:
+        log.info("--- Skipping bond ETF holdings ---")
 
     # Mutual fund holdings via EdgarTools
     if not skip_mf:
@@ -602,6 +736,11 @@ if __name__ == "__main__":
         help="Skip mutual fund holdings (EdgarTools N-PORT).",
     )
     parser.add_argument(
+        "--skip-bonds",
+        action="store_true",
+        help="Skip bond ETF holdings (BlackRock varnish API, BOND_ETF_PID_MAP).",
+    )
+    parser.add_argument(
         "--etf-tickers",
         nargs="+",
         default=None,
@@ -613,10 +752,18 @@ if __name__ == "__main__":
         default=None,
         help="Specific mutual fund tickers to fetch (default: all in MUTUAL_FUND_UNIVERSE).",
     )
+    parser.add_argument(
+        "--bond-tickers",
+        nargs="+",
+        default=None,
+        help="Specific bond ETF tickers to fetch (default: all in BOND_ETF_PID_MAP).",
+    )
     args = parser.parse_args()
     main(
         skip_etf=args.skip_etf,
         skip_mf=args.skip_mf,
+        skip_bonds=args.skip_bonds,
         etf_tickers=args.etf_tickers,
         mf_tickers=args.mf_tickers,
+        bond_tickers=args.bond_tickers,
     )

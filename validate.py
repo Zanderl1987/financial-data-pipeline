@@ -1140,8 +1140,14 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
     },
     "fund_holdings": {
+        # holding_ticker is NOT critical_nn: bond ETF rows (AGG/LQD/HYG/TIP)
+        # legitimately have no ticker in BlackRock's fixed-income feed (bonds
+        # are identified by holding_name + maturity_date/coupon_pct instead;
+        # see fund_holdings_pipeline.py's fetch_blackrock_bond_holdings). A
+        # single-file spot check on a bond-only raw file is 100% null on this
+        # column by design, not a broken pipeline.
         "required":    ['fund_ticker', 'holding_ticker', 'source', 'fetched_at'],
-        "critical_nn": ['fund_ticker', 'holding_ticker'],
+        "critical_nn": ['fund_ticker'],
         "date_col":    "snapshot_date",
     },
     "etf_holdings": {

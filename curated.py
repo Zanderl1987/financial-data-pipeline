@@ -105,7 +105,15 @@ KEYS: dict[str, list[str]] = {
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],
-    "fund_holdings":          ["fund_ticker", "holding_ticker", "snapshot_date"],
+    # Bond ETF rows have no holding_ticker (BlackRock's fixed-income sheets
+    # identify positions by name only) -- holding_ticker alone would collapse
+    # every bond in a fund to one row. holding_name/maturity_date/coupon_pct/
+    # par_value together are unique per position (verified against live AGG/
+    # LQD/HYG/TIP data, 2026-07-31); harmless no-ops for equity/MF rows since
+    # holding_ticker already disambiguates those and the added columns are
+    # consistently null within each real ticker's rows.
+    "fund_holdings":          ["fund_ticker", "holding_ticker", "holding_name",
+                                "maturity_date", "coupon_pct", "par_value", "snapshot_date"],
     "etf_holdings":           ["fund_ticker", "holding_ticker", "snapshot_date"],
     "identifier_map":         ["ticker"],
     # EIA refinery activity / crude trade
