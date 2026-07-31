@@ -35,6 +35,7 @@ class TestAnalyticsImports:
         from analytics import macro          # noqa: F401
         from analytics import sectors        # noqa: F401
         from analytics import short_interest # noqa: F401
+        from analytics import portfolio      # noqa: F401
 
 
 # ── Function signatures ────────────────────────────────────────────────────────
@@ -146,6 +147,33 @@ class TestFunctionSignatures:
         from analytics import short_vs_ftd
         assert "symbols" in self._sig(short_vs_ftd)
 
+    # portfolio
+    def test_sector_exposure_params(self):
+        from analytics import sector_exposure
+        assert "fund_ticker" in self._sig(sector_exposure)
+
+    def test_sector_overweight_params(self):
+        from analytics import sector_overweight
+        sig = self._sig(sector_overweight)
+        assert "fund_ticker" in sig
+        assert "benchmark_ticker" in sig
+
+    def test_top_holdings_params(self):
+        from analytics import top_holdings
+        sig = self._sig(top_holdings)
+        assert "fund_ticker" in sig
+        assert "n" in sig
+
+    def test_holdings_overlap_params(self):
+        from analytics import holdings_overlap
+        sig = self._sig(holdings_overlap)
+        assert "fund_a" in sig
+        assert "fund_b" in sig
+
+    def test_bond_duration_profile_params(self):
+        from analytics import bond_duration_profile
+        assert "fund_ticker" in self._sig(bond_duration_profile)
+
 
 # ── Return type: functions should return DataFrame, not raise, when table empty ─
 
@@ -190,6 +218,36 @@ class TestEmptyDataBehavior:
         from analytics import sector_performance
         result = sector_performance()
         assert isinstance(result, pd.DataFrame)
+
+    def test_sector_exposure_unknown_fund_returns_empty_df(self):
+        from analytics import sector_exposure
+        result = sector_exposure("ZZZZ_NOT_A_REAL_FUND")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_sector_overweight_unknown_fund_returns_empty_df(self):
+        from analytics import sector_overweight
+        result = sector_overweight("ZZZZ_NOT_A_REAL_FUND", "ZZZZ_ALSO_FAKE")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_top_holdings_unknown_fund_returns_empty_df(self):
+        from analytics import top_holdings
+        result = top_holdings("ZZZZ_NOT_A_REAL_FUND")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_holdings_overlap_unknown_fund_returns_empty_df(self):
+        from analytics import holdings_overlap
+        result = holdings_overlap("ZZZZ_NOT_A_REAL_FUND", "ZZZZ_ALSO_FAKE")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_bond_duration_profile_unknown_fund_returns_empty_df(self):
+        from analytics import bond_duration_profile
+        result = bond_duration_profile("ZZZZ_NOT_A_REAL_FUND")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
 
     def test_put_call_ratio_empty_returns_df(self):
         from analytics import put_call_ratio

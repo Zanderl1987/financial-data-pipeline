@@ -4,6 +4,7 @@ from .events import upcoming_earnings, insider_sentiment, earnings_surprise, div
 from .macro import rate_environment, inversion, credit_spreads
 from .sectors import sector_performance, sector_vs_spy, sector_rotation
 from .short_interest import squeeze_candidates, short_change, ftd_pressure, short_vs_ftd
+from .portfolio import sector_exposure, sector_overweight, top_holdings, holdings_overlap, bond_duration_profile
 from .features import feature_matrix
 from .signals import (
     signal_panel, rank_symbols, momentum, value, quality, low_volatility,
@@ -43,4 +44,9 @@ __all__ = [
     "short_change",
     "ftd_pressure",
     "short_vs_ftd",
+    "sector_exposure",
+    "sector_overweight",
+    "top_holdings",
+    "holdings_overlap",
+    "bond_duration_profile",
 ]
