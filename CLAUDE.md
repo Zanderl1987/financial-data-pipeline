@@ -67,6 +67,52 @@ just "exit 1". Individual pipeline `*.py` files have NOT been retrofitted to use
 level first; adopt it in a pipeline directly if you want persisted logs from a manual
 (non-`run_all.py`) run. Tests: `tests/test_logging.py`.
 
+## Iceberg tables (`constituents/`, `shipping/`) — local, regenerable state
+
+`storage/iceberg/` holds a few tables (fund_holdings, etf_holdings, securities,
+index_members, identifier_map, shipping_gscpi, shipping_freight_ppi) via a local
+PyIceberg SQL catalog (`storage/iceberg/constituents_catalog.db`, SQLite). As of
+2026-07-31, the metadata (`**/metadata/*.json`, `*.avro`) AND the catalog DB itself
+are gitignored, same as the parquet data — **the whole Iceberg warehouse is local,
+regenerable state, not git-synced**, matching `storage/raw/`.
+
+**Why**: a table's `location` is baked into its metadata at creation time as an
+absolute path. This machine has two clones of this repo (`PycharmProjects\
+financial-data-pipeline`, canonical, and a stale `C:\Users\zande\financial-data-
+pipeline`, see PROJECT_NOTES.md). `etf_holdings` was first created/populated from
+the other clone, then its small metadata files got git-committed and merged into
+this one — but the actual parquet data (gitignored, same as any raw table) never
+followed. The result: this clone's catalog *looked* fully populated (readable
+snapshot history, no errors) but every query against it silently returned zero
+rows, because the metadata pointed at a directory that only exists on the other
+machine/clone. Discovered + fixed 2026-07-31 (migrated the real 7,723-row dataset
+into this clone, recreated the table here, then gitignored metadata everywhere so
+this failure mode can't recur). If you ever see an Iceberg table with real-looking
+snapshot history but `query.py`/`validate.py` reads zero rows, check
+`table.location()` via pyiceberg against the clone you're actually in before
+assuming the data is gone — see `SESSION_NOTES_2026-07-30.md` session 2 for the
+full diagnostic trail.
+
+**Practical implications:**
+- A fresh clone (or the other machine's clone) starts with NO Iceberg data.
+  Table-creation scripts (`create_securities_table.py`, `create_shipping_tables.py`)
+  plus a real pipeline run are required to repopulate locally.
+- When writing to one of these tables per-partition in a loop (e.g. per
+  `fund_ticker`), batch all `overwrite()`/`append()` calls into a single
+  `with table.transaction() as txn:` block. One `table.overwrite()` per item
+  in a loop creates one new `metadata.json` snapshot version PER ITEM per run —
+  `fund_holdings` hit 467 metadata files this way after only a handful of runs
+  before being fixed. See `fund_holdings_pipeline.py`/`etf_holdings_pipeline.py`'s
+  `write_to_iceberg()` and `iceberg_utils.expire_old_snapshots()` (called after
+  every write, retains 30 days of snapshot history — trims the logical snapshot
+  log, though pyiceberg 0.11.1's Python client has no on-disk orphan-file GC yet,
+  so it doesn't reclaim old data/manifest files already written).
+- The Bash tool's working directory persists across tool calls in a session. A
+  stray `cd` into the other clone (e.g. to check its git log) will silently
+  redirect every subsequent *relative*-path command to the wrong repo. Use
+  absolute paths for any command touching Iceberg state if there's been a `cd`
+  earlier in the session, or re-run `pwd` before trusting a "this repo" result.
+
 ## Adding a new pipeline — wiring checklist
 
 1. Standalone `<name>_pipeline.py` at repo root. Free/public sources only.

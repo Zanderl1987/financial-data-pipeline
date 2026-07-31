@@ -26,5 +26,13 @@ storage/eval_registry/
 storage/logs/
 logs/
 
+# Iceberg tables (constituents/, shipping/): metadata + catalog DB are local,
+# regenerable state, same as storage/raw/ -- NOT git-synced. Baking an absolute
+# clone-specific path into a table's metadata and then syncing only the metadata
+# (never the gitignored *.parquet data) via git produces a "phantom" table that
+# looks populated but reads zero rows from any other clone. See CLAUDE.md.
+storage/iceberg/**/metadata/
+storage/iceberg/constituents_catalog.db
+
 # Regenerable progress state for the long-running universe backfill
 schwab_universe_backfill_progress.json

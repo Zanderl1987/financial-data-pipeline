@@ -413,22 +413,37 @@ def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
         log.error("[Iceberg] Arrow schema conversion failed: %s", e)
         return 0
 
+    # Batched into a single transaction so one pipeline run produces one new
+    # metadata.json version instead of one per fund_ticker (see fund_holdings_
+    # pipeline.py's write_to_iceberg for the same fix and why it matters).
     total_written = 0
     write_errors = []
-    for fund_ticker in sorted(df["fund_ticker"].unique()):
-        try:
-            fund_df = arrow_table.filter(
-                pa.compute.equal(arrow_table.column("fund_ticker"), fund_ticker)
-            )
-            table.overwrite(fund_df, overwrite_filter=EqualTo("fund_ticker", fund_ticker))
-            total_written += len(fund_df)
-            log.info("[Iceberg]   %s: %d rows written", fund_ticker, len(fund_df))
-        except Exception as e:
-            log.error("[Iceberg]   %s: write FAILED: %s", fund_ticker, e)
-            write_errors.append(fund_ticker)
+    try:
+        with table.transaction() as txn:
+            for fund_ticker in sorted(df["fund_ticker"].unique()):
+                try:
+                    fund_df = arrow_table.filter(
+                        pa.compute.equal(arrow_table.column("fund_ticker"), fund_ticker)
+                    )
+                    txn.overwrite(fund_df, overwrite_filter=EqualTo("fund_ticker", fund_ticker))
+                    total_written += len(fund_df)
+                    log.info("[Iceberg]   %s: %d rows staged", fund_ticker, len(fund_df))
+                except Exception as e:
+                    log.error("[Iceberg]   %s: write FAILED: %s", fund_ticker, e)
+                    write_errors.append(fund_ticker)
+    except Exception as e:
+        log.error("[Iceberg] Transaction commit FAILED: %s", e)
+        return 0
 
     if write_errors:
         log.warning("[Iceberg] Write errors (%d): %s", len(write_errors), ", ".join(write_errors))
+
+    try:
+        from iceberg_utils import expire_old_snapshots
+        table.refresh()
+        expire_old_snapshots(table, retain_days=30, log=log)
+    except Exception as e:
+        log.warning("[Iceberg] Snapshot expiration failed (non-fatal): %s", e)
 
     if total_written > 0:
         log.info("[Iceberg] Partial written: %d rows",
