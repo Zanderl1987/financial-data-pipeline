@@ -19,9 +19,15 @@
 
 ## Backlog
 
-- [ ] **`finra_short_interest` rewrite** — found a real keyless replacement
-      (`api.finra.org/data/group/otcMarket/name/equityShortInterest`), not yet implemented.
-      See SESSION_NOTES_2026-08-01.md item 7.
+- [x] **`finra_short_interest` rewrite — RULED OUT (2026-08-02)**: the keyless
+      `api.finra.org/data/group/otcMarket/name/equityShortInterest` endpoint flagged
+      2026-08-01 turned out to be OTC/pink-sheet-scoped, not NMS — verified live,
+      AAPL/MSFT/TSLA/SPY all return 204 (no rows). The real NMS-consolidated dataset
+      (what `short_pressure` actually needs, matching the old dead CNMSshvol CDN file)
+      lives at `equityMarket/equityShortInterest`, confirmed 401 keyless — still needs
+      registered FINRA Query API credentials from developer.finra.org, unchanged from
+      the 2026-07-06 finding. No further action without those credentials; yfinance
+      fallback in `analytics/features.py` remains the correct active source.
 - [ ] **`open_meteo_pipeline.py --backfill`** — needs date-range chunking to fit Open-Meteo's
       per-request size cap (35yr x 5 locations x 11 vars in one call is too much).
 - [ ] **BLS retry** — `bls_oes_qcew_pipeline.py`/`bls_expansion_pipeline.py` hit daily quota

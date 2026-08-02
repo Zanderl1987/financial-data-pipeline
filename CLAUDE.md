@@ -193,6 +193,11 @@ full diagnostic trail.
   `analytics/features.py` now falls back to the yfinance `short_interest` snapshot table
   (same biweekly filing, watchlist-only coverage) — keep running the pipeline daily so
   filing dates accumulate. Registering FINRA API credentials would restore full-market data.
+  **Re-confirmed 2026-08-02**: the keyless `api.finra.org/data/group/otcMarket/name/
+  equityShortInterest` endpoint (found 2026-08-01, used successfully for `dark_pool_volume`)
+  is OTC-scoped, not NMS — verified live, AAPL/MSFT/TSLA/SPY all return 204. The NMS-scoped
+  `equityMarket/equityShortInterest` (what this factor actually needs) is 401 keyless. No
+  keyless path exists; registered credentials remain the only fix.
 - `sentiment` factor ACTIVE (2026-07-06): `news_sentiment_pipeline.py` rewritten to local
   VADER + finance lexicon (no ANTHROPIC_API_KEY needed; deterministic, free). Backfilled
   1,235 articles. `fed_sentiment_pipeline.py` still requires ANTHROPIC_API_KEY (Claude API).
