@@ -106,10 +106,10 @@ NUCLEAR_DATA_FIELDS = ["capacity", "outage-mwg", "percent"]
 # Frequency: annual
 # ---------------------------------------------------------------------------
 COAL_PROD_RANKS: dict[str, str] = {
-    "an": "Anthracite",
-    "bi": "Bituminous",
-    "sb": "Subbituminous",
-    "li": "Lignite",
+    "ANT": "Anthracite",
+    "BIT": "Bituminous",
+    "SUB": "Subbituminous",
+    "LIG": "Lignite",
 }
 
 COAL_PROD_TYPES: dict[str, str] = {
@@ -179,30 +179,6 @@ INTL_UNITS: dict[str, str] = {
 # State Energy Data System -- SEDS (route: seds)
 # Frequency: annual; ~3 year lag
 # ---------------------------------------------------------------------------
-SEDS_FUELS: dict[str, str] = {
-    "ALL": "All Fuels",
-    "FOS": "Fossil Fuels",
-    "COL": "Coal",
-    "NG":  "Natural Gas",
-    "OIL": "Petroleum",
-    "NUG": "Non-Combustible Renewables",
-    "HYC": "Hydroelectric",
-    "SUN": "Solar",
-    "WND": "Wind",
-    "GEO": "Geothermal",
-    "NUC": "Nuclear",
-    "BM":  "Biomass",
-}
-
-SEDS_SECTORS: dict[str, str] = {
-    "FIN": "Final Consumption (Total)",
-    "RES": "Residential",
-    "COM": "Commercial",
-    "IND": "Industrial",
-    "TRA": "Transportation",
-    "ELE": "Electric Power",
-}
-
 SEDS_STATES = [
     "US",
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL",
@@ -299,12 +275,12 @@ def fetch_electricity_generation(start_date: str | None = None) -> pd.DataFrame:
             "api_key":            EIA_API_KEY,
             "data[]":             "generation",
             "frequency":          "monthly",
-            "facets[sectorId][]": "99",      # Total Electric Power sector
-            "facets[stateid][]":  "US",      # national total
+            "facets[sectorid][]": "99",      # Total Electric Power sector
+            "facets[location][]": "US",      # national total
             "sort[0][column]":    "period",
             "sort[0][direction]": "asc",
         },
-        list_params={"facets[fuel2002][]": list(ELEC_GEN_FUELS.keys())},
+        list_params={"facets[fueltypeid][]": list(ELEC_GEN_FUELS.keys())},
         start_date=start_date,
         label="elec_gen",
     )
@@ -312,14 +288,15 @@ def fetch_electricity_generation(start_date: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df = df.rename(columns={"period": "date", "fuel2002": "fuel_code"})
+    df = df.rename(columns={"period": "date", "fueltypeid": "fuel_code",
+                             "generation": "value"})
     if "value" not in df.columns:
         print(f"  Warning: no 'value' column in EIA response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
     df["value"]      = pd.to_numeric(df["value"], errors="coerce")
     df["fuel_name"]  = df["fuel_code"].map(ELEC_GEN_FUELS)
-    df["state"]      = df.get("stateid", "US")
+    df["state"]      = df.get("location", "US")
     df["sector"]     = "Total Electric Power"
     df["units"]      = "Megawatthours"
     df["frequency"]  = "monthly"
@@ -360,20 +337,24 @@ def fetch_electricity_sales(start_date: str | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df = df.rename(columns={"period": "date", "sectorid": "sector_code"})
-    if "value" not in df.columns:
-        print(f"  Warning: no 'value' column in EIA retail-sales response (columns: {list(df.columns)[:10]})")
+    # Wide response: sales/revenue/price come back as separate columns, not a
+    # single "value" column -- "sales" (volume, MkWh) is the headline metric.
+    if "sales" not in df.columns:
+        print(f"  Warning: no 'sales' column in EIA retail-sales response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
     df["date"]        = pd.to_datetime(df["date"], errors="coerce")
-    df["value"]       = pd.to_numeric(df["value"], errors="coerce")
+    df["value"]       = pd.to_numeric(df["sales"], errors="coerce")
+    df["revenue"]     = pd.to_numeric(df.get("revenue"), errors="coerce")
+    df["price"]       = pd.to_numeric(df.get("price"), errors="coerce")
     df["sector_name"] = df["sector_code"].map(ELEC_SALES_SECTORS)
-    df["state_name"]  = df.get("stateid", "")
-    df["units"]       = df.get("units", "Million Kilowatthours")
+    df["state_name"]  = df.get("stateDescription", "")
+    df["units"]       = "Million Kilowatthours"
     df["frequency"]   = "monthly"
     df["source"]      = "EIA"
     df["fetched_at"]  = datetime.datetime.utcnow().isoformat()
 
     keep = ["date", "stateid", "state_name", "sector_code", "sector_name",
-            "value", "units", "frequency", "source", "fetched_at"]
+            "value", "revenue", "price", "units", "frequency", "source", "fetched_at"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["date", "value"])
     return df.sort_values(["stateid", "sector_code", "date"]).reset_index(drop=True)
@@ -394,7 +375,7 @@ def fetch_nuclear_outages(start_date: str | None = None) -> pd.DataFrame:
             "sort[0][direction]": "asc",
         },
         list_params={
-            "data[]": ["capacity", "outage-mwg", "percent"],
+            "data[]": ["capacity", "outage", "percentOutage"],
         },
         start_date=start_date,
         label="nuclear",
@@ -404,17 +385,23 @@ def fetch_nuclear_outages(start_date: str | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df = df.rename(columns={"period": "date"})
-    if "value" not in df.columns:
-        print(f"  Warning: no 'value' column in EIA nuclear response (columns: {list(df.columns)[:10]})")
+    # This dataset returns capacity/outage/percentOutage as separate columns per
+    # row (not the usual single "value" column) -- "outage" (MW offline) is the
+    # headline metric, so it maps to "value"; capacity/percent kept alongside.
+    if "outage" not in df.columns:
+        print(f"  Warning: no 'outage' column in EIA nuclear response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
-    df["date"]       = pd.to_datetime(df["date"], errors="coerce")
-    df["value"]      = pd.to_numeric(df["value"], errors="coerce")
+    df["date"]            = pd.to_datetime(df["date"], errors="coerce")
+    df["value"]            = pd.to_numeric(df["outage"], errors="coerce")
+    df["capacity_mw"]      = pd.to_numeric(df.get("capacity"), errors="coerce")
+    df["percent_outage"]   = pd.to_numeric(df.get("percentOutage"), errors="coerce")
     df["state"]      = "US"
     df["frequency"]  = "daily"
     df["source"]     = "EIA"
     df["fetched_at"] = datetime.datetime.utcnow().isoformat()
 
-    keep = ["date", "state", "value", "units", "frequency", "source", "fetched_at"]
+    keep = ["date", "state", "value", "capacity_mw", "percent_outage",
+            "units", "frequency", "source", "fetched_at"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["date", "value"])
     return df.sort_values("date").reset_index(drop=True)
@@ -435,7 +422,7 @@ def fetch_coal_production(start_date: str | None = None) -> pd.DataFrame:
             "sort[0][column]":    "period",
             "sort[0][direction]": "asc",
         },
-        list_params={"facets[coalRank][]": list(COAL_PROD_RANKS.keys())},
+        list_params={"facets[coalRankId][]": list(COAL_PROD_RANKS.keys())},
         start_date=start_date,
         label="coal_prod",
     )
@@ -443,15 +430,16 @@ def fetch_coal_production(start_date: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df = df.rename(columns={"period": "date", "coalRank": "rank_code"})
+    df = df.rename(columns={"period": "date", "coalRankId": "rank_code",
+                             "production": "value"})
     if "value" not in df.columns:
         print(f"  Warning: no 'value' column in EIA coal-production response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
     df["value"]      = pd.to_numeric(df["value"], errors="coerce")
     df["rank_name"]  = df["rank_code"].map(COAL_PROD_RANKS)
-    df["mine_type"]  = df.get("mineType", "")
-    df["state"]      = df.get("stateId", "")
+    df["mine_type"]  = df.get("mineTypeId", "")
+    df["state"]      = df.get("stateRegionId", "")
     df["units"]      = "Short Tons"
     df["frequency"]  = "annual"
     df["source"]     = "EIA"
@@ -489,24 +477,29 @@ def fetch_coal_trade(start_date: str | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df = df.rename(columns={"period": "date"})
-    if "value" not in df.columns:
-        print(f"  Warning: no 'value' column in EIA coal-trade response (columns: {list(df.columns)[:10]})")
+    # Wide response: quantity/price come back as separate columns, not a single
+    # "value" column -- "quantity" (short tons) is the headline metric. There's
+    # no separate destination/origin pair either, just one countryId plus an
+    # exportImportType flag distinguishing the flow direction.
+    if "quantity" not in df.columns:
+        print(f"  Warning: no 'quantity' column in EIA coal-trade response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
-    df["date"]       = pd.to_datetime(df["date"], errors="coerce")
-    df["value"]      = pd.to_numeric(df["value"], errors="coerce")
-    df["destination"] = df.get("destinationCountryId", "")
-    df["origin"]     = df.get("originCountryId", "")
-    df["coal_rank"]  = df.get("coalRank", "")
-    df["units"]      = df.get("units", "Short Tons")
-    df["frequency"]  = "annual"
-    df["source"]     = "EIA"
-    df["fetched_at"] = datetime.datetime.utcnow().isoformat()
+    df["date"]        = pd.to_datetime(df["date"], errors="coerce")
+    df["value"]        = pd.to_numeric(df["quantity"], errors="coerce")
+    df["price"]        = pd.to_numeric(df.get("price"), errors="coerce")
+    df["flow_type"]     = df.get("exportImportType", "")
+    df["country"]       = df.get("countryDescription", df.get("countryId", ""))
+    df["coal_rank"]     = df.get("coalRankId", "")
+    df["units"]         = "Short Tons"
+    df["frequency"]      = "annual"
+    df["source"]         = "EIA"
+    df["fetched_at"]     = datetime.datetime.utcnow().isoformat()
 
-    keep = ["date", "destination", "origin", "coal_rank",
-            "value", "units", "frequency", "source", "fetched_at"]
+    keep = ["date", "flow_type", "country", "coal_rank",
+            "value", "price", "units", "frequency", "source", "fetched_at"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["date", "value"])
-    return df.sort_values(["destination", "origin", "date"]).reset_index(drop=True)
+    return df.sort_values(["flow_type", "country", "date"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -572,15 +565,13 @@ def fetch_seds(start_date: str | None = None) -> pd.DataFrame:
         "seds/data/",
         base_params={
             "api_key":            EIA_API_KEY,
+            "data[]":             "value",
             "frequency":          "annual",
             "sort[0][column]":    "period",
             "sort[0][direction]": "asc",
         },
         list_params={
-            "data[]":             ["producer", "consumption"],
             "facets[stateId][]":  SEDS_STATES,
-            "facets[fuelId][]":   ["ALL", "FOS", "COL", "NG", "OIL", "NUC"],
-            "facets[sectorId][]": ["FIN", "RES", "COM", "IND", "TRA", "ELE"],
         },
         start_date=start_date,
         label="seds",
@@ -589,22 +580,29 @@ def fetch_seds(start_date: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df = df.rename(columns={"period": "date", "fuelId": "fuel_code",
-                             "sectorId": "sector_code", "stateId": "state_code"})
+    # This dataset's real facets are only seriesId/stateId (no fuelId/sectorId --
+    # those don't exist on this endpoint, confirmed live 2026-08-01). seriesId is
+    # EIA's 5-char MSN mnemonic (e.g. "ABICB"); positions 1-2/3-4 are a fuel/sector
+    # code pair by EIA convention, but decoding them accurately needs EIA's full
+    # published MSN reference table, which isn't reproduced here -- fuel_code/
+    # sector_code below are a best-effort raw prefix split (grouping key), not an
+    # authoritative decode. seriesDescription carries the real human-readable label.
+    df = df.rename(columns={"period": "date", "stateId": "state_code",
+                             "seriesId": "series_id", "seriesDescription": "series_description"})
     if "value" not in df.columns:
         print(f"  Warning: no 'value' column in EIA SEDS response (columns: {list(df.columns)[:10]})")
         return pd.DataFrame()
     df["date"]        = pd.to_datetime(df["date"], errors="coerce")
     df["value"]       = pd.to_numeric(df["value"], errors="coerce")
-    df["fuel_name"]   = df["fuel_code"].map(SEDS_FUELS)
-    df["sector_name"] = df["sector_code"].map(SEDS_SECTORS)
-    df["units"]       = df.get("units", "Quadrillion Btu")
+    df["fuel_code"]   = df["series_id"].str[:2]
+    df["sector_code"] = df["series_id"].str[2:4]
+    df["units"]       = df.get("unit", "")
     df["frequency"]   = "annual"
     df["source"]      = "EIA"
     df["fetched_at"]  = datetime.datetime.utcnow().isoformat()
 
-    keep = ["date", "state_code", "fuel_code", "fuel_name",
-            "sector_code", "sector_name", "value", "units",
+    keep = ["date", "state_code", "fuel_code", "sector_code", "series_id",
+            "series_description", "value", "units",
             "frequency", "source", "fetched_at"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["date", "value"])

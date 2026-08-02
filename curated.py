@@ -56,6 +56,8 @@ _BOOKKEEPING = {"fetched_at", "year", "month"}
 # later runs collapse to one, which already removes the bulk of the redundancy
 # without risking data loss from a wrong key guess.
 KEYS: dict[str, list[str]] = {
+    # Fed SOMA holdings — one row per security per weekly report
+    "fed_soma":               ["as_of_date", "cusip"],
     # Equity / ETF prices — one bar per symbol per day
     "prices":                 ["symbol", "date"],
     "tiingo_prices":          ["symbol", "date"],
@@ -166,9 +168,9 @@ KEYS: dict[str, list[str]] = {
     "eia_electricity_sales":       ['date', 'stateid', 'sector_code'],
     "eia_nuclear_outages":         ['date'],
     "eia_coal_production":         ['date', 'rank_code', 'mine_type', 'state'],
-    "eia_coal_trade":              ['date', 'destination', 'origin', 'coal_rank'],
+    "eia_coal_trade":              ['date', 'flow_type', 'country', 'coal_rank'],
     "eia_international":           ['date', 'activity_code', 'product_code', 'country_code'],
-    "eia_seds":                    ['date', 'state_code', 'fuel_code', 'sector_code'],
+    "eia_seds":                    ['date', 'state_code', 'series_id'],
     "eia_petroleum_spot_prices":    ['date', 'product_code', 'location_code'],
     "eia_petroleum_futures":        ['date', 'product_code'],
     "eia_refiner_margins":          ['date', 'series_code'],
@@ -218,8 +220,11 @@ KEYS: dict[str, list[str]] = {
     "retail_sentiment":                ['message_id'],
     "retail_sentiment_daily":          ['date', 'symbol'],
     "insider_sentiment":               ['accession_number'],
-    # dark_pool_volume omitted — FINRA response schema not yet verified against a
-    # live pull, so it falls back to safe full-row dedup rather than risking a
+    # dark_pool_volume omitted — schema verified live 2026-08-01 (rewritten pipeline,
+    # see dark_pool_pipeline.py), but (trade_date, MPID, tierIdentifier,
+    # summaryTypeCode, issueSymbolIdentifier) still isn't fully unique (~12% residual
+    # dupes, likely revised/re-reported weeks with no distinguishing revision column
+    # in the response). Falls back to safe full-row dedup rather than risking a
     # wrong natural-key guess.
     "indeed_job_postings_national":    ['date', 'variable'],
     "indeed_job_postings_sector":      ['date', 'sector', 'variable'],
@@ -239,8 +244,12 @@ def _curated_path(table: str) -> str:
 # pushed it to 47M+ raw rows -- these use a DuckDB-native window-function dedup
 # instead, which streams/spills instead of holding everything in memory at once.
 # Requires a fully-specified KEYS entry (no full-row-fallback support) and a
-# `fetched_at` column to order by.
-_LARGE_TABLES = {"prices"}
+# `fetched_at` column to order by. `fed_soma` added 2026-08-01: its 30.8M raw
+# rows live in just 2 parquet files, so the plain pandas path was fully
+# materializing + drop_duplicates-ing the whole thing in memory every run --
+# minutes of dead time on every `curated.py` invocation, not just the rare
+# full-backfill case `prices` was added for.
+_LARGE_TABLES = {"prices", "fed_soma"}
 
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":

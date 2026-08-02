@@ -1070,8 +1070,8 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "eia_coal_trade": {
-        "required":    ['date', 'destination', 'origin', 'coal_rank', 'value', 'fetched_at'],
-        "critical_nn": ['date', 'destination', 'origin', 'coal_rank'],
+        "required":    ['date', 'flow_type', 'country', 'coal_rank', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'flow_type', 'country', 'coal_rank'],
         "date_col":    "date",
     },
     "eia_international": {
@@ -1080,8 +1080,8 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "eia_seds": {
-        "required":    ['date', 'state_code', 'fuel_code', 'sector_code', 'value', 'fetched_at'],
-        "critical_nn": ['date', 'state_code', 'fuel_code', 'sector_code'],
+        "required":    ['date', 'state_code', 'series_id', 'value', 'fetched_at'],
+        "critical_nn": ['date', 'state_code', 'series_id'],
         "date_col":    "date",
     },
     "eia_petroleum_spot_prices": {

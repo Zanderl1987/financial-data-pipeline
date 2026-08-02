@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """
-Dark Pool (ATS) Volume Pipeline — FINRA OTC Transparency.
+Dark Pool (ATS) Volume Pipeline — FINRA weekly ATS/OTC summary.
 
-Fetches aggregate dark pool / ATS trading volume data from FINRA's OTC
-Transparency API. No API key required.
+Fetches aggregate weekly dark pool / ATS trading volume per market
+participant (firm) from FINRA's public data-group API. No API key required.
 
-Source: https://otctransparency.finra.org
+Rewritten 2026-08-01: the old otctransparency.finra.org REST path now serves
+the site's Angular SPA shell (HTTP 200, text/html) instead of JSON for every
+request -- FINRA retired that endpoint and moved this dataset behind
+api.finra.org's data-group gateway (dataset "weeklySummary" in group
+"otcMarket"), which is POST-based, keyless, and paginated (max 5,000 rows
+per request via limit/offset).
+
+Source: https://api.finra.org/data/group/otcMarket/name/weeklySummary
 
 CLI:
   python dark_pool_pipeline.py             # incremental (last 30 days)
@@ -28,16 +35,17 @@ from storage_utils import write_partitioned
 load_dotenv()
 
 OUTPUT_DIR = os.path.join("storage", "raw", "dark_pool")
-BASE_URL = "https://otctransparency.finra.org/otc/transparency/api/daily/aggregate"
-REQUEST_INTERVAL = 1.0
+BASE_URL = "https://api.finra.org/data/group/otcMarket/name/weeklySummary"
+PAGE_LIMIT = 5000
+REQUEST_INTERVAL = 0.5
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 60
 
 
-def _get_with_backoff(url: str, params) -> requests.Response | None:
+def _post_with_backoff(url, body):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            r = requests.get(url, params=params, timeout=30)
+            r = requests.post(url, json=body, headers={"Accept": "application/json"}, timeout=30)
             if r.status_code == 200:
                 return r
             if r.status_code == 429:
@@ -54,30 +62,34 @@ def _get_with_backoff(url: str, params) -> requests.Response | None:
     return None
 
 
-def fetch_dark_pool_data(trade_date=None):
-    """Fetch dark pool volume data for a given date from the FINRA OTC Transparency API."""
-    params = {}
-    if trade_date:
-        params["startDate"] = trade_date
-        params["endDate"] = trade_date
-    return _get_with_backoff(BASE_URL, params)
-
-
-def parse_response(raw_resp, trade_date):
-    """Parse raw response into a list of row dicts."""
-    if raw_resp is None:
-        return []
-    try:
-        body = raw_resp.json()
-    except Exception:
-        return []
-
+def fetch_weekly_summary(start_date, end_date):
+    """Paginate through weeklySummary for [start_date, end_date], both YYYY-MM-DD."""
     records = []
-    data = body if isinstance(body, list) else body.get("data", [])
-    for record in data:
-        if isinstance(record, dict):
-            record["trade_date"] = trade_date
-            records.append(record)
+    offset = 0
+    while True:
+        body = {
+            "limit": PAGE_LIMIT,
+            "offset": offset,
+            "dateRangeFilters": [
+                {"fieldName": "weekStartDate", "startDate": start_date, "endDate": end_date}
+            ],
+        }
+        resp = _post_with_backoff(BASE_URL, body)
+        if resp is None:
+            break
+        try:
+            page = resp.json()
+        except Exception:
+            break
+        if not page:
+            break
+        records.extend(page)
+        total = int(resp.headers.get("record-total", len(records)))
+        print(f"    {len(records):,}/{total:,} rows...")
+        if len(page) < PAGE_LIMIT or len(records) >= total:
+            break
+        offset += PAGE_LIMIT
+        time.sleep(REQUEST_INTERVAL)
     return records
 
 
@@ -95,21 +107,13 @@ def main(backfill=False):
     print(f"Dark Pool Pipeline  mode={mode}")
     print(f"Date range: {start_date} to {end_date}")
 
-    all_records = []
-    current = start_date
-    while current <= end_date:
-        if current.weekday() < 5:
-            raw = fetch_dark_pool_data(current.isoformat())
-            records = parse_response(raw, current.isoformat())
-            all_records.extend(records)
-        current += datetime.timedelta(days=1)
-        time.sleep(REQUEST_INTERVAL)
-
-    if not all_records:
+    records = fetch_weekly_summary(start_date.isoformat(), end_date.isoformat())
+    if not records:
         print("[!] No dark pool data returned.")
         return
 
-    df = pd.DataFrame(all_records)
+    df = pd.DataFrame(records)
+    df = df.rename(columns={"weekStartDate": "trade_date"})
     df["fetched_at"] = fetched_at
 
     path = write_partitioned(
@@ -120,7 +124,7 @@ def main(backfill=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="FINRA dark pool (ATS) volume data pipeline")
+    parser = argparse.ArgumentParser(description="FINRA weekly ATS/dark-pool volume pipeline")
     parser.add_argument("--backfill", action="store_true", help="Full year of history")
     args = parser.parse_args()
     main(backfill=args.backfill)

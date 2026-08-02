@@ -42,6 +42,7 @@ Note: Finviz provides 15-minute delayed quotes on the free tier.
 
 import argparse
 import datetime
+import io
 import os
 import re
 import time
@@ -144,27 +145,34 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 
 def _find_table_with_col(html: str, col_name: str) -> pd.DataFrame:
     """
-    Parse all HTML tables and return the first one that contains col_name
-    as a column header.  Uses pd.read_html so no extra deps are needed.
+    Parse all HTML tables and return the LARGEST one that contains col_name
+    as a column header.  The page now includes several small widget tables
+    (e.g. a "recent tickers" strip) that also carry a Ticker column ahead of
+    the real results grid in document order, so picking the first match is
+    no longer safe -- the real data table is reliably the one with the most
+    rows.  Uses pd.read_html so no extra deps are needed.
     """
     try:
-        tables = pd.read_html(html, match=col_name)
+        tables = pd.read_html(io.StringIO(html), match=col_name)
     except Exception:
         return pd.DataFrame()
 
+    best = pd.DataFrame()
     for df in tables:
         # read_html may use MultiIndex columns; flatten to strings
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [" ".join(str(c) for c in col).strip() for col in df.columns]
         df.columns = df.columns.astype(str)
-        if col_name in df.columns:
-            # Drop the row-number column Finviz includes
-            df = df.drop(columns=[c for c in df.columns if c in ("No.", "")], errors="ignore")
-            # Drop fully-NaN rows (Finviz often adds spacer rows)
-            df = df.dropna(how="all").reset_index(drop=True)
-            return df
+        if col_name not in df.columns:
+            continue
+        # Drop the row-number column Finviz includes
+        df = df.drop(columns=[c for c in df.columns if c in ("No.", "")], errors="ignore")
+        # Drop fully-NaN rows (Finviz often adds spacer rows)
+        df = df.dropna(how="all").reset_index(drop=True)
+        if len(df) > len(best):
+            best = df
 
-    return pd.DataFrame()
+    return best
 
 
 def _get_screener_total(html: str) -> int:

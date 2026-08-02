@@ -149,10 +149,29 @@ full diagnostic trail.
 ## Known-broken / dead ends (don't re-attempt without a new angle)
 
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything; needs a replacement source.
+  Affects `market_valuation`/`treasury_yield_curve` CATALOG tables (still NO DATA).
 - USDA_NASS keys in .env return 401 (need fresh key); CENSUS_API_KEY not set.
 - Baker Hughes rig count (JS SPA), AAR rail traffic (member-gated), Stooq (JS proof-of-work),
   Motley Fool transcripts (ToS prohibits scraping) — all ruled out.
 - IEX_CLOUD_API_KEY is dead (service shut down 2025).
+- **Finnhub free tier tightened sometime before 2026-08-01** — many endpoints that used to
+  work now 403 with `"You don't have access to this resource."`, confirmed across 3
+  independent pipelines: `dividend_pipeline.py` (`/stock/dividend2`, ALL 30 symbols),
+  `finnhub_expansion_pipeline.py` (esg/congressional-trading/supply-chain/social-sentiment/
+  earnings-quality-score/lobbying/usa-spending/uspto-patents/visa-applications/
+  economic-calendar — 10 of 12 endpoints), `finnhub_fundamentals_pipeline.py`
+  (`/stock/transcripts/list`, likely also eps/revenue estimates, ownership, splits,
+  executives, filing-sentiment, company-news-sentiment — not individually reconfirmed).
+  Only `insider_sentiment`/`sec_filings` (from expansion) still work on the free key.
+  Not a code bug — needs a paid Finnhub plan to restore, or drop these CATALOG tables.
+- **Tiingo corporate-actions add-on is not on the free/Power plan** — `/tiingo/
+  corporate-actions/<symbol>/distributions` and `/splits` 403 "symbol likely lacks
+  corporate actions add-on entitlement" for every symbol (confirmed 2026-08-01). The
+  sibling `/distributions-yield` (no add-on gate) still works fine — that's the only
+  live sub-table of `tiingo_corporate_actions_*`.
+- Congressional trades (`congressional_trades_pipeline.py`) — both House and Senate
+  disclosure aggregator endpoints 403 (confirmed again 2026-08-01, same as 07-23);
+  looks like anti-bot hardening on the source site, not a URL/param bug.
 
 ## Where deeper knowledge lives
 

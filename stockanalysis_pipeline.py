@@ -49,6 +49,7 @@ Outputs
 
 import argparse
 import datetime
+import io
 import os
 import time
 
@@ -182,7 +183,7 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 def _parse_tables(html: str) -> list[pd.DataFrame]:
     """Return all non-empty HTML tables with flattened string column names."""
     try:
-        raw = pd.read_html(html)
+        raw = pd.read_html(io.StringIO(html))
     except Exception:
         return []
     result = []
@@ -490,6 +491,10 @@ def _fetch_one_financial(symbol: str, url_suffix: str) -> pd.DataFrame:
             if first_col_text_ratio < 0.6:
                 continue
             df.columns = ["metric"] + list(df.columns[1:])
+            # Some period tables repeat a date-column header (e.g. an overlapping
+            # TTM column) -- dedupe here so the eventual cross-symbol concat can't
+            # inherit a duplicate column name from any single symbol/period.
+            df = df.loc[:, ~df.columns.duplicated()]
             df["symbol"]      = symbol.upper()
             df["period_type"] = period
             frames.append(df)
@@ -534,6 +539,11 @@ def run_financials(symbols: list[str]) -> None:
 
         combined = pd.concat(stmt_frames, ignore_index=True)
         combined = _normalize_cols(combined)
+        # _normalize_cols can collapse two originally-distinct raw headers (e.g.
+        # differing only in punctuation/whitespace) into the same string, which
+        # pyarrow then rejects as a duplicate column name at write time.
+        combined = combined.loc[:, ~combined.columns.duplicated()]
+        combined = _coerce_numerics(combined)
         path     = write_partitioned(
             combined, out_dir, f"sa_{stmt_name}_{today_str}.parquet"
         )
