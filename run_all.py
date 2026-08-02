@@ -796,7 +796,7 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="schwab_quotes",
         file="schwab_quotes_pipeline.py",
-        desc="Schwab real-time quote snapshot (DJI + sector ETFs)",
+        desc="Schwab real-time quote snapshot (S&P 500 + sector ETFs)",
         stage=2,
         tables=["schwab_quotes"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
@@ -808,6 +808,7 @@ PIPELINES: list[PipelineSpec] = [
         stage=2,
         tables=["schwab_options"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
+        timeout=1800,   # ~507-symbol S&P 500 universe measured ~24min live 2026-08-02
     ),
     PipelineSpec(
         name="options_chain",
@@ -820,7 +821,7 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="schwab_intraday",
         file="schwab_intraday_pipeline.py",
-        desc="Schwab 5-min intraday bars (broad ETFs + megacaps)",
+        desc="Schwab 5-min intraday bars (S&P 500)",
         stage=2,
         tables=["schwab_intraday"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
