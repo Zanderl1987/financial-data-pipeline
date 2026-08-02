@@ -144,6 +144,58 @@ class TestEventGenerators:
         assert list(ev["date"]) == [dates[2], dates[7]]
 
 
+class TestEarningsEvents:
+    """earnings_events() — unions alpha_vantage_earnings + finnhub_earnings_history."""
+
+    def _patch_sources(self, monkeypatch, av=None, fh=None):
+        av_cols = ["ticker", "report_type", "reportedDate", "estimatedEPS",
+                   "reportedEPS", "surprisePercentage"]
+        fh_cols = ["symbol", "period", "estimate", "actual", "surprisePercent"]
+        av_df = pd.DataFrame(av, columns=av_cols) if av else pd.DataFrame(columns=av_cols)
+        fh_df = pd.DataFrame(fh, columns=fh_cols) if fh else pd.DataFrame(columns=fh_cols)
+
+        def fake_load(table, *a, **k):
+            if table == "alpha_vantage_earnings":
+                return av_df
+            if table == "finnhub_earnings_history":
+                return fh_df
+            return pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+
+    def test_unions_both_sources(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            av=[["AAPL", "quarterly", "2024-01-25", 2.10, 2.18, 3.8]],
+            fh=[["MSFT", "2024-01-25", 2.65, 2.93, 10.6]],
+        )
+        ev = eb.earnings_events()
+        assert set(ev["symbol"]) == {"AAPL", "MSFT"}
+        assert len(ev) == 2
+
+    def test_dedup_prefers_alpha_vantage(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            av=[["AAPL", "quarterly", "2024-01-25", 2.10, 2.18, 3.8]],
+            fh=[["AAPL", "2024-01-25", 999, 999, 999]],
+        )
+        ev = eb.earnings_events()
+        assert len(ev) == 1
+        assert ev["eps_actual"].iloc[0] == 2.18
+
+    def test_beat_and_min_surprise_filters(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            fh=[
+                ["A", "2024-01-25", 1.00, 1.10, 10.0],   # beat, big
+                ["B", "2024-01-25", 1.00, 1.01, 1.0],    # beat, small
+                ["C", "2024-01-25", 1.00, 0.80, -20.0],  # miss, big
+            ],
+        )
+        ev = eb.earnings_events(beat=True, min_surprise_pct=5)
+        assert list(ev["symbol"]) == ["A"]
+
+
 class TestRatingChanges:
     """rating_changes() / tv_snapshot_changes() — bucket-change scanning."""
 

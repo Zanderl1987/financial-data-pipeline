@@ -406,34 +406,60 @@ def earnings_events(
     start: "str | None" = None,
 ) -> pd.DataFrame:
     """
-    Earnings reports with real historical dates + EPS surprises, sourced from
-    alpha_vantage_earnings (deep per-symbol history back to the 1990s, quota-
-    gated coverage that grows daily via alpha_vantage_fundamentals_pipeline.py's
-    rotating symbol subset). earnings_calendar (Finnhub) is NOT used here —
-    verified live 2026-07-29 that its free tier only returns a rolling ~2-month
-    window and never has real historical actuals (2015/2020/2022/2023 and even
-    2026-01/04/05 all returned 0 rows).
+    Earnings reports with real historical dates + EPS surprises. Primary
+    source is alpha_vantage_earnings (deep per-symbol history back to the
+    1990s, quota-gated coverage that grows slowly via
+    alpha_vantage_fundamentals_pipeline.py's rotating symbol subset — see
+    CLAUDE.md/memory for why that pacing is currently stalled).
+    finnhub_earnings_history (Finnhub's /stock/earnings, NOT the
+    earnings_calendar table) supplements it: real historical actual/estimate/
+    surprise with real dates, just shallow (~4 most recent quarters/symbol,
+    a verified free-tier API ceiling — confirmed 2026-08-02 that neither a
+    higher `limit` nor an explicit `from`/`to` range unlocks more). Rows are
+    unioned and deduped on (symbol, date), preferring alpha_vantage_earnings
+    where both cover the same report. earnings_calendar (Finnhub) is still
+    NOT used — verified live 2026-07-29 that its free tier only returns a
+    rolling ~2-month forward window and never has real historical actuals.
 
     beat=True keeps beats, False keeps misses; min_surprise_pct filters by
     |EPS surprise %|. Columns: symbol, date, eps_estimate, eps_actual,
     surprise_pct. Note: use entry_lag=1 in event_study/scenario — report
     timing (BMO/AMC) isn't reliable enough to trade the same close.
     """
-    df = q.load("alpha_vantage_earnings")
+    av = q.load("alpha_vantage_earnings")
+    if not av.empty:
+        av = av[av["report_type"] == "quarterly"].copy()
+        av = av.rename(columns={
+            "ticker": "symbol",
+            "reportedDate": "date",
+            "estimatedEPS": "eps_estimate",
+            "reportedEPS": "eps_actual",
+            "surprisePercentage": "surprise_pct",
+        })
+        av = av[["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
+
+    fh = q.load("finnhub_earnings_history")
+    if not fh.empty:
+        fh = fh.rename(columns={
+            "period": "date",
+            "estimate": "eps_estimate",
+            "actual": "eps_actual",
+            "surprisePercent": "surprise_pct",
+        })
+        fh = fh[["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
+
+    df = pd.concat([av, fh], ignore_index=True) if not av.empty or not fh.empty else pd.DataFrame(
+        columns=["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"])
     if df.empty:
         return df
-    df = df[df["report_type"] == "quarterly"].copy()
-    df = df.rename(columns={
-        "ticker": "symbol",
-        "reportedDate": "date",
-        "estimatedEPS": "eps_estimate",
-        "reportedEPS": "eps_actual",
-        "surprisePercentage": "surprise_pct",
-    })
+
     for col in ("eps_estimate", "eps_actual", "surprise_pct"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date", "eps_actual", "eps_estimate", "surprise_pct"])
+    # AV rows were concatenated first, so keep='first' prefers AV over Finnhub
+    # for any (symbol, date) both sources report.
+    df = df.drop_duplicates(subset=["symbol", "date"], keep="first")
     if symbols is not None:
         symbols = [symbols] if isinstance(symbols, str) else list(symbols)
         df = df[df["symbol"].isin(symbols)]
