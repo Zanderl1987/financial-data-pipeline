@@ -33,6 +33,7 @@ import pandas as pd
 import schwabdev
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
+from symbol_universe import get_broad_universe
 
 load_dotenv()
 
@@ -43,7 +44,11 @@ TOKEN_PATH   = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 
 OUTPUT_DIR = os.path.join("storage", "raw", "schwab", "options")
 
-DEFAULT_SYMBOLS = [
+# Fallback if --symbols isn't passed and the broad universe can't be resolved
+# (e.g. no IVV holdings snapshot yet). Real default is the S&P 500 (via
+# get_broad_universe(), Schwab has no daily quota to ration against) --
+# accepted tradeoff: full chains at this size add up in storage fast.
+FALLBACK_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
     "META", "TSLA", "JPM", "SPY", "QQQ",
 ]
@@ -107,7 +112,7 @@ def fetch_option_chain(
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = client.option_chain(
+            resp = client.option_chains(
                 symbol=symbol,
                 contractType="ALL",
                 strikeCount=40,        # 20 strikes each side of ATM
@@ -155,8 +160,8 @@ def fetch_option_chain(
 def main():
     parser = argparse.ArgumentParser(description="Schwab options chain pipeline with greeks")
     parser.add_argument(
-        "--symbols", nargs="+", default=DEFAULT_SYMBOLS,
-        help="Symbols to fetch (default: top liquid equity + index options)"
+        "--symbols", nargs="+", default=None,
+        help="Symbols to fetch (default: S&P 500 via IVV holdings)"
     )
     parser.add_argument(
         "--expirations", type=int, default=4,
@@ -173,7 +178,7 @@ def main():
         tokens_db=TOKEN_PATH,
     )
 
-    symbols  = [s.upper() for s in args.symbols]
+    symbols  = [s.upper() for s in (args.symbols or get_broad_universe(extra=FALLBACK_SYMBOLS))]
     today_str = datetime.datetime.utcnow().strftime("%Y%m%d")
     print(f"Fetching options chains for {len(symbols)} symbols "
           f"({args.expirations} weeks out)...")

@@ -35,6 +35,7 @@ import schwabdev
 from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
+from symbol_universe import get_broad_universe
 
 load_dotenv()
 
@@ -45,9 +46,11 @@ TOKEN_PATH   = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 
 OUTPUT_DIR = os.path.join("storage", "raw", "schwab", "intraday")
 
-# Broad ETFs + the most event-active megacaps: enough for intraday event
-# studies without blowing up row counts (390 one-min bars/day/symbol).
-DEFAULT_SYMBOLS = [
+# Small fallback if --symbols isn't passed and the broad universe can't be
+# resolved (e.g. no IVV holdings snapshot yet). The real default is the S&P
+# 500 (via get_broad_universe(), Schwab has no daily quota to ration against)
+# -- accepted tradeoff: 390 one-min bars/day/symbol adds up fast at this size.
+FALLBACK_SYMBOLS = [
     "SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "USO",
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA",
 ]
@@ -120,7 +123,7 @@ def main(freq=5, days=5, backfill=False, symbols=None):
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(end_dt.timestamp() * 1000)
 
-    symbols = [s.upper() for s in (symbols or DEFAULT_SYMBOLS)]
+    symbols = [s.upper() for s in (symbols or get_broad_universe(extra=FALLBACK_SYMBOLS))]
     mode = "backfill" if backfill else "incremental"
     print(f"Schwab Intraday Pipeline  freq={freq}m  days={days}  mode={mode}  "
           f"symbols={len(symbols)}")
@@ -160,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--backfill", action="store_true",
                         help="Fetch Schwab's maximum retention for the chosen freq")
     parser.add_argument("--symbols", nargs="+",
-                        help="Symbol override (default: broad ETFs + megacaps)")
+                        help="Symbol override (default: S&P 500 via IVV holdings)")
     args = parser.parse_args()
     main(freq=args.freq, days=args.days, backfill=args.backfill,
          symbols=args.symbols)

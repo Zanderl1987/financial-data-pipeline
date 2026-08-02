@@ -2,7 +2,9 @@
 """
 Schwab Quotes Pipeline:
   Daily snapshot of real-time quotes plus fundamental data (PE, EPS,
-  dividend yield, 52-week range) for DJI components and sector ETFs.
+  dividend yield, 52-week range) for the S&P 500 (via IVV holdings) plus
+  sector ETFs. Schwab has no daily quota (120 req/min hard cap only), so
+  this pipeline is not scoped down to DJI-30 the way quota-gated sources are.
 
   Uses client.quotes() which batches up to 500 symbols in a single request,
   so the entire universe runs in 1-2 API calls.
@@ -31,7 +33,7 @@ import pandas as pd
 import schwabdev
 from dotenv import load_dotenv
 
-from finnhub_pipeline import get_dji_symbols  # reuse Wikipedia scraper
+from symbol_universe import get_broad_universe
 from storage_utils import write_partitioned
 
 load_dotenv()
@@ -52,6 +54,7 @@ SECTOR_ETFS = [
 
 MAX_RETRIES     = 3
 BACKOFF_SECONDS = 30
+BATCH_SIZE      = 500  # Schwab /quotes hard cap per request
 
 
 def _safe_get(d: dict, *keys, default=None):
@@ -106,8 +109,8 @@ def flatten_quote(symbol: str, data: dict) -> dict | None:
     }
 
 
-def fetch_quotes(client, symbols: list[str]) -> pd.DataFrame:
-    """Batch-fetch quotes; falls back to single-symbol calls on batch failure."""
+def _fetch_batch(client, symbols: list[str]) -> pd.DataFrame:
+    """Fetch quotes for a single batch (<=500 symbols, Schwab's per-request cap)."""
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             resp = client.quotes(symbols, fields="quote,fundamental,reference")
@@ -134,6 +137,20 @@ def fetch_quotes(client, symbols: list[str]) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def fetch_quotes(client, symbols: list[str]) -> pd.DataFrame:
+    """Fetch quotes for the full symbol list, chunked to Schwab's 500-symbol batch cap."""
+    batches = [symbols[i:i + BATCH_SIZE] for i in range(0, len(symbols), BATCH_SIZE)]
+    frames = []
+    for i, batch in enumerate(batches, 1):
+        if len(batches) > 1:
+            print(f"  Batch {i}/{len(batches)} ({len(batch)} symbols)...")
+        frames.append(_fetch_batch(client, batch))
+        if i < len(batches):
+            time.sleep(0.5)
+    frames = [f for f in frames if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -144,8 +161,7 @@ def main():
         tokens_db=TOKEN_PATH,
     )
 
-    dji_symbols = get_dji_symbols()
-    all_symbols = sorted(set(dji_symbols + SECTOR_ETFS))
+    all_symbols = get_broad_universe(extra=SECTOR_ETFS)
     print(f"Fetching quotes for {len(all_symbols)} symbols...")
 
     df = fetch_quotes(client, all_symbols)
