@@ -12,6 +12,7 @@ import sys
 import numpy as np
 import pandas as pd
 import pytest
+import plotly.graph_objects as go
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -202,3 +203,40 @@ class TestBaselineVsLive:
                                        "summary_reason": "no realized trades"})
         assert out["n_trades"] == {"baseline": None, "live": 0}
         assert out["win_rate_pct"] == {"baseline": None, "live": None}
+
+
+class TestCharts:
+    def _price_df(self):
+        return pd.DataFrame({"close": [10.0, 11.0, 12.0]},
+                            index=pd.bdate_range("2024-01-01", periods=3))
+
+    def _trades_df(self):
+        return pd.DataFrame({
+            "symbol": ["AAPL", "MSFT"], "side": ["long", "long"],
+            "entry_signal_date": pd.bdate_range("2024-01-01", periods=2),
+            "entry_date": pd.bdate_range("2024-01-02", periods=2),
+            "entry_price": [10.0, 20.0],
+            "exit_signal_date": pd.bdate_range("2024-01-03", periods=2),
+            "exit_date": pd.bdate_range("2024-01-04", periods=2),
+            "exit_price": [12.0, 19.0], "days_held": [2, 2],
+            "pnl_dollars": [200.0, -50.0], "pnl_pct": [2.0, -0.5],
+        })
+
+    def test_symbol_price_fig_renders_with_zero_trades_for_symbol(self):
+        fig = ba.symbol_price_fig("AAPL", self._price_df(), pd.DataFrame(
+            columns=ba.ev_trades.TRADE_COLS))
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1     # price line only, no marker traces
+
+    def test_symbol_price_fig_adds_entry_exit_markers(self):
+        fig = ba.symbol_price_fig("AAPL", self._price_df(), self._trades_df())
+        assert len(fig.data) > 1
+
+    def test_cumulative_pnl_fig_none_on_empty_trades(self):
+        assert ba.cumulative_pnl_fig(pd.DataFrame(
+            columns=ba.ev_trades.TRADE_COLS)) is None
+
+    def test_cumulative_pnl_fig_builds_running_sum(self):
+        fig = ba.cumulative_pnl_fig(self._trades_df())
+        assert isinstance(fig, go.Figure)
+        assert list(fig.data[0].y) == [200.0, 150.0]
