@@ -32,6 +32,7 @@ transformers==4.56.2          # finbert_eval.py
 torch==2.8.0                  # finbert_eval.py
 plotly==5.9.0                 # generate_tv_rating_report.py
 dash==4.4.1                   # backtest_app.py (live interactive explorer)
+comm>=0.2.0                   # dash transitive dep -- <0.2.0 raises NotImplementedError on import outside Jupyter
 
 # ── Pipeline-specific, not currently installed (pin after installing) ──────
 pytrends       # google_trends_pipeline.py
