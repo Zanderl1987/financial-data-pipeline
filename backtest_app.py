@@ -83,3 +83,32 @@ def build_tv_threshold_rule(bull_min: float, exit_long_max: float,
         short_entries=lambda d: _crossed_down(d["rating_all"], bear_max),
         short_exits=lambda d: d["rating_all"] > exit_short_min,
         notional=notional)
+
+
+def has_trade_rule(name: str) -> bool:
+    return name in KNOWN_TRADE_RULE_SIGNALS
+
+
+def get_cache(name: str) -> dict:
+    """Per-symbol price+rating cache for one signal, built once and reused
+    (module-level, server-side -- NOT round-tripped through dcc.Store,
+    which would serialize the full multi-decade panel to browser JSON on
+    every slider tick)."""
+    if name not in _CACHE:
+        builder = KNOWN_TRADE_RULE_SIGNALS[name]     # raises KeyError if unknown
+        _CACHE[name] = builder()
+    return _CACHE[name]
+
+
+def simulate_live(name: str, bull_min: float, exit_long_max: float,
+                  bear_max: float, exit_short_min: float,
+                  notional: "float | None" = None):
+    """Re-run the trade simulation in-process against the cached panel --
+    no disk I/O, cost bounded by in-memory panel size."""
+    cache = get_cache(name)
+    rule = build_tv_threshold_rule(bull_min, exit_long_max, bear_max,
+                                   exit_short_min,
+                                   notional or DEFAULT_NOTIONAL)
+    trades = ev_trades.simulate(rule, cache)
+    summary = ev_trades.trade_summary(trades)
+    return trades, summary

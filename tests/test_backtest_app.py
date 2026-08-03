@@ -144,3 +144,41 @@ class TestBuildTvThresholdRule:
         assert short_entries[3] == False, "No short entry on day 3: 0.1 > -0.5"
         assert short_entries[4] == True, "Short entry on day 4: -0.5 <= -0.5 and prev 0.1 > -0.5"
         assert short_entries[5] == False, "No short entry on day 5: -0.4 > -0.5, prev -0.5 NOT > -0.5"
+
+
+class TestCacheAndSimulateLive:
+    def test_has_trade_rule_true_for_known_signal(self):
+        assert ba.has_trade_rule("tv_threshold") is True
+
+    def test_has_trade_rule_false_for_unknown_signal(self):
+        assert ba.has_trade_rule("factor_value") is False
+
+    def test_get_cache_builds_once_and_reuses(self, monkeypatch):
+        calls = []
+
+        def fake_rating_cache():
+            calls.append(1)
+            return {"AAPL": pd.DataFrame({"close": [1.0], "rating_all": [0.0]})}
+
+        monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold",
+                            fake_rating_cache)
+        ba._CACHE.clear()
+        first = ba.get_cache("tv_threshold")
+        second = ba.get_cache("tv_threshold")
+        assert first is second
+        assert len(calls) == 1
+
+    def test_get_cache_raises_for_unknown_signal(self):
+        with pytest.raises(KeyError):
+            ba.get_cache("factor_value")
+
+    def test_simulate_live_zero_trades_at_extreme_threshold(self, monkeypatch):
+        cache = {"AAPL": pd.DataFrame(
+            {"close": [10.0, 11.0, 12.0], "rating_all": [0.0, 0.1, 0.2]},
+            index=pd.bdate_range("2024-01-01", periods=3))}
+        monkeypatch.setattr(ba, "get_cache", lambda name: cache)
+        trades, summary = ba.simulate_live("tv_threshold", bull_min=0.99,
+                                           exit_long_max=0.1, bear_max=-0.99,
+                                           exit_short_min=-0.1)
+        assert trades.empty
+        assert summary == {"n_trades": 0, "summary_reason": "no realized trades"}
