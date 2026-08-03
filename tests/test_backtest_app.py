@@ -182,3 +182,23 @@ class TestCacheAndSimulateLive:
                                            exit_short_min=-0.1)
         assert trades.empty
         assert summary == {"n_trades": 0, "summary_reason": "no realized trades"}
+
+
+class TestBaselineVsLive:
+    def test_diffs_the_three_headline_stats(self):
+        baseline = {"n_trades": 21938, "win_rate_pct": 36.6,
+                   "total_pnl_dollars": 378073.0}
+        live = {"n_trades": 1847, "win_rate_pct": 41.2,
+               "total_pnl_dollars": 612340.0}
+        out = ba.baseline_vs_live(baseline, live)
+        assert out == {
+            "n_trades": {"baseline": 21938, "live": 1847},
+            "win_rate_pct": {"baseline": 36.6, "live": 41.2},
+            "total_pnl_dollars": {"baseline": 378073.0, "live": 612340.0},
+        }
+
+    def test_missing_baseline_keys_are_none(self):
+        out = ba.baseline_vs_live({}, {"n_trades": 0,
+                                       "summary_reason": "no realized trades"})
+        assert out["n_trades"] == {"baseline": None, "live": 0}
+        assert out["win_rate_pct"] == {"baseline": None, "live": None}

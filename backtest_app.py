@@ -112,3 +112,11 @@ def simulate_live(name: str, bull_min: float, exit_long_max: float,
     trades = ev_trades.simulate(rule, cache)
     summary = ev_trades.trade_summary(trades)
     return trades, summary
+
+
+BASELINE_DIFF_KEYS = ("n_trades", "win_rate_pct", "total_pnl_dollars")
+
+
+def baseline_vs_live(baseline_summary: dict, live_summary: dict) -> dict:
+    return {k: {"baseline": baseline_summary.get(k), "live": live_summary.get(k)}
+            for k in BASELINE_DIFF_KEYS}
