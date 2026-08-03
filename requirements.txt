@@ -31,6 +31,7 @@ datasets==2.12.0              # upload_huggingface.py
 transformers==4.56.2          # finbert_eval.py
 torch==2.8.0                  # finbert_eval.py
 plotly==5.9.0                 # generate_tv_rating_report.py
+dash==4.4.1                   # backtest_app.py (live interactive explorer)
 
 # ── Pipeline-specific, not currently installed (pin after installing) ──────
 pytrends       # google_trends_pipeline.py
