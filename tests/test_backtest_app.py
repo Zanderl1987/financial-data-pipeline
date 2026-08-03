@@ -165,21 +165,38 @@ class TestCacheAndSimulateLive:
         monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold",
                             fake_rating_cache)
         ba._CACHE.clear()
-        first = ba.get_cache("tv_threshold")
-        second = ba.get_cache("tv_threshold")
+        ba._CACHE_RUN_ID.clear()
+        first = ba.get_cache("tv_threshold", "run_001")
+        second = ba.get_cache("tv_threshold", "run_001")
         assert first is second
         assert len(calls) == 1
 
+    def test_get_cache_rebuilds_on_different_run_id(self, monkeypatch):
+        calls = []
+
+        def fake_rating_cache():
+            calls.append(1)
+            return {"AAPL": pd.DataFrame({"close": [1.0], "rating_all": [0.0]})}
+
+        monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold",
+                            fake_rating_cache)
+        ba._CACHE.clear()
+        ba._CACHE_RUN_ID.clear()
+        first = ba.get_cache("tv_threshold", "run_001")
+        second = ba.get_cache("tv_threshold", "run_002")
+        assert first is not second
+        assert len(calls) == 2
+
     def test_get_cache_raises_for_unknown_signal(self):
         with pytest.raises(KeyError):
-            ba.get_cache("factor_value")
+            ba.get_cache("factor_value", "some_run_id")
 
     def test_simulate_live_zero_trades_at_extreme_threshold(self, monkeypatch):
         cache = {"AAPL": pd.DataFrame(
             {"close": [10.0, 11.0, 12.0], "rating_all": [0.0, 0.1, 0.2]},
             index=pd.bdate_range("2024-01-01", periods=3))}
-        monkeypatch.setattr(ba, "get_cache", lambda name: cache)
-        trades, summary = ba.simulate_live("tv_threshold", bull_min=0.99,
+        monkeypatch.setattr(ba, "get_cache", lambda name, run_id: cache)
+        trades, summary = ba.simulate_live("tv_threshold", "run_001", bull_min=0.99,
                                            exit_long_max=0.1, bear_max=-0.99,
                                            exit_short_min=-0.1)
         assert trades.empty
@@ -257,3 +274,21 @@ class TestLayout:
         app = dash.Dash(__name__)
         app.layout = ba.build_layout(ba.list_evaluated_signals())
         ba.register_callbacks(app)     # just verifies callback registration succeeds
+
+
+class TestRenderIcPanel:
+    def test_trade_rule_type_renders_trades_fig(self):
+        trades = pd.DataFrame({
+            "symbol": ["AAPL"], "pnl_dollars": [100.0], "pnl_pct": [1.0],
+        })
+        out = ba._render_ic_panel({"input_type": "trade_rule"}, {}, trades)
+        assert len(out) == 1
+
+    def test_trade_rule_type_empty_trades_renders_nothing(self):
+        out = ba._render_ic_panel({"input_type": "trade_rule"}, {}, pd.DataFrame())
+        assert out == []
+
+    def test_signal_type_renders_ic_charts(self):
+        results = {"ic": {"5": {"pooled_ic": 0.03, "mean_daily_ic": 0.02}}}
+        out = ba._render_ic_panel({"input_type": "signal"}, results, None)
+        assert len(out) >= 1

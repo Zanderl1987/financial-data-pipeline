@@ -33,7 +33,8 @@ KNOWN_TRADE_RULE_SIGNALS = {
     "tv_threshold": ev_adapters.rating_cache,
 }
 
-_CACHE: dict = {}   # signal name -> dict[symbol -> DataFrame], built lazily
+_CACHE: dict = {}          # signal name -> dict[symbol -> DataFrame], built lazily
+_CACHE_RUN_ID: dict = {}   # signal name -> run_id the cache was built for
 
 
 def list_evaluated_signals() -> "list[dict]":
@@ -90,32 +91,54 @@ def has_trade_rule(name: str) -> bool:
     return name in KNOWN_TRADE_RULE_SIGNALS
 
 
-def get_cache(name: str) -> dict:
-    """Per-symbol price+rating cache for one signal, built once and reused
-    (module-level, server-side -- NOT round-tripped through dcc.Store,
-    which would serialize the full multi-decade panel to browser JSON on
-    every slider tick)."""
-    if name not in _CACHE:
+def get_cache(name: str, run_id: str) -> dict:
+    """Per-symbol price+rating cache for one signal's run, built once and
+    reused (module-level, server-side -- NOT round-tripped through
+    dcc.Store, which would serialize the full multi-decade panel to
+    browser JSON on every slider tick). Keyed by (name, run_id) so a
+    Refresh that finds a newer run invalidates and rebuilds the cache
+    rather than silently serving a stale panel under a fresh-looking
+    banner."""
+    if name not in _CACHE or _CACHE_RUN_ID.get(name) != run_id:
         builder = KNOWN_TRADE_RULE_SIGNALS[name]     # raises KeyError if unknown
         _CACHE[name] = builder()
+        _CACHE_RUN_ID[name] = run_id
     return _CACHE[name]
 
 
-def simulate_live(name: str, bull_min: float, exit_long_max: float,
+_SIM_CACHE: dict = {}   # (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min) -> (trades, summary)
+
+
+def simulate_live(name: str, run_id: str, bull_min: float, exit_long_max: float,
                   bear_max: float, exit_short_min: float,
                   notional: "float | None" = None):
     """Re-run the trade simulation in-process against the cached panel --
-    no disk I/O, cost bounded by in-memory panel size."""
-    cache = get_cache(name)
+    no disk I/O, cost bounded by in-memory panel size. Memoized by its
+    full input key so switching the symbol dropdown (which doesn't change
+    any of these inputs) reuses the already-computed trades instead of
+    re-simulating the whole universe."""
+    key = (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min)
+    if key in _SIM_CACHE:
+        return _SIM_CACHE[key]
+    cache = get_cache(name, run_id)
     rule = build_tv_threshold_rule(bull_min, exit_long_max, bear_max,
                                    exit_short_min,
                                    notional or DEFAULT_NOTIONAL)
     trades = ev_trades.simulate(rule, cache)
     summary = ev_trades.trade_summary(trades)
+    _SIM_CACHE[key] = (trades, summary)
     return trades, summary
 
 
 BASELINE_DIFF_KEYS = ("n_trades", "win_rate_pct", "total_pnl_dollars")
+
+
+def _fmt_money(v) -> str:
+    return "n/a" if v is None else f"${v:,.0f}"
+
+
+def _fmt_pct(v) -> str:
+    return "n/a" if v is None else f"{v}%"
 
 
 def baseline_vs_live(baseline_summary: dict, live_summary: dict) -> dict:
@@ -166,7 +189,7 @@ def cumulative_pnl_fig(trades_df: "pd.DataFrame") -> "go.Figure | None":
     return fig
 
 
-from generate_eval_report import _ic_by_horizon, _spread_with_ci, _regimes
+from generate_eval_report import _ic_by_horizon, _spread_with_ci, _regimes, _trades_fig
 
 SLIDER_MIN, SLIDER_MAX, SLIDER_STEP = -1.0, 1.0, 0.05
 
@@ -190,25 +213,28 @@ def build_layout(signals: "list[dict]") -> "html.Div":
             html.Div(id="run-banner"),
         ]),
         html.Div([
-            html.Div(id="ic-panel"),
+            dcc.Loading(html.Div(id="ic-panel")),
             html.Div([
                 html.Div("Bull entry"), _slider("bull-min", 0.5),
                 html.Div("Exit long"), _slider("exit-long-max", 0.1),
                 html.Div("Bear entry"), _slider("bear-max", -0.5),
                 html.Div("Exit short"), _slider("exit-short-min", -0.1),
-                html.Div(id="trade-summary"),
+                dcc.Loading(html.Div(id="trade-summary")),
             ]),
         ]),
         html.Div([
             dcc.Dropdown(id="symbol-dropdown", placeholder="select a symbol"),
-            dcc.Graph(id="symbol-fig"),
+            dcc.Loading(dcc.Graph(id="symbol-fig")),
         ]),
-        dcc.Graph(id="pnl-fig"),
+        dcc.Loading(dcc.Graph(id="pnl-fig")),
         dcc.Store(id="signal-store"),
     ])
 
 
-def _render_ic_panel(results: dict) -> "list":
+def _render_ic_panel(meta: dict, results: dict, trades: "pd.DataFrame | None") -> "list":
+    if meta.get("input_type") == "trade_rule":
+        fig = _trades_fig(trades)
+        return [dcc.Graph(figure=fig)] if fig is not None else []
     ic = results.get("ic", {})
     figs = [_ic_by_horizon(ic), _spread_with_ci(ic, results.get("tier2", {})),
            _regimes(results.get("tier3", {}))]
@@ -230,11 +256,17 @@ def register_callbacks(app: "dash.Dash") -> None:
         banner = (f'{meta.get("run_id")} - {meta.get("date_range")} - '
                  f'loaded {pd.Timestamp.now():%H:%M:%S}')
         symbol_options = []
+        run_id = meta.get("run_id")
         if has_trade_rule(name):
-            symbol_options = [{"label": s, "value": s}
-                             for s in sorted(get_cache(name).keys())]
-        return ({"name": name, "results": loaded["results"]}, banner,
-               _render_ic_panel(loaded["results"]), symbol_options)
+            cache = get_cache(name, run_id)
+            symbol_options = [{"label": s, "value": s} for s in sorted(cache.keys())]
+            recorded_n = len(meta.get("universe") or [])
+            if recorded_n and len(cache) != recorded_n:
+                banner += (f' [WARNING: live universe has {len(cache)} symbols, '
+                          f'recorded run had {recorded_n} -- live vs baseline '
+                          f'numbers may not be directly comparable]')
+        return ({"name": name, "run_id": run_id, "results": loaded["results"]}, banner,
+               _render_ic_panel(meta, loaded["results"], loaded["trades"]), symbol_options)
 
     @app.callback(
         Output("trade-summary", "children"), Output("symbol-fig", "figure"),
@@ -245,22 +277,24 @@ def register_callbacks(app: "dash.Dash") -> None:
     def _on_sliders_change(store, bull_min, exit_long_max, bear_max,
                           exit_short_min, symbol):
         empty_fig = go.Figure()
-        if not store or not has_trade_rule(store["name"]):
+        if not store:
+            return "select a signal", empty_fig, empty_fig
+        if not has_trade_rule(store["name"]):
             return "no trade rule defined for this signal", empty_fig, empty_fig
-        trades, summary = simulate_live(store["name"], bull_min, exit_long_max,
-                                        bear_max, exit_short_min)
+        trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
+                                        exit_long_max, bear_max, exit_short_min)
         baseline = store["results"].get("summary", {})
         diff = baseline_vs_live(baseline, summary)
         if summary.get("n_trades", 0) == 0:
             text = "0 realized trades at this threshold"
         else:
             text = (f'n={diff["n_trades"]["live"]} trades | '
-                   f'win {diff["win_rate_pct"]["live"]}% | '
-                   f'${diff["total_pnl_dollars"]["live"]:,.0f} net '
+                   f'win {_fmt_pct(diff["win_rate_pct"]["live"])} | '
+                   f'{_fmt_money(diff["total_pnl_dollars"]["live"])} net '
                    f'(baseline: {diff["n_trades"]["baseline"]} / '
-                   f'{diff["win_rate_pct"]["baseline"]}% / '
-                   f'${diff["total_pnl_dollars"]["baseline"]:,.0f})')
-        cache = get_cache(store["name"])
+                   f'{_fmt_pct(diff["win_rate_pct"]["baseline"])} / '
+                   f'{_fmt_money(diff["total_pnl_dollars"]["baseline"])})')
+        cache = get_cache(store["name"], store["run_id"])
         sym_fig = (symbol_price_fig(symbol, cache[symbol], trades)
                   if symbol and symbol in cache else empty_fig)
         pnl_fig = cumulative_pnl_fig(trades) or empty_fig
