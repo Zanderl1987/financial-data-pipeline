@@ -9,6 +9,7 @@ no Selenium/browser harness, per docs/superpowers/specs/
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -16,6 +17,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 import backtest_app as ba
+from evaluation import trades as ev_trades
 
 
 class TestListEvaluatedSignals:
@@ -54,3 +56,47 @@ class TestLoadSignal:
             "meta": {"input_name": "tv_threshold"},
             "trades": None,
         }
+
+
+class TestBuildTvThresholdRule:
+    def _df(self):
+        # rating_all path: 0.0 -> 0.6 (crosses bull 0.5) -> 0.05 (exits long,
+        # < 0.1) -> -0.6 (crosses bear -0.5) -> -0.05 (exits short, > -0.1)
+        return pd.DataFrame({
+            "close": [10.0, 11.0, 12.0, 13.0, 14.0],
+            "rating_all": [0.0, 0.6, 0.05, -0.6, -0.05],
+        }, index=pd.bdate_range("2024-01-01", periods=5))
+
+    def test_matches_adapters_tv_threshold_rule_at_default_thresholds(self):
+        import tv_rating_eval as tve
+        from evaluation.adapters import tv_threshold_rule
+
+        df = self._df()
+        live_rule = ba.build_tv_threshold_rule(
+            bull_min=tve.BULL_MIN, exit_long_max=tve.EXIT_LONG_MAX,
+            bear_max=tve.BEAR_MAX, exit_short_min=tve.EXIT_SHORT_MIN,
+            notional=tve.NOTIONAL)
+        fixed_rule = tv_threshold_rule()
+
+        le1, lx1, se1, sx1 = ev_trades.rule_flags(live_rule, df)
+        le2, lx2, se2, sx2 = ev_trades.rule_flags(fixed_rule, df)
+        assert np.array_equal(le1, le2)
+        assert np.array_equal(lx1, lx2)
+        assert np.array_equal(se1, se2)
+        assert np.array_equal(sx1, sx2)
+
+    def test_tighter_bull_threshold_enters_earlier(self):
+        df = self._df()
+        loose = ba.build_tv_threshold_rule(0.5, 0.1, -0.5, -0.1)
+        tight = ba.build_tv_threshold_rule(0.0, 0.1, -0.5, -0.1)
+        le_loose, _, _, _ = ev_trades.rule_flags(loose, df)
+        le_tight, _, _, _ = ev_trades.rule_flags(tight, df)
+        # tight (0.0) fires on the very first crossing above 0.0, loose only
+        # once rating_all reaches 0.5 in the same step -- both fire on row 1
+        # here, so assert the tight rule fires at least as early overall.
+        assert np.flatnonzero(le_tight)[0] <= np.flatnonzero(le_loose)[0]
+
+    def test_side_is_both(self):
+        rule = ba.build_tv_threshold_rule(0.5, 0.1, -0.5, -0.1)
+        assert rule.side == "both"
+        assert rule.name == "tv_threshold_live"

@@ -56,3 +56,30 @@ def load_signal(name: str) -> dict:
     results, meta, trades = load_run(run_dir)
     return {"run_dir": run_dir, "results": results, "meta": meta,
             "trades": trades}
+
+
+DEFAULT_NOTIONAL = 10_000.0
+
+
+def _crossed_up(series, level):
+    return (series >= level) & (series.shift(1) <= level)
+
+
+def _crossed_down(series, level):
+    return (series <= level) & (series.shift(1) >= level)
+
+
+def build_tv_threshold_rule(bull_min: float, exit_long_max: float,
+                            bear_max: float, exit_short_min: float,
+                            notional: float = DEFAULT_NOTIONAL) -> TradeRule:
+    """Same crossed-up/crossed-down shape as evaluation.adapters.
+    tv_threshold_rule(), with slider-driven thresholds instead of
+    tv_rating_eval's fixed module constants."""
+    return TradeRule(
+        name="tv_threshold_live",
+        entries=lambda d: _crossed_up(d["rating_all"], bull_min),
+        exits=lambda d: d["rating_all"] < exit_long_max,
+        side="both",
+        short_entries=lambda d: _crossed_down(d["rating_all"], bear_max),
+        short_exits=lambda d: d["rating_all"] > exit_short_min,
+        notional=notional)
