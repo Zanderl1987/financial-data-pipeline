@@ -34,3 +34,23 @@ class TestListEvaluatedSignals:
             {"name": "factor_value", "has_local_artifacts": False},
             {"name": "tv_threshold", "has_local_artifacts": True},
         ]
+
+
+class TestLoadSignal:
+    def test_missing_artifacts_returns_error_dict(self, monkeypatch):
+        monkeypatch.setattr(ba, "find_latest", lambda name: None)
+        out = ba.load_signal("ghost_signal")
+        assert "error" in out
+        assert "ghost_signal" in out["error"]
+
+    def test_loads_run_artifacts_on_success(self, monkeypatch):
+        monkeypatch.setattr(ba, "find_latest", lambda name: "/run/dir")
+        monkeypatch.setattr(ba, "load_run", lambda run_dir: (
+            {"summary": {"n_trades": 5}}, {"input_name": "tv_threshold"}, None))
+        out = ba.load_signal("tv_threshold")
+        assert out == {
+            "run_dir": "/run/dir",
+            "results": {"summary": {"n_trades": 5}},
+            "meta": {"input_name": "tv_threshold"},
+            "trades": None,
+        }

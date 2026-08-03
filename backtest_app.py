@@ -43,3 +43,16 @@ def list_evaluated_signals() -> "list[dict]":
     names = sorted(reg["input_name"].unique())
     return [{"name": n, "has_local_artifacts": find_latest(n) is not None}
             for n in names]
+
+
+def load_signal(name: str) -> dict:
+    """Latest run's artifacts for one signal, or an {"error": ...} dict if
+    the registry knows this name but no local run directory exists (e.g. a
+    registry synced from another machine without its gitignored artifacts)."""
+    run_dir = find_latest(name)
+    if run_dir is None:
+        return {"error": f"no local artifacts for {name!r} -- run "
+                         f"evaluate.py --adapter ... first"}
+    results, meta, trades = load_run(run_dir)
+    return {"run_dir": run_dir, "results": results, "meta": meta,
+            "trades": trades}
