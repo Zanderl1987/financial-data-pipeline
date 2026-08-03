@@ -145,6 +145,16 @@ full diagnostic trail.
 - **event_backtest.load_close()** keeps the LONGEST series across price tables so shallow
   watchlist pulls don't shadow deep history — preserve that invariant.
 - Alpha Vantage: 25 req/day/key. BLS: daily quota. SEC EDGAR: ≤10 req/s + EDGAR_USER_AGENT.
+- **Open-Meteo archive API's 429 is IP-level and stateful across process restarts** — confirmed
+  2026-08-03 during the `open_meteo_pipeline.py --backfill` rewrite: after a request-volume spike
+  (a duplicate process racing the original, then a too-fast retry pace), a freshly-restarted
+  process hit 429 on its very first request even with a conservative pause and zero prior
+  requests of its own. Restarting the client does NOT reset the window. If you see 429s
+  immediately on a cold start, stop and wait for real idle time (duration unknown, budget 15-20min+)
+  rather than tuning the pause further or restarting again — you're adding requests to an
+  already-tripped window, not helping. `_date_chunks()` backfill mode has resume-skip logic
+  (checks if a chunk's output file exists before re-fetching) specifically so a paused/interrupted
+  backfill doesn't lose completed work — just re-run the same command later.
 
 ## Known-broken / dead ends (don't re-attempt without a new angle)
 

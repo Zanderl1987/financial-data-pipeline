@@ -28,9 +28,21 @@
       registered FINRA Query API credentials from developer.finra.org, unchanged from
       the 2026-07-06 finding. No further action without those credentials; yfinance
       fallback in `analytics/features.py` remains the correct active source.
-- [ ] **`open_meteo_pipeline.py --backfill`** — needs date-range chunking to fit Open-Meteo's
-      per-request size cap (35yr x 5 locations x 11 vars in one call is too much).
-- [ ] **BLS retry** — `bls_oes_qcew_pipeline.py`/`bls_expansion_pipeline.py` hit daily quota
-      2026-08-01; retry on a day with fresh headroom.
+- [x] **`open_meteo_pipeline.py --backfill` date-chunking — DONE (2026-08-03)**: added
+      `_date_chunks()` (3yr windows, 13 chunks for 1990-2026) so `main()` iterates
+      date-chunk x location-batch instead of one 35yr call. Verified: chunk boundaries
+      are contiguous/gap-free via standalone test, live-tested `_fetch_batch` against
+      the real API (10-day window, Des Moines, 10 rows returned correctly) before
+      running full backfill in background.
+- [x] **BLS retry — RULED OUT as a "just retry" fix (2026-08-03)**: re-ran
+      `bls_oes_qcew_pipeline.py` fresh — still hit `"the daily threshold ... has been
+      reached"` immediately. Root cause isn't a stale quota, it's structural: no
+      `BLS_API_KEY` is set in `.env`, so the pipeline runs BLS's **keyless v1 API**,
+      which has a very low shared anonymous-IP daily quota that a single run's own
+      ~1000+ series/chunk requests exhausts by itself. A free v2 key (instant
+      self-service signup, no approval wait, at https://data.bls.gov/registrationEngine/)
+      raises the limit to 500 req/day and batch size from 25→50 series/call
+      (`bls_oes_qcew_pipeline.py` already has the v2 code path — just reads
+      `BLS_API_KEY` from `.env` if present). No further retry will help without it.
 - [ ] **Reddit/Comtrade/Census/USDA/AISStream** — all NO-DATA, all blocked purely on the user
       obtaining/renewing an API key or app registration (no code issue).
