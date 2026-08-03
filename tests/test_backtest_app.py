@@ -9,6 +9,7 @@ no Selenium/browser harness, per docs/superpowers/specs/
 import os
 import sys
 
+import dash
 import numpy as np
 import pandas as pd
 import pytest
@@ -240,3 +241,19 @@ class TestCharts:
         fig = ba.cumulative_pnl_fig(self._trades_df())
         assert isinstance(fig, go.Figure)
         assert list(fig.data[0].y) == [200.0, 150.0]
+
+
+class TestLayout:
+    def test_builds_with_empty_registry(self):
+        div = ba.build_layout([])
+        assert isinstance(div, ba.html.Div)
+
+    def test_builds_with_signals(self):
+        div = ba.build_layout([{"name": "tv_threshold", "has_local_artifacts": True},
+                               {"name": "factor_value", "has_local_artifacts": False}])
+        assert isinstance(div, ba.html.Div)
+
+    def test_register_callbacks_does_not_raise(self):
+        app = dash.Dash(__name__)
+        app.layout = ba.build_layout(ba.list_evaluated_signals())
+        ba.register_callbacks(app)     # just verifies callback registration succeeds

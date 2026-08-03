@@ -15,6 +15,7 @@ Usage
 
 import dash
 from dash import dcc, html, Input, Output
+import pandas as pd
 import plotly.graph_objects as go
 
 from evaluation import registry as ev_registry
@@ -163,3 +164,113 @@ def cumulative_pnl_fig(trades_df: "pd.DataFrame") -> "go.Figure | None":
                                  "(%{customdata[2]:.2f}%%)<extra></extra>")
     fig.update_layout(title="Cumulative P&L (current thresholds)", height=320)
     return fig
+
+
+from generate_eval_report import _ic_by_horizon, _spread_with_ci, _regimes
+
+SLIDER_MIN, SLIDER_MAX, SLIDER_STEP = -1.0, 1.0, 0.05
+
+
+def _slider(id_, value):
+    return dcc.Slider(id=id_, min=SLIDER_MIN, max=SLIDER_MAX, step=SLIDER_STEP,
+                      value=value, updatemode="mouseup",
+                      marks={-1: "-1", 0: "0", 1: "1"})
+
+
+def build_layout(signals: "list[dict]") -> "html.Div":
+    options = [{"label": s["name"] + ("" if s["has_local_artifacts"]
+                                      else "  [no local artifacts]"),
+               "value": s["name"]} for s in signals]
+    return html.Div([
+        html.Div([
+            dcc.Dropdown(id="signal-dropdown", options=options,
+                        value=options[0]["value"] if options else None,
+                        placeholder="no evaluated signals yet"),
+            html.Button("Refresh", id="refresh-button", n_clicks=0),
+            html.Div(id="run-banner"),
+        ]),
+        html.Div([
+            html.Div(id="ic-panel"),
+            html.Div([
+                html.Div("Bull entry"), _slider("bull-min", 0.5),
+                html.Div("Exit long"), _slider("exit-long-max", 0.1),
+                html.Div("Bear entry"), _slider("bear-max", -0.5),
+                html.Div("Exit short"), _slider("exit-short-min", -0.1),
+                html.Div(id="trade-summary"),
+            ]),
+        ]),
+        html.Div([
+            dcc.Dropdown(id="symbol-dropdown", placeholder="select a symbol"),
+            dcc.Graph(id="symbol-fig"),
+        ]),
+        dcc.Graph(id="pnl-fig"),
+        dcc.Store(id="signal-store"),
+    ])
+
+
+def _render_ic_panel(results: dict) -> "list":
+    ic = results.get("ic", {})
+    figs = [_ic_by_horizon(ic), _spread_with_ci(ic, results.get("tier2", {})),
+           _regimes(results.get("tier3", {}))]
+    return [dcc.Graph(figure=f) for f in figs if f is not None]
+
+
+def register_callbacks(app: "dash.Dash") -> None:
+    @app.callback(
+        Output("signal-store", "data"), Output("run-banner", "children"),
+        Output("ic-panel", "children"), Output("symbol-dropdown", "options"),
+        Input("signal-dropdown", "value"), Input("refresh-button", "n_clicks"))
+    def _on_signal_change(name, _n_clicks):
+        if not name:
+            return None, "no evaluated signals yet", [], []
+        loaded = load_signal(name)
+        if "error" in loaded:
+            return None, loaded["error"], [], []
+        meta = loaded["meta"]
+        banner = (f'{meta.get("run_id")} - {meta.get("date_range")} - '
+                 f'loaded {pd.Timestamp.now():%H:%M:%S}')
+        symbol_options = []
+        if has_trade_rule(name):
+            symbol_options = [{"label": s, "value": s}
+                             for s in sorted(get_cache(name).keys())]
+        return ({"name": name, "results": loaded["results"]}, banner,
+               _render_ic_panel(loaded["results"]), symbol_options)
+
+    @app.callback(
+        Output("trade-summary", "children"), Output("symbol-fig", "figure"),
+        Output("pnl-fig", "figure"),
+        Input("signal-store", "data"), Input("bull-min", "value"),
+        Input("exit-long-max", "value"), Input("bear-max", "value"),
+        Input("exit-short-min", "value"), Input("symbol-dropdown", "value"))
+    def _on_sliders_change(store, bull_min, exit_long_max, bear_max,
+                          exit_short_min, symbol):
+        empty_fig = go.Figure()
+        if not store or not has_trade_rule(store["name"]):
+            return "no trade rule defined for this signal", empty_fig, empty_fig
+        trades, summary = simulate_live(store["name"], bull_min, exit_long_max,
+                                        bear_max, exit_short_min)
+        baseline = store["results"].get("summary", {})
+        diff = baseline_vs_live(baseline, summary)
+        if summary.get("n_trades", 0) == 0:
+            text = "0 realized trades at this threshold"
+        else:
+            text = (f'n={diff["n_trades"]["live"]} trades | '
+                   f'win {diff["win_rate_pct"]["live"]}% | '
+                   f'${diff["total_pnl_dollars"]["live"]:,.0f} net '
+                   f'(baseline: {diff["n_trades"]["baseline"]} / '
+                   f'{diff["win_rate_pct"]["baseline"]}% / '
+                   f'${diff["total_pnl_dollars"]["baseline"]:,.0f})')
+        cache = get_cache(store["name"])
+        sym_fig = (symbol_price_fig(symbol, cache[symbol], trades)
+                  if symbol and symbol in cache else empty_fig)
+        pnl_fig = cumulative_pnl_fig(trades) or empty_fig
+        return text, sym_fig, pnl_fig
+
+
+app = dash.Dash(__name__)
+app.layout = build_layout(list_evaluated_signals())
+register_callbacks(app)
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
