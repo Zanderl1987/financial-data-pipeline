@@ -62,11 +62,11 @@ DEFAULT_NOTIONAL = 10_000.0
 
 
 def _crossed_up(series, level):
-    return (series >= level) & (series.shift(1) <= level)
+    return (series >= level) & (series.shift(1) < level)
 
 
 def _crossed_down(series, level):
-    return (series <= level) & (series.shift(1) >= level)
+    return (series <= level) & (series.shift(1) > level)
 
 
 def build_tv_threshold_rule(bull_min: float, exit_long_max: float,
