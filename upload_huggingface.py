@@ -206,6 +206,17 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
     print(f"\nDone! Dataset: https://huggingface.co/datasets/{repo_id}")
     print(f"  Load with: ds = load_dataset('{repo_id}')")
 
+    return {
+        "repo_id": repo_id,
+        "tables": len(parquet_files),
+        "rows": total_rows,
+        "size_mb": total_size_mb,
+        "files": [
+            str(pf.relative_to(STORAGE_ROOT)).replace(os.sep, "/")
+            for pf in parquet_files
+        ],
+    }
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload curated data to HuggingFace")
