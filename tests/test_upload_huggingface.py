@@ -9,7 +9,6 @@ import os
 import sys
 
 import pandas as pd
-import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -26,6 +25,19 @@ class _FakeApi:
 
     def upload_folder(self, *args, **kwargs):
         pass
+
+
+class _AssertNotCalledApi:
+    """HfApi double that fails the test if any network-touching method is invoked."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def create_repo(self, *args, **kwargs):
+        raise AssertionError("create_repo should not be called when there are no parquet files")
+
+    def upload_folder(self, *args, **kwargs):
+        raise AssertionError("upload_folder should not be called when there are no parquet files")
 
 
 def _write_fake_table(root, table_name: str, df: pd.DataFrame) -> None:
@@ -62,5 +74,22 @@ def test_main_returns_none_without_token(tmp_path, monkeypatch):
     monkeypatch.delenv("HUGGINGFACE_TOKEN", raising=False)
 
     result = upload_huggingface.main()
+
+    assert result is None
+
+
+def test_main_returns_none_when_curated_folder_has_no_parquet_files(tmp_path, monkeypatch):
+    """
+    A fresh worktree or wiped storage/curated/ has zero parquet files. Uploading
+    in that state would publish an empty "0 tables, 0 rows" README over the live
+    public HF dataset -- main() must refuse and must not touch the network at all
+    (no create_repo, no upload_folder).
+    """
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)  # empty dir, no parquet files
+    monkeypatch.setattr(upload_huggingface, "HfApi", _AssertNotCalledApi)
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True)
 
     assert result is None

@@ -108,6 +108,15 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
         print("ERROR: Set HUGGINGFACE_TOKEN or HF_TOKEN env variable.")
         return
 
+    # Scan curated files
+    parquet_files = sorted(STORAGE_ROOT.glob("**/*.parquet"))
+    print(f"Found {len(parquet_files)} parquet files")
+
+    if not parquet_files:
+        print(f"ERROR: No parquet files found under {STORAGE_ROOT} -- "
+              f"refusing to publish an empty snapshot.")
+        return
+
     login(token=token)
     api = HfApi()
 
@@ -115,10 +124,6 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
     print(f"Creating/updating repo: {repo_id} (private={private})")
 
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
-
-    # Scan curated files
-    parquet_files = sorted(STORAGE_ROOT.glob("**/*.parquet"))
-    print(f"Found {len(parquet_files)} parquet files")
 
     # Count rows and categorize
     total_rows = 0
