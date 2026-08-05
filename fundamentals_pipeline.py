@@ -449,6 +449,86 @@ def hf_pull(repo_id, filename_in_repo, dest_dir):
         return None
 
 
+def hf_append(fresh_path, repo_id, filename_in_repo):
+    """
+    Merge a fresh parquet snapshot into the existing file on HF and push the union.
+
+    Preserves the full accumulated history on HF (including restatement/filed
+    versions); collapses rows that are identical on every column EXCEPT
+    fetched_at, keeping the newest fetch. This is the default HF push path for
+    both full-market and DJI modes.
+    """
+    if not HF_TOKEN:
+        print("  HF_TOKEN not set — skipping upload. Add it to .env to enable.")
+        return
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+    except ImportError:
+        print("  huggingface_hub not installed. Run: pip install huggingface_hub")
+        return
+
+    api = HfApi()
+    try:
+        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
+
+        # Pull the current file from HF (force, so we merge with the live state).
+        existing_path = None
+        try:
+            existing_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename_in_repo,
+                repo_type="dataset",
+                token=HF_TOKEN,
+                force_download=True,
+            )
+        except Exception:
+            existing_path = None
+
+        fresh = pd.read_parquet(fresh_path)
+        for col in ("period_end", "fetched_at"):
+            if col in fresh.columns:
+                fresh[col] = pd.to_datetime(fresh[col], errors="coerce")
+
+        if existing_path and os.path.exists(existing_path):
+            old = pd.read_parquet(existing_path)
+            for col in ("period_end", "fetched_at"):
+                if col in old.columns:
+                    old[col] = pd.to_datetime(old[col], errors="coerce")
+            merged = pd.concat([old, fresh], ignore_index=True)
+            dupes = len(merged)
+            if "fetched_at" in merged.columns:
+                dedup_cols = [c for c in merged.columns if c != "fetched_at"]
+                merged = (
+                    merged.sort_values("fetched_at", na_position="first")
+                          .drop_duplicates(subset=dedup_cols, keep="last")
+                )
+            else:
+                merged = merged.drop_duplicates(keep="last")
+            print(f"  Merged {os.path.basename(fresh_path)} with existing {filename_in_repo}: "
+                  f"{len(old):,} + {len(fresh):,} -> {len(merged):,} rows "
+                  f"({dupes - len(merged):,} duplicates collapsed to newest fetch)")
+        else:
+            merged = fresh
+            print(f"  No existing {filename_in_repo} on HF — pushing fresh snapshot "
+                  f"({len(merged):,} rows)")
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+        os.close(tmp_fd)
+        merged.to_parquet(tmp_path, index=False)
+        print(f"  Uploading merged {filename_in_repo} -> {repo_id} ...")
+        api.upload_file(
+            path_or_fileobj=tmp_path,
+            path_in_repo=filename_in_repo,
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=HF_TOKEN,
+        )
+        print(f"  -> https://huggingface.co/datasets/{repo_id}")
+        os.unlink(tmp_path)
+    except Exception as e:
+        print(f"  HF append upload failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -508,13 +588,14 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         if os.path.exists(quarterly_out):
             print(f"Quarterly -> {quarterly_out} ({counts['quarterly']:,} rows)")
 
-        # Push to Hugging Face Hub
+        # Push to Hugging Face Hub — append (merge + dedup) is always the behavior,
+        # so the full accumulated history on HF survives every refresh.
         if repo_id:
-            print("\nUploading to Hugging Face Hub...")
+            print("\nUploading to Hugging Face Hub (append mode)...")
             if os.path.exists(annual_out):
-                hf_push(annual_out, repo_id, "fundamentals_annual_latest.parquet")
+                hf_append(annual_out, repo_id, "fundamentals_annual_latest.parquet")
             if os.path.exists(quarterly_out):
-                hf_push(quarterly_out, repo_id, "fundamentals_quarterly_latest.parquet")
+                hf_append(quarterly_out, repo_id, "fundamentals_quarterly_latest.parquet")
 
         print("\n--- COMPLETE ---")
         return
@@ -550,11 +631,15 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         annual_df = pd.concat(annual_frames, ignore_index=True)
         path = write_partitioned(annual_df, ANNUAL_DIR, f"fundamentals_annual_{today}.parquet")
         print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
+        if repo_id:
+            hf_append(path, repo_id, "fundamentals_annual_latest.parquet")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
         path = write_partitioned(quarterly_df, QUARTERLY_DIR, f"fundamentals_quarterly_{today}.parquet")
         print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
+        if repo_id:
+            hf_append(path, repo_id, "fundamentals_quarterly_latest.parquet")
 
     if failed:
         print(f"\nFailed/skipped ({len(failed)}): {', '.join(failed)}")

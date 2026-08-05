@@ -1,4 +1,4 @@
-﻿AV earnings pacing run on 2026-08-01 hit the daily rate limit -- likely no real progress.
+﻿AV earnings pacing run on 2026-08-05 hit the daily rate limit -- likely no real progress.
 Alpha Vantage Fundamentals Pipeline complete. (20 request(s) used/20 budgeted)
-Full report: C:\Users\zande\PycharmProjects\financial-data-pipeline\storage\quality_reports\av_earnings_pacing_2026-08-01.txt
-Retry in tomorrow's ~10:05am gap.
+Full report: C:\Users\zande\PycharmProjects\financial-data-pipeline\storage\quality_reports\av_earnings_pacing_2026-08-05.txt
+Expected until earnings_sentiment_tool's transcript cache completes (~2026-08-06); retries automatically tomorrow at 10:45am.

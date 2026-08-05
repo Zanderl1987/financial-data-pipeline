@@ -57,12 +57,17 @@ check `git log -1` / `git status` in whichever clone you're in; don't assume it'
 
 ## Cross-repo dependencies
 
-- **`custom_index_tool`** (earnings-call verbosity study) shares this machine's IP
-  for Alpha Vantage quota (see above) — coordinate before running AV-heavy backfills
-  here. It also wants an independent "bad news" label per (ticker, quarter), which
-  this repo can supply via `earnings_surprise` analytics + `event_backtest.
+- **`earnings_sentiment_tool`** (earnings-call verbosity study — corrected 2026-08-04;
+  this note previously misnamed it `custom_index_tool`, which is unrelated and only
+  uses `FRED_API_KEY`) shares this machine's IP for Alpha Vantage quota (see above).
+  Its `ClaudeAuto-TranscriptPull` task fires daily at 10:30 AM and consumes up to the
+  full 25/day quota until its 725-file transcript cache completes (~2026-08-06). This
+  repo's own `ClaudeAuto-AVEarningsPacing` is scheduled for 10:45 AM (after, not
+  before) specifically to respect AV's rolling-24h quota window — see AUTOMATION.md
+  for the full reasoning. It also wants an independent "bad news" label per (ticker,
+  quarter), which this repo can supply via `earnings_surprise` analytics + `event_backtest.
   earnings_events()` once earnings history is deep enough (see AV earnings finding
-  above). See `custom_index_tool/EXPERT_BRIEF.md`.
+  above). See `earnings_sentiment_tool/EXPERT_BRIEF.md`.
 
 ## Storage
 

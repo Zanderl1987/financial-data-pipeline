@@ -1,11 +1,18 @@
 # AV DJI earnings-history pacing run: alpha_vantage_fundamentals_pipeline.py
-# (incremental, default 20-request budget) timed for the ~10:05-10:30am gap,
-# after the previous day's AV quota rolls off but before ClaudeAuto-TranscriptPull
-# fires at 10:30 and spends the day's shared-IP quota on transcripts instead.
-# Archives output, leaves a visible flag file if the run hit AV's rate-limit
-# response with no real progress (quota already spent) or crashed outright.
-# One-time task for 2026-08-01; not yet a recurring ClaudeAuto-* automation
-# (see AUTOMATION.md before promoting it to one).
+# (incremental, default 20-request budget). Scheduled for 10:45am, deliberately
+# AFTER earnings_sentiment_tool's ClaudeAuto-TranscriptPull fires at 10:30 -- the
+# 10:05am "before" slot tried on 07-31/08-01 both failed (full quota, zero
+# progress) because AV's quota is rolling-24h, not midnight-reset: yesterday's
+# ~10:30 transcript-pull usage doesn't roll off until ~10:30 today, so a 10:05
+# run still saw it as unexpired. Firing at 10:45 (after TranscriptPull's own
+# run, not before it) is correct relative to the rolling window, though it
+# still won't get real progress until earnings_sentiment_tool's 725-file
+# transcript cache completes (ETA ~2026-08-06 per that repo's CLAUDE.md) and
+# its daily pull becomes a zero-quota no-op -- until then this will legitimately
+# keep reporting QUOTA below, which is expected, not a bug. Registered as
+# recurring Windows Scheduled Task "ClaudeAuto-AVEarningsPacing" (see
+# AUTOMATION.md). Archives output, leaves a visible flag file if the run hit
+# AV's rate-limit response with no real progress or crashed outright.
 
 $repo = "C:\Users\zande\PycharmProjects\financial-data-pipeline"
 $py = "C:\ProgramData\anaconda3\python.exe"
@@ -31,7 +38,7 @@ if ($exit -ne 0) {
         Out-File $flag -Encoding utf8
 } elseif ($rateLimited) {
     $status = "QUOTA"
-    "AV earnings pacing run on $stamp hit the daily rate limit -- likely no real progress.`n$summaryLine`nFull report: $report`nRetry in tomorrow's ~10:05am gap." |
+    "AV earnings pacing run on $stamp hit the daily rate limit -- likely no real progress.`n$summaryLine`nFull report: $report`nExpected until earnings_sentiment_tool's transcript cache completes (~2026-08-06); retries automatically tomorrow at 10:45am." |
         Out-File $flag -Encoding utf8
 } else {
     if (Test-Path $flag) { Remove-Item $flag -Force }
