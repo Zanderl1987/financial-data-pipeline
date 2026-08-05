@@ -1054,6 +1054,61 @@ def compact_curated(passed_specs: list[PipelineSpec]) -> None:
         print(f"  Compacted {len(df)} table(s); removed {removed:,} duplicate row(s).")
 
 
+def sync_huggingface(
+    has_new_data: bool,
+    compact_enabled: bool,
+    dry_run: bool,
+    hf_sync_enabled: bool,
+) -> RunResult:
+    """
+    Push the recompacted curated snapshot to the public HuggingFace dataset
+    and verify the upload actually landed remotely.
+
+    Only ever meaningful when curated data was just recompacted this run
+    (compact_enabled) -- that ordering is what keeps this safe from
+    publishing stale data, on top of curated.dedup()'s own key-uniqueness
+    guarantee (see tests/test_curated.py). This function adds no new
+    duplicate-detection logic of its own.
+    """
+    if dry_run:
+        return RunResult("hf_sync", "SKIP", 0.0, "dry run, skipping sync")
+    if not hf_sync_enabled:
+        return RunResult("hf_sync", "SKIP", 0.0, "--no-hf-sync set, skipping sync")
+    if not compact_enabled:
+        return RunResult("hf_sync", "SKIP", 0.0, "--no-compact set, skipping sync")
+    if not has_new_data:
+        return RunResult("hf_sync", "SKIP", 0.0, "no pipeline passed, nothing new to sync")
+    if not (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")):
+        return RunResult("hf_sync", "SKIP", 0.0, "no HF_TOKEN/HUGGINGFACE_TOKEN set")
+
+    start = time.time()
+    try:
+        import upload_huggingface
+        from huggingface_hub import HfApi
+
+        stats = upload_huggingface.main()
+        if stats is None:
+            return RunResult(
+                "hf_sync", "FAIL", time.time() - start,
+                "upload_huggingface.main() returned no stats",
+            )
+
+        remote_files = set(HfApi().list_repo_files(stats["repo_id"], repo_type="dataset"))
+        missing = sorted(f for f in stats["files"] if f not in remote_files)
+        duration = time.time() - start
+
+        if missing:
+            note = f"{len(missing)} table(s) missing remotely: {', '.join(missing[:5])}"
+            return RunResult("hf_sync", "FAIL", duration, note)
+
+        print("\n-- HuggingFace Sync --")
+        print(f"  {stats['tables']} tables, {stats['rows']:,} rows, "
+              f"{stats['size_mb']:.1f} MB, verified remotely.")
+        return RunResult("hf_sync", "PASS", duration, "")
+    except Exception as exc:  # noqa: BLE001 -- never let HF sync sink a run
+        return RunResult("hf_sync", "FAIL", time.time() - start, f"sync error: {exc}")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> int:
