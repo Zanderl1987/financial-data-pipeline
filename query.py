@@ -66,6 +66,19 @@ def _curated_file(table: str) -> str:
     return os.path.join(_CURATED_ROOT, table, f"{table}.parquet").replace("\\", "/")
 
 
+# Pilot tables mirrored into the local Iceberg warehouse by migrate_pilot.py.
+# query.py reads these via real `iceberg_scan` calls (preferred over the curated
+# parquet snapshot when the Iceberg table exists). See iceberg_pilot.py.
+PILOT_ICEBERG_TABLES = {"prices", "macro", "fundamentals_annual", "fundamentals_quarterly"}
+
+
+def _pilot_iceberg_metadata(table: str) -> str | None:
+    """Latest *.metadata.json for a pilot Iceberg table, or None."""
+    import iceberg_pilot
+
+    return iceberg_pilot.latest_metadata(f"{iceberg_pilot.PILOT_NAMESPACE}.{table}")
+
+
 # ---------------------------------------------------------------------------
 # Table catalog — maps logical names to Parquet glob patterns
 # ---------------------------------------------------------------------------
@@ -586,6 +599,17 @@ def _register_views(con: duckdb.DuckDBPyConnection) -> None:
     layer — see curated.py.
     """
     for name, glob_path in CATALOG.items():
+        if name in PILOT_ICEBERG_TABLES:
+            metadata = _pilot_iceberg_metadata(name)
+            # Iceberg is an additional curated-style snapshot, so it only takes
+            # precedence when USE_CURATED is True (curated.py's _raw_reads forces
+            # raw globs — pilot tables must NOT read back from their own mirror).
+            if USE_CURATED and metadata:
+                con.execute(f"""
+                    CREATE OR REPLACE VIEW {name} AS
+                    SELECT * FROM iceberg_scan('{metadata}')
+                """)
+                continue
         curated = _curated_file(name)
         if USE_CURATED and os.path.exists(curated.replace("/", os.sep)):
             con.execute(f"""

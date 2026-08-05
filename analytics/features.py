@@ -145,6 +145,13 @@ def _asof_fundamentals(panel: pd.DataFrame) -> pd.DataFrame:
 
     For each (symbol, date) row, attaches the most recent annual fact whose
     filing date is on or before that date — no look-ahead.
+
+    A single 10-K filing reports several fiscal years of income-statement
+    history, so multiple rows share the same (symbol, filed). The ASOF source is
+    deduplicated to the LATEST fiscal year (period_end DESC, then newest
+    fetched_at) per (symbol, filed) so the join is deterministic regardless of
+    physical file order — otherwise the chosen value silently depends on which
+    engine (read_parquet vs iceberg_scan) served the rows.
     """
     if not _has_data("fundamentals_annual"):
         return panel
@@ -159,8 +166,17 @@ def _asof_fundamentals(panel: pd.DataFrame) -> pd.DataFrame:
                 FROM _panel p
                 ASOF LEFT JOIN (
                     SELECT symbol, CAST(filed AS DATE) AS filed, value
-                    FROM fundamentals_annual
-                    WHERE metric = '{metric}' AND form = '10-K' AND filed IS NOT NULL
+                    FROM (
+                        SELECT symbol, filed, value,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY symbol, CAST(filed AS DATE)
+                                   ORDER BY CAST(period_end AS DATE) DESC, fetched_at DESC
+                               ) AS _rn
+                        FROM fundamentals_annual
+                        WHERE metric = '{metric}' AND form = '10-K'
+                          AND filed IS NOT NULL
+                    )
+                    WHERE _rn = 1
                 ) f
                 ON p.symbol = f.symbol AND p.date >= f.filed
             """).df()

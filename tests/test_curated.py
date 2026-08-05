@@ -111,3 +111,44 @@ def test_curated_views_have_no_duplicate_keys(table):
         f"FROM {table} GROUP BY {keycsv} HAVING COUNT(*) > 1)"
     ).iloc[0, 0]
     assert dups == 0, f"{table} has {dups} duplicated keys after curation"
+
+
+class TestPeriodEndNormalization:
+    """period_end is a natural-key column stored inconsistently across snapshots
+    (some write bare '2017-09-30', others timestamp '2017-09-30 00:00:00'), which
+    used to create phantom duplicates that made downstream drop_duplicates/ASOF
+    joins order-sensitive. curated must normalize to date-only before dedup."""
+
+    def _frame(self):
+        # same fact (cik/metric/period_end/form/unit) fetched in two snapshots
+        return pd.DataFrame({
+            "cik":           ["123", "123", "123", "123"],
+            "metric":        ["revenue"] * 4,
+            "period_end":    ["2017-09-30", "2017-09-30 00:00:00",
+                              "2018-09-29", "2018-09-29 00:00:00"],
+            "fiscal_period": ["FY"] * 4,
+            "form":          ["10-K"] * 4,
+            "unit":          ["USD"] * 4,
+            "value":         [100.0, 101.5, 200.0, 202.0],  # later fetch is correction
+            "fetched_at":    ["2026-06-15T00:00:00", "2026-08-04T00:00:00",
+                              "2026-06-15T00:00:00", "2026-08-04T00:00:00"],
+        })
+
+    def test_normalizes_period_end_format_before_dedup(self):
+        out = curated.dedup("fundamentals_annual", self._frame())
+        # both format variants of the same date must collapse to ONE fact
+        assert len(out) == 2
+        assert sorted(out["value"].tolist()) == [101.5, 202.0]  # newest fetch wins
+
+    def test_output_period_end_is_date_only(self):
+        out = curated.dedup("fundamentals_annual", self._frame())
+        assert not out["period_end"].astype(str).str.contains(" ").any()
+
+    def test_non_fundamentals_table_untouched(self):
+        # prices' natural key has no period_end — normalization is a no-op
+        df = pd.DataFrame({
+            "symbol": ["AAPL"], "date": ["2024-01-02"], "close": [1.0],
+            "fetched_at": ["t"],
+        })
+        out = curated.dedup("prices", df)
+        assert out.iloc[0]["close"] == 1.0

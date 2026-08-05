@@ -32,7 +32,7 @@ def yoy_growth(
         fiscal_year | prior_B | current_B | yoy_pct | period_end
     """
     ann = q.load("fundamentals_annual")
-    ann["period_end"] = pd.to_datetime(ann["period_end"])
+    ann["period_end"] = pd.to_datetime(ann["period_end"], format="mixed")
 
     mask = (ann["metric"] == metric) & (ann["form"] == "10-K") & ann["symbol"].ne("")
     if symbols is not None:
@@ -83,7 +83,7 @@ def valuation(symbols: "list[str] | str | None" = None) -> pd.DataFrame:
     if ann.empty:
         return latest_prices.assign(pe=None, ps=None, pb=None)
 
-    ann["period_end"] = pd.to_datetime(ann["period_end"])
+    ann["period_end"] = pd.to_datetime(ann["period_end"], format="mixed")
 
     def _latest(metric_name: str, col: str) -> pd.DataFrame:
         return (ann[ann["metric"] == metric_name]
@@ -131,7 +131,7 @@ def top_by_metric(
     if ann.empty:
         return pd.DataFrame()
 
-    ann["period_end"] = pd.to_datetime(ann["period_end"])
+    ann["period_end"] = pd.to_datetime(ann["period_end"], format="mixed")
 
     sub = (ann[(ann["metric"] == metric) & (ann["form"] == form) & ann["symbol"].ne("")]
            .sort_values("period_end", ascending=False)

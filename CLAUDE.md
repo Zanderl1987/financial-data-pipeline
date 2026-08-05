@@ -113,6 +113,29 @@ full diagnostic trail.
   absolute paths for any command touching Iceberg state if there's been a `cd`
   earlier in the session, or re-run `pwd` before trusting a "this repo" result.
 
+## Iceberg pilot tables (`pilot/`) — DuckDB-readable mirrors (2026-08-04)
+
+`prices`, `macro`, `fundamentals_annual`, `fundamentals_quarterly` are mirrored
+into `storage/iceberg/pilot/` (catalog `storage/iceberg/pilot_catalog.db`) so
+`query.py` reads them via **real `iceberg_scan`** — the only tables that do.
+`query.py` prefers `iceberg_scan(<latest metadata.json>)` for these 4, falls
+back to curated parquet when the mirror is absent.
+
+**The Windows URI gotcha that blocks every other Iceberg table here:** pyiceberg's
+default `PyArrowFileIO` writes two-slash `file://C:/...` URIs into table
+`location` + manifest paths, which DuckDB's `iceberg_scan` cannot open on
+Windows ("Cannot open file"). The FIX is to load the catalog with
+`py-io-impl=pyiceberg.io.fsspec.FsspecFileIO` AND a **three-slash** warehouse
+(`file:///C:/...`); then pyiceberg writes URIs BOTH tools read. Existing
+`constituents.*`/`shipping.*` tables predate this and still scan-fail in DuckDB
+(they're read via parquet globs in query.py instead). Don't create new Iceberg
+tables with the 2-slash pattern.
+
+Tooling: `iceberg_pilot.py` (catalog loader + `latest_metadata()` +
+`replace_from_parquet()` full-replace sync) and `migrate_pilot.py` — run the
+latter after `curated.py` to refresh the mirrors (manual by design):
+`C:\ProgramData\anaconda3\python.exe migrate_pilot.py` (or `--only prices,...`).
+
 ## Adding a new pipeline — wiring checklist
 
 1. Standalone `<name>_pipeline.py` at repo root. Free/public sources only.

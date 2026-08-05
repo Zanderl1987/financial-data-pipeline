@@ -47,6 +47,29 @@ CURATED_ROOT = os.path.join(
 # meaningful for "is this the same row" comparisons.
 _BOOKKEEPING = {"fetched_at", "year", "month"}
 
+# Tables whose natural key contains `period_end` — a date that raw snapshots
+# store inconsistently: the 2026-06-15 fundamentals file has it as a bare
+# "2017-09-30" string while later snapshots write timestamp[us]
+# ("2017-09-30 00:00:00"). union_by_name=True coerces the union to strings, so
+# the SAME fact survives as two rows and the natural-key dedup (which sees
+# period_end as a string) never collapses them. Normalize to a canonical
+# date-only string BEFORE dedup so one row per fact survives (newest fetched_at
+# wins) and downstream order-sensitive picks (ASOF joins, yoy drop_duplicates)
+# stop depending on physical file order. Discovered 2026-08-04 during iceberg
+# pilot verification: fundamentals_annual carried 1,228,766 such duplicates
+# (47% of its rows).
+_PERIOD_END_TABLES = {"fundamentals_annual", "fundamentals_quarterly"}
+
+
+def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalize period_end to date-only before dedup (see _PERIOD_END_TABLES)."""
+    if table in _PERIOD_END_TABLES and "period_end" in df.columns:
+        df = df.copy()
+        df["period_end"] = pd.to_datetime(
+            df["period_end"], errors="coerce", format="mixed"
+        ).dt.strftime("%Y-%m-%d")
+    return df
+
 # ---------------------------------------------------------------------------
 # Natural-key registry
 # ---------------------------------------------------------------------------
@@ -339,6 +362,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     """Deduplicate a raw DataFrame on its natural key, keeping the latest version."""
     if df.empty:
         return df
+    df = _normalize_period_end(table, df)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)

@@ -17,6 +17,8 @@ sys.path.insert(0, REPO_ROOT)
 
 from analytics import features, feature_matrix
 
+import query as q
+
 
 def _synthetic_panel(n=300):
     dates = pd.bdate_range("2022-01-03", periods=n)
@@ -69,6 +71,63 @@ class TestAlternativeBlocks:
         out = block(self.panel.copy())
         assert len(out) == len(self.panel)
         assert {"symbol", "date", "close"}.issubset(out.columns)
+
+
+class TestAsofFundamentalsDeterminism:
+    """Regression (2026-08-04): a single 10-K filing reports several fiscal
+    years, so multiple fundamentals rows share the same (symbol, filed). The
+    ASOF join must deterministically pick the LATEST fiscal year — otherwise
+    the chosen value depends on physical file order (read_parquet vs
+    iceberg_scan served different values, silently changing fund_* features
+    and backtest results)."""
+
+    def _con(self, monkeypatch, df: pd.DataFrame):
+        import duckdb
+        con = duckdb.connect()
+        con.register("fundamentals_annual", df)
+        monkeypatch.setattr(q, "_con", lambda: con)
+        monkeypatch.setattr(features, "_has_data", lambda table: table == "fundamentals_annual")
+        return con
+
+    def test_latest_fiscal_year_wins_per_filing(self, monkeypatch):
+        # One 10-K filed 2020-10-30 reports FY2017, FY2018, FY2019 revenue.
+        # ASOF on filed must return the FY2019 value (latest period_end), not
+        # whatever row happens to be first physically.
+        facts = pd.DataFrame({
+            "metric":       ["revenue"] * 3,
+            "form":         ["10-K"] * 3,
+            "symbol":       ["AAPL"] * 3,
+            "period_end":   ["2017-09-30", "2018-09-29", "2019-09-28"],
+            "filed":        ["2020-10-30"] * 3,
+            "value":        [1.0, 2.0, 3.0],
+            "fetched_at":   ["2026-08-04T00:00:00"] * 3,
+        })
+        self._con(monkeypatch, facts)
+        panel = pd.DataFrame({
+            "symbol": ["AAPL"], "date": [pd.Timestamp("2021-01-15")],
+        })
+        out = features._asof_fundamentals(panel)
+        assert out["fund_revenue"].iloc[0] == 3.0
+
+    def test_oldest_filing_not_visible_before_filed_date(self, monkeypatch):
+        # Revenue from a filing not yet public on the panel date must be absent
+        # (no look-ahead), and the most recent public filing's latest year wins.
+        facts = pd.DataFrame({
+            "metric":     ["revenue"] * 4,
+            "form":       ["10-K"] * 4,
+            "symbol":     ["MSFT"] * 4,
+            "period_end": ["2017-06-30", "2018-06-30", "2019-06-30", "2020-06-30"],
+            "filed":      ["2019-08-01", "2019-08-01", "2020-08-01", "2020-08-01"],
+            "value":      [10.0, 20.0, 30.0, 40.0],
+            "fetched_at": ["2026-08-04T00:00:00"] * 4,
+        })
+        self._con(monkeypatch, facts)
+        panel = pd.DataFrame({
+            "symbol": ["MSFT"], "date": [pd.Timestamp("2019-09-01")],
+        })
+        out = features._asof_fundamentals(panel)
+        # only the 2019-08-01 filing is public -> its latest year is 2018-06-30
+        assert out["fund_revenue"].iloc[0] == 20.0
 
 
 class TestFeatureMatrixIntegration:

@@ -409,13 +409,62 @@ class TestCatalogPaths:
         )
 
 
+class TestPilotIcebergViews:
+    """Pilot tables should be backed by iceberg_scan when an Iceberg mirror
+    exists, and fall back to the curated parquet otherwise."""
+
+    def test_pilot_tables_defined(self):
+        assert q.PILOT_ICEBERG_TABLES == {
+            "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+        }
+
+    def test_iceberg_metadata_wins_over_curated(self, monkeypatch, tmp_path):
+        import pandas as pd
+        import pyarrow.parquet as pq
+        import iceberg_pilot
+
+        # Point the pilot warehouse at a temp dir and build a real mini table.
+        monkeypatch.setattr(iceberg_pilot, "ICEBERG_WAREHOUSE", tmp_path)
+        monkeypatch.setattr(iceberg_pilot, "PILOT_CATALOG_DB", tmp_path / "pilot_catalog.db")
+        df = pd.DataFrame({
+            "symbol": ["AAPL", "MSFT"],
+            "date": ["2024-01-02", "2024-01-02"],
+            "close": [100.0, 50.0],
+        })
+        pq_path = tmp_path / "prices.parquet"
+        df.to_parquet(pq_path, index=False)
+        iceberg_pilot.replace_from_parquet("pilot.prices", str(pq_path))
+
+        q.reload()
+        con = q._con()
+        sql = con.execute(
+            "SELECT sql FROM duckdb_views() WHERE view_name='prices'"
+        ).fetchone()[0]
+        assert "iceberg_scan" in sql
+        # and the view reads the mirrored rows through the real catalog
+        n = q.sql("SELECT COUNT(*) AS n FROM prices").iloc[0]["n"]
+        assert n == 2
+
+    def test_curated_fallback_when_no_iceberg(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(q, "_pilot_iceberg_metadata", lambda t: None)
+        # point curated root at an empty temp dir so the fallback is the raw glob
+        monkeypatch.setattr(q, "_CURATED_ROOT", tmp_path)
+        q.reload()
+        con = q._con()
+        sql = con.execute(
+            "SELECT sql FROM duckdb_views() WHERE view_name='prices'"
+        ).fetchone()
+        # prices' raw glob exists in storage/raw -> view registered via parquet
+        assert sql is not None
+        assert "iceberg_scan" not in sql[0]
+
+
 class TestDiscoveryHelpers:
     def test_tables_runs_without_error(self):
         df = q.tables()
         assert df is not None
         assert "table" in df.columns
         assert "rows" in df.columns
-
     def test_tables_returns_all_catalog_entries(self):
         df = q.tables()
         registered = set(df["table"].tolist())
