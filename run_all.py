@@ -18,6 +18,7 @@ Usage
   python run_all.py --dry-run              # print commands, don't execute
   python run_all.py --no-validate          # skip post-run validation
   python run_all.py --no-compact           # skip post-run curated compaction
+  python run_all.py --no-hf-sync           # skip post-run HuggingFace dataset sync
 """
 
 import argparse
@@ -1054,6 +1055,77 @@ def compact_curated(passed_specs: list[PipelineSpec]) -> None:
         print(f"  Compacted {len(df)} table(s); removed {removed:,} duplicate row(s).")
 
 
+def sync_huggingface(
+    has_new_data: bool,
+    compact_enabled: bool,
+    dry_run: bool,
+    hf_sync_enabled: bool,
+) -> RunResult:
+    """
+    Push the curated snapshot (the full storage/curated/ folder) to the
+    public HuggingFace dataset and verify the upload actually landed remotely.
+
+    Gated on compact_enabled -- i.e. we never sync before curated compaction
+    has had a chance to run at all this session. That guarantee is narrower
+    than it may sound: compact_curated() only recompacts tables whose
+    pipeline PASSed *this specific run*, but the sync afterward uploads ALL
+    curated tables, most of which were NOT touched this run. So the ordering
+    protects the tables that ran this run from being published stale -- it
+    does not mean every table in the published snapshot was just freshly
+    recompacted. Long-term freshness of untouched tables still rests on
+    curated.dedup()'s own key-uniqueness guarantee (see tests/test_curated.py).
+    This function adds no new duplicate-detection logic of its own.
+    """
+    if dry_run:
+        return RunResult("hf_sync", "SKIP", 0.0, "dry run, skipping sync")
+    if not hf_sync_enabled:
+        return RunResult("hf_sync", "SKIP", 0.0, "--no-hf-sync set, skipping sync")
+    if not compact_enabled:
+        return RunResult("hf_sync", "SKIP", 0.0, "--no-compact set, skipping sync")
+    if not has_new_data:
+        return RunResult("hf_sync", "SKIP", 0.0, "no pipeline passed, nothing new to sync")
+    if not (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")):
+        return RunResult("hf_sync", "SKIP", 0.0, "no HF_TOKEN/HUGGINGFACE_TOKEN set")
+
+    start = time.time()
+    try:
+        import upload_huggingface
+        from huggingface_hub import HfApi
+
+        stats = upload_huggingface.main()
+        if stats is None:
+            return RunResult(
+                "hf_sync", "FAIL", time.time() - start,
+                "upload_huggingface.main() returned no stats",
+            )
+        if not stats.get("tables") or not stats.get("files"):
+            # Second, independent guard: upload_huggingface.main() already refuses
+            # to publish when storage/curated/ has zero parquet files, but if that
+            # guard is ever bypassed or changed, don't let an empty stats dict
+            # vacuously PASS here (missing = [] when stats["files"] == []).
+            return RunResult(
+                "hf_sync", "FAIL", time.time() - start,
+                "no curated parquet files found, refusing to publish",
+            )
+
+        remote_files = set(HfApi().list_repo_files(stats["repo_id"], repo_type="dataset"))
+        missing = sorted(f for f in stats["files"] if f not in remote_files)
+        duration = time.time() - start
+
+        if missing:
+            shown = ", ".join(missing[:5])
+            suffix = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
+            note = f"{len(missing)} table(s) missing remotely: {shown}{suffix}"
+            return RunResult("hf_sync", "FAIL", duration, note)
+
+        print("\n-- HuggingFace Sync --")
+        print(f"  {stats['tables']} tables, {stats['rows']:,} rows, "
+              f"{stats['size_mb']:.1f} MB, verified remotely.")
+        return RunResult("hf_sync", "PASS", duration, "")
+    except Exception as exc:  # noqa: BLE001 -- never let HF sync sink a run
+        return RunResult("hf_sync", "FAIL", time.time() - start, f"sync error: {exc}")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1089,6 +1161,10 @@ def main() -> int:
     parser.add_argument(
         "--no-compact", action="store_true",
         help="Skip post-run curated compaction (dedup of the tables that ran).",
+    )
+    parser.add_argument(
+        "--no-hf-sync", action="store_true",
+        help="Skip post-run HuggingFace dataset sync.",
     )
     args = parser.parse_args()
 
@@ -1145,9 +1221,25 @@ def main() -> int:
         passed_specs = [spec_by_name[r.name] for r in results if r.status == "PASS"]
         compact_curated(passed_specs)
 
+    has_new_data = any(r.status == "PASS" for r in results)
+    hf_result = sync_huggingface(
+        has_new_data=has_new_data,
+        compact_enabled=compact,
+        dry_run=args.dry_run,
+        hf_sync_enabled=not args.no_hf_sync,
+    )
+    results.append(hf_result)
+
     _print_summary(results, args.backfill, start_time)
 
-    return 0 if all(r.status in ("PASS", "SKIP", "DRY RUN") for r in results) else 1
+    # hf_sync is excluded from the exit-code computation (but still shown in the
+    # summary table above): an HF-side problem (rate limit, transient network
+    # error, expired token) is not a data-collection failure, and the daily
+    # accumulator scheduled task treats any nonzero exit code here as "the whole
+    # run failed" (see AUTOMATION.md) -- we don't want an HF hiccup to trip that
+    # alarm when real pipeline data collection succeeded.
+    return 0 if all(r.status in ("PASS", "SKIP", "DRY RUN")
+                     for r in results if r.name != "hf_sync") else 1
 
 
 if __name__ == "__main__":

@@ -28,6 +28,19 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   reports any FAIL. Any future Claude session should check for that file. Auto-clears on
   the next clean run.
 
+## HuggingFace dataset sync (`run_all.py`)
+
+`run_all.py` automatically syncs `storage/curated/` to the public HuggingFace dataset
+(`ZanderL1337/financial-data-pipeline`) at the end of every run, via `upload_huggingface.py`.
+The sync is gated on all of: `HF_TOKEN`/`HUGGINGFACE_TOKEN` being set, `--no-compact` not
+being passed (curated compaction must have had a chance to run this session), and at least
+one pipeline having PASSed. It uploads the full curated snapshot, then verifies the upload
+by listing remote files — not just the tables that ran this session. This can be disabled
+per-invocation with `--no-hf-sync`. An `hf_sync` FAIL (e.g. rate limit, transient network
+error, expired token) is reported in the summary table but does **not** flip `run_all.py`'s
+overall exit code — it's an HF-side concern, distinct from a pipeline/data-collection
+failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
+
 ## Managing
 
 ```powershell
