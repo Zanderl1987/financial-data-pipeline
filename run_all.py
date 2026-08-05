@@ -18,6 +18,7 @@ Usage
   python run_all.py --dry-run              # print commands, don't execute
   python run_all.py --no-validate          # skip post-run validation
   python run_all.py --no-compact           # skip post-run curated compaction
+  python run_all.py --no-hf-sync           # skip post-run HuggingFace dataset sync
 """
 
 import argparse
@@ -1145,6 +1146,10 @@ def main() -> int:
         "--no-compact", action="store_true",
         help="Skip post-run curated compaction (dedup of the tables that ran).",
     )
+    parser.add_argument(
+        "--no-hf-sync", action="store_true",
+        help="Skip post-run HuggingFace dataset sync.",
+    )
     args = parser.parse_args()
 
     # Build filtered pipeline list
@@ -1199,6 +1204,15 @@ def main() -> int:
         spec_by_name = {p.name: p for p in PIPELINES}
         passed_specs = [spec_by_name[r.name] for r in results if r.status == "PASS"]
         compact_curated(passed_specs)
+
+    has_new_data = any(r.status == "PASS" for r in results)
+    hf_result = sync_huggingface(
+        has_new_data=has_new_data,
+        compact_enabled=compact,
+        dry_run=args.dry_run,
+        hf_sync_enabled=not args.no_hf_sync,
+    )
+    results.append(hf_result)
 
     _print_summary(results, args.backfill, start_time)
 

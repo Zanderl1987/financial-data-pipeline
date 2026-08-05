@@ -131,3 +131,33 @@ class TestUploadAndVerify:
         )
         assert result.status == "FAIL"
         assert "no stats" in result.note
+
+
+import subprocess
+
+
+class TestCliWiring:
+    def test_no_hf_sync_flag_is_recognized(self):
+        """
+        --dry-run makes every pipeline a no-op (see run_pipeline's dry_run
+        branch, run_all.py:935-938) so this exercises the real argparse +
+        main() wiring end-to-end with no network calls and no subprocess
+        pipeline execution.
+        """
+        result = subprocess.run(
+            [sys.executable, os.path.join(REPO_ROOT, "run_all.py"),
+             "--dry-run", "--stage", "1", "--no-hf-sync"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "hf_sync" in result.stdout
+
+    def test_dry_run_shows_hf_sync_skip_reason(self):
+        result = subprocess.run(
+            [sys.executable, os.path.join(REPO_ROOT, "run_all.py"),
+             "--dry-run", "--stage", "1"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "hf_sync" in result.stdout
+        assert "dry run" in result.stdout
