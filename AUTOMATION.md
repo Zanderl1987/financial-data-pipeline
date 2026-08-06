@@ -81,9 +81,11 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
 ## ClaudeAuto-FundamentalsHFRefresh (Windows Scheduled Task)
 
 - **What:** runs `scripts\fundamentals_hf_refresh.ps1` every Sunday at 8:00 AM (catches up
-  after boot if the machine was off): `fundamentals_pipeline.py --full-market --no-cache`
-  (`--no-cache` forces a real EDGAR re-download + re-push instead of short-circuiting on the
-  pipeline's own HF cache check) -> `curated.py` -> `verify_hf.py --repo
+  after boot if the machine was off): `fundamentals_pipeline.py --full-market` (extraction
+  only; the pipeline no longer pushes raw files to HF) -> `curated.py` ->
+  `build_fundamentals_dataset.py` (assembles the Option-D snapshot — facts/companies/
+  filings/wide-latest/metrics — and pushes all files to HF in ONE atomic commit, one
+  coherent revision per run) -> `verify_hf.py --repo
   ZanderL1337/financial-fundamentals`, combined output archived to `storage\quality_reports\
   fundamentals_hf_YYYY-MM-DD.txt`, one summary line per week appended to
   `storage\quality_reports\fundamentals_hf_summary_log.txt`. Added 2026-08-04 after the
@@ -91,9 +93,14 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
   Weekly cadence chosen deliberately: SEC filings don't change fast enough to justify a daily
   ~1.3GB EDGAR re-download, and Sunday 8:00 AM avoids overlapping `ClaudeAuto-DailyAccumulators`
   (daily 9:00 AM) and `ClaudeAuto-PipelineQuality` (Monday 9:30 AM).
-- **Failure signal:** `FUNDAMENTALS_HF_FAIL.txt` appears at repo root if any of the three
-  steps fails (pipeline crash, `curated.py` failure, or `verify_hf.py` VERIFY FAIL — stale
-  data, row-count drop, or excess duplicate rate). Any future Claude session should check for
+- **2026-08-05 schema change:** dataset converted from two long files to the 5-file
+  Option-D snapshot (foreign issuers via `ifrs-full`, forms 20-F/40-F/6-K/10-K/A/10-Q/A/8-K,
+  accession-tracked restatements). Old `financials_*_latest.parquet` filenames now hold the
+  WIDE latest-filing-wins tables. See `SESSION_NOTES_2026-08-05.md`.
+- **Failure signal:** `FUNDAMENTALS_HF_FAIL.txt` appears at repo root if any of the four
+  steps fails (pipeline crash, `curated.py` failure, `build_fundamentals_dataset.py` failure,
+  or `verify_hf.py` VERIFY FAIL — stale data, row-count drop, excess duplicate rate, or
+  snapshot.json/actual row-count mismatch). Any future Claude session should check for
   that file. Auto-clears on the next clean run.
 
 ## Managing

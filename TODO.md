@@ -1,6 +1,53 @@
-# TODO — 2026-08-04
+# TODO — 2026-08-05
 
-## Completed This Session (see SESSION_NOTES_2026-08-04.md for detail)
+## This Session (2026-08-05, see SESSION_NOTES_2026-08-05.md for detail)
+
+- [x] **HF `financial-fundamentals` expansion — research + design DONE (2026-08-05)**:
+      live EDGAR probes found 2 gaps in `fundamentals_pipeline.py` — taxonomy gate
+      reads only `facts.us-gaap` (foreign filers TSM/RY/NOK/INFY/TM/BABA/PDD/NIO are
+      all-`ifrs-full`, contributing 0 rows) and form gate keeps only 10-K/10-Q
+      (`20-F`, `20-F/A`, `40-F`, `6-K`, `10-K/A`, `10-Q/A`, `8-K` verified to carry
+      tagged facts; S-1/S-1/A ruled out — no facts tagged against them). IFRS tag
+      mapping produced (EPS has NO ifrs-full tag → IFRS filers get 8/10 metrics,
+      accepted). Database-design review → user approved **Option D**: 5 files per
+      snapshot (long atomic `facts.parquet` + `companies.parquet` + `filings.parquet`
+      + wide `financials_annual_latest`/`financials_quarterly_latest` latest-filing-wins
+      + `metrics.parquet` reference); per-filing tables rejected. "Living Databases"
+      paper (arXiv 2605.00676v1) reviewed → 2 rules adopted: one coherent pipeline run
+      per HF revision, additive-only schema changes. Old HF filenames preserved.
+- [x] **Extend `fundamentals_pipeline.py` — DONE (2026-08-05)**: loops `facts` over
+      us-gaap + ifrs-full (IFRS tag map verified live on TSM/RY: Revenue,
+      ProfitLoss, GrossProfit, ProfitLossFromOperatingActivities, Assets,
+      Liabilities, CashFlowsFromUsedInOperatingActivities,
+      NumberOfSharesIssuedAndFullyPaid; EPS has no IFRS tag -> 8/10 metrics),
+      form allowlist now 10-K/10-K/A/20-F/20-F/A/40-F + 10-Q/10-Q/A/6-K/8-K/8-K/A
+      (S-1 ruled out — no facts), adds `taxonomy`/`accession_number`/`start_date`/
+      `duration_days` columns, extract dedup key now (taxonomy,start,end,form,accn)
+      so restatements are preserved at the fact level. BABA verified us-gaap (not
+      IFRS); TM files us-gaap 20-F.
+- [x] **Create `build_fundamentals_dataset.py` — DONE (2026-08-05)**: builds the
+      5-file Option-D snapshot from curated (facts/companies/filings/wide
+      annual+quarterly latest/metrics + README + snapshot.json); wide tables are
+      latest-filing-wins on (symbol, period_end) with per-metric value + unit
+      columns.
+- [x] **Rework HF push to a single coherent revision — DONE (2026-08-05)**:
+      pipeline no longer pushes raw files (extraction only); new
+      `hf_push_revision()` pushes all 8 snapshot files in ONE atomic `create_commit`
+      (paper rule 1). Removed obsolete hf_push/hf_pull/hf_append + HF-cache
+      short-circuit.
+- [x] **Update `scripts/fundamentals_hf_refresh.ps1` + `verify_hf.py` — DONE (2026-08-05)**:
+      ps1 chain is pipeline -> curated -> build (pushes) -> verify; verify_hf.py
+      rewritten for the new files (per-file kind checks, composite filings key,
+      snapshot.json/actual coherence, `--no-min-rows` for scratch smoke tests).
+- [x] **Live test + verify on HF — DONE (2026-08-05/06)**: 559/559 tests pass;
+      scratch-repo push+verify PASS (then deleted); full-market run (20,151
+      companies, 0 failed) -> curated -> build -> LIVE push to
+      ZanderL1337/financial-fundamentals -> verify_hf VERIFY PASS. Live dataset now
+      facts 5,180,975 rows (us-gaap 5,120,697 + ifrs-full 60,231), 16,881
+      companies, 415,581 filings, annual-latest 141,995, quarterly-latest 246,878,
+      all snapshot.json coherence OK.
+
+## Completed 2026-08-04 (see SESSION_NOTES_2026-08-04.md for detail)
 
 - [x] **HuggingFace `financial-fundamentals` dataset refresh — DONE (2026-08-04)**: confirmed
       public via HF API; re-ran `fundamentals_pipeline.py --full-market --no-cache` (needed

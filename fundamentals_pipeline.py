@@ -61,6 +61,39 @@ CONCEPTS = {
     "shares_outstanding":  ["CommonStockSharesOutstanding", "CommonStockSharesIssued"],
 }
 
+# IFRS (ifrs-full) candidates for foreign private issuers / Canadian banks that
+# file under IFRS instead of US GAAP. Some tags (ProfitLoss, GrossProfit, Assets,
+# Liabilities) are shared by both taxonomies; the rest are IFRS-specific. EPS has
+# NO ifrs-full tag, so IFRS filers get 8 of the 10 metrics (all except EPS).
+# Verified live 2026-08-05 against TSM / RY (334/298 ifrs-full tags each).
+IFRS_CONCEPTS = {
+    "revenue": [
+        "Revenue",
+        "RevenueFromContractsWithCustomers",
+    ],
+    "net_income": ["ProfitLoss"],
+    "eps_diluted": [],
+    "eps_basic":   [],
+    "gross_profit": ["GrossProfit"],
+    "operating_income": ["ProfitLossFromOperatingActivities"],
+    "total_assets":      ["Assets"],
+    "total_liabilities": ["Liabilities"],
+    "operating_cash_flow": ["CashFlowsFromUsedInOperatingActivities"],
+    "shares_outstanding":  ["NumberOfSharesIssuedAndFullyPaid"],
+}
+
+# Taxonomies to read from companyfacts (in priority order per company).
+TAXONOMIES = ["us-gaap", "ifrs-full"]
+
+# Filing forms whose tagged facts are real periodic financial data. Forms not in
+# these sets are dropped (e.g. S-1/S-1/A carry no facts at all). The annual
+# bucket holds full-year statements; the quarterly bucket holds interim
+# statements. 6-K (foreign interim reports) and 8-K (usually a tagged copy of an
+# interim press release) land in the quarterly bucket; 8-K facts are mostly
+# one-offs and are kept for completeness rather than value.
+ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F"}
+QUARTERLY_FORMS = {"10-Q", "10-Q/A", "6-K", "8-K", "8-K/A"}
+
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
 
 
@@ -164,23 +197,24 @@ def get_dji_symbols():
 # XBRL extraction — shared between DJI and full-market modes
 # ---------------------------------------------------------------------------
 
-def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
+def extract_concept(facts, metric_name, candidate_concepts, taxonomy):
     """
     Collect fact rows across all candidate XBRL concepts, deduplicating by
-    (period_end, form) so companies that switched concepts mid-history (e.g.
-    NVDA moving from RevenueFromContractWithCustomer to Revenues) return a
-    complete time series rather than only the first concept's data.
+    (taxonomy, start, end, form, accession) so companies that switched concepts
+    mid-history (e.g. NVDA moving from RevenueFromContractWithCustomer to
+    Revenues) return a complete time series rather than only the first concept's
+    data, while restatements filed under a new accession number are preserved.
     """
     rows = []
     seen: set[tuple] = set()
 
     for concept in candidate_concepts:
-        node = facts_us_gaap.get(concept)
+        node = facts.get(concept)
         if not node:
             continue
         for unit_key, entries in node.get("units", {}).items():
             for e in entries:
-                key = (e.get("end"), e.get("form"))
+                key = (taxonomy, e.get("start"), e.get("end"), e.get("form"), e.get("accn"))
                 if key in seen:
                     continue
                 seen.add(key)
@@ -190,11 +224,14 @@ def extract_concept(facts_us_gaap, metric_name, candidate_concepts):
                     "unit":          unit_key,
                     "value":         e.get("val"),
                     "period_end":    e.get("end"),
+                    "start_date":    e.get("start"),
+                    "accession_number": e.get("accn"),
                     "fiscal_year":   e.get("fy"),
                     "fiscal_period": e.get("fp"),
                     "form":          e.get("form"),
                     "filed":         e.get("filed"),
                     "frame":         e.get("frame"),
+                    "taxonomy":      taxonomy,
                 })
 
     return rows
@@ -205,30 +242,41 @@ def extract_company(data, symbol=""):
     Extract all configured metrics from a companyfacts JSON dict.
     Returns (annual_rows, quarterly_rows) as lists of dicts.
     Works for both HTTP-fetched and ZIP-sourced data.
+
+    Reads every taxonomy present (us-gaap for US domestic filers, ifrs-full for
+    foreign private issuers), tags each row with its taxonomy, and keeps only
+    the periodic forms in ANNUAL_FORMS / QUARTERLY_FORMS.
     """
     entity_name = data.get("entityName", symbol)
     cik = str(data.get("cik", "")).zfill(10)
-    facts_us_gaap = data.get("facts", {}).get("us-gaap", {})
-    if not facts_us_gaap:
+    facts = data.get("facts", {})
+    if not facts:
         return [], []
 
     fetch_ts = datetime.datetime.utcnow().isoformat()
     annual, quarterly = [], []
 
-    for metric_name, candidates in CONCEPTS.items():
-        for row in extract_concept(facts_us_gaap, metric_name, candidates):
-            enriched = {
-                **row,
-                "symbol":      symbol,
-                "entity_name": entity_name,
-                "cik":         cik,
-                "fetched_at":  fetch_ts,
-            }
-            form = enriched.get("form", "")
-            if form == "10-K":
-                annual.append(enriched)
-            elif form == "10-Q":
-                quarterly.append(enriched)
+    for taxonomy in TAXONOMIES:
+        taxonomy_facts = facts.get(taxonomy, {})
+        if not taxonomy_facts:
+            continue
+        concept_map = IFRS_CONCEPTS if taxonomy == "ifrs-full" else CONCEPTS
+        for metric_name, candidates in concept_map.items():
+            if not candidates:
+                continue
+            for row in extract_concept(taxonomy_facts, metric_name, candidates, taxonomy):
+                enriched = {
+                    **row,
+                    "symbol":      symbol,
+                    "entity_name": entity_name,
+                    "cik":         cik,
+                    "fetched_at":  fetch_ts,
+                }
+                form = enriched.get("form", "")
+                if form in ANNUAL_FORMS:
+                    annual.append(enriched)
+                elif form in QUARTERLY_FORMS:
+                    quarterly.append(enriched)
 
     return annual, quarterly
 
@@ -258,7 +306,9 @@ def process_company_dji(symbol, cik_padded, n_quarters=8):
             return None
         df = pd.DataFrame(rows)
         df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+        df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df["duration_days"] = (df["period_end"] - df["start_date"]).dt.days
         return df
 
     annual_df = to_df(annual_rows)
@@ -369,7 +419,9 @@ def _flush_batch(rows, tmpdir, filename):
         return
     df = pd.DataFrame(rows)
     df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["duration_days"] = (df["period_end"] - df["start_date"]).dt.days
     df.to_parquet(os.path.join(tmpdir, filename), index=False, compression="snappy")
 
 
@@ -397,146 +449,12 @@ def _merge_parquets(parts, output_path):
 
 
 # ---------------------------------------------------------------------------
-# Hugging Face Hub helpers
-# ---------------------------------------------------------------------------
-
-def hf_push(local_path, repo_id, filename_in_repo):
-    """Upload a parquet file to a Hugging Face dataset repo (creates repo if needed)."""
-    if not HF_TOKEN:
-        print("  HF_TOKEN not set — skipping upload. Add it to .env to enable.")
-        return
-    try:
-        from huggingface_hub import HfApi
-    except ImportError:
-        print("  huggingface_hub not installed. Run: pip install huggingface_hub")
-        return
-
-    api = HfApi()
-    try:
-        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
-        print(f"  Uploading {os.path.basename(local_path)} -> {repo_id}/{filename_in_repo} ...")
-        api.upload_file(
-            path_or_fileobj=local_path,
-            path_in_repo=filename_in_repo,
-            repo_id=repo_id,
-            repo_type="dataset",
-            token=HF_TOKEN,
-        )
-        print(f"  -> https://huggingface.co/datasets/{repo_id}")
-    except Exception as e:
-        print(f"  HF upload failed: {e}")
-
-
-def hf_pull(repo_id, filename_in_repo, dest_dir):
-    """
-    Download a file from HF Hub into dest_dir. Returns local path or None.
-    Uses HF's built-in cache — won't re-download if the file hasn't changed.
-    """
-    if not HF_TOKEN or not repo_id:
-        return None
-    try:
-        from huggingface_hub import hf_hub_download
-        path = hf_hub_download(
-            repo_id=repo_id,
-            filename=filename_in_repo,
-            repo_type="dataset",
-            token=HF_TOKEN,
-            local_dir=dest_dir,
-            local_dir_use_symlinks=False,
-        )
-        return path
-    except Exception:
-        return None
-
-
-def hf_append(fresh_path, repo_id, filename_in_repo):
-    """
-    Merge a fresh parquet snapshot into the existing file on HF and push the union.
-
-    Preserves the full accumulated history on HF (including restatement/filed
-    versions); collapses rows that are identical on every column EXCEPT
-    fetched_at, keeping the newest fetch. This is the default HF push path for
-    both full-market and DJI modes.
-    """
-    if not HF_TOKEN:
-        print("  HF_TOKEN not set — skipping upload. Add it to .env to enable.")
-        return
-    try:
-        from huggingface_hub import HfApi, hf_hub_download
-    except ImportError:
-        print("  huggingface_hub not installed. Run: pip install huggingface_hub")
-        return
-
-    api = HfApi()
-    try:
-        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
-
-        # Pull the current file from HF (force, so we merge with the live state).
-        existing_path = None
-        try:
-            existing_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename_in_repo,
-                repo_type="dataset",
-                token=HF_TOKEN,
-                force_download=True,
-            )
-        except Exception:
-            existing_path = None
-
-        fresh = pd.read_parquet(fresh_path)
-        for col in ("period_end", "fetched_at"):
-            if col in fresh.columns:
-                fresh[col] = pd.to_datetime(fresh[col], errors="coerce")
-
-        if existing_path and os.path.exists(existing_path):
-            old = pd.read_parquet(existing_path)
-            for col in ("period_end", "fetched_at"):
-                if col in old.columns:
-                    old[col] = pd.to_datetime(old[col], errors="coerce")
-            merged = pd.concat([old, fresh], ignore_index=True)
-            dupes = len(merged)
-            if "fetched_at" in merged.columns:
-                dedup_cols = [c for c in merged.columns if c != "fetched_at"]
-                merged = (
-                    merged.sort_values("fetched_at", na_position="first")
-                          .drop_duplicates(subset=dedup_cols, keep="last")
-                )
-            else:
-                merged = merged.drop_duplicates(keep="last")
-            print(f"  Merged {os.path.basename(fresh_path)} with existing {filename_in_repo}: "
-                  f"{len(old):,} + {len(fresh):,} -> {len(merged):,} rows "
-                  f"({dupes - len(merged):,} duplicates collapsed to newest fetch)")
-        else:
-            merged = fresh
-            print(f"  No existing {filename_in_repo} on HF — pushing fresh snapshot "
-                  f"({len(merged):,} rows)")
-
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
-        os.close(tmp_fd)
-        merged.to_parquet(tmp_path, index=False)
-        print(f"  Uploading merged {filename_in_repo} -> {repo_id} ...")
-        api.upload_file(
-            path_or_fileobj=tmp_path,
-            path_in_repo=filename_in_repo,
-            repo_id=repo_id,
-            repo_type="dataset",
-            token=HF_TOKEN,
-        )
-        print(f"  -> https://huggingface.co/datasets/{repo_id}")
-        os.unlink(tmp_path)
-    except Exception as e:
-        print(f"  HF append upload failed: {e}")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_hf_cache=True):
+def main(n_quarters=8, refresh_cik=False, full_market=False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     today = datetime.datetime.utcnow().strftime("%Y%m%d")
-    repo_id = hf_repo or HF_DATASET_REPO
 
     # ------------------------------------------------------------------ #
     # FULL-MARKET MODE                                                     #
@@ -554,19 +472,10 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         annual_out    = os.path.join(annual_partition,    f"fundamentals_full_annual_{today}.parquet")
         quarterly_out = os.path.join(quarterly_partition, f"fundamentals_full_quarterly_{today}.parquet")
 
-        # Check HF Hub first — skip the 7 GB download if fresh data is already there
-        if use_hf_cache and repo_id:
-            print(f"Checking HF Hub for cached data ({repo_id})...")
-            a_path = hf_pull(repo_id, "fundamentals_annual_latest.parquet", OUTPUT_DIR)
-            q_path = hf_pull(repo_id, "fundamentals_quarterly_latest.parquet", OUTPUT_DIR)
-            if a_path and q_path:
-                a_rows = pq.read_metadata(a_path).num_rows
-                q_rows = pq.read_metadata(q_path).num_rows
-                print(f"  Cache hit — using HF Hub data.")
-                print(f"  Annual:    {a_path} ({a_rows:,} rows)")
-                print(f"  Quarterly: {q_path} ({q_rows:,} rows)")
-                print("  Run with --no-cache to force a fresh download and reprocess.")
-                return
+        # (No HF-cache short-circuit here: the pipeline owns extraction only. The HF
+        # dataset is assembled from curated by build_fundamentals_dataset.py, which
+        # pushes the whole snapshot as one coherent revision. A fresh full-market
+        # extract always runs.)
 
         # Build reverse CIK map so full-market rows get ticker symbols populated
         cik_map = load_cik_map(force_refresh=refresh_cik)
@@ -588,16 +497,7 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         if os.path.exists(quarterly_out):
             print(f"Quarterly -> {quarterly_out} ({counts['quarterly']:,} rows)")
 
-        # Push to Hugging Face Hub — append (merge + dedup) is always the behavior,
-        # so the full accumulated history on HF survives every refresh.
-        if repo_id:
-            print("\nUploading to Hugging Face Hub (append mode)...")
-            if os.path.exists(annual_out):
-                hf_append(annual_out, repo_id, "fundamentals_annual_latest.parquet")
-            if os.path.exists(quarterly_out):
-                hf_append(quarterly_out, repo_id, "fundamentals_quarterly_latest.parquet")
-
-        print("\n--- COMPLETE ---")
+        print("\n--- COMPLETE (run curated.py then build_fundamentals_dataset.py to push to HF) ---")
         return
 
     # ------------------------------------------------------------------ #
@@ -631,20 +531,16 @@ def main(n_quarters=8, refresh_cik=False, full_market=False, hf_repo=None, use_h
         annual_df = pd.concat(annual_frames, ignore_index=True)
         path = write_partitioned(annual_df, ANNUAL_DIR, f"fundamentals_annual_{today}.parquet")
         print(f"\nAnnual   -> {path} ({len(annual_df)} rows, {annual_df['symbol'].nunique()} companies)")
-        if repo_id:
-            hf_append(path, repo_id, "fundamentals_annual_latest.parquet")
 
     if quarterly_frames:
         quarterly_df = pd.concat(quarterly_frames, ignore_index=True)
         path = write_partitioned(quarterly_df, QUARTERLY_DIR, f"fundamentals_quarterly_{today}.parquet")
         print(f"Quarterly -> {path} ({len(quarterly_df)} rows, {quarterly_df['symbol'].nunique()} companies)")
-        if repo_id:
-            hf_append(path, repo_id, "fundamentals_quarterly_latest.parquet")
 
     if failed:
         print(f"\nFailed/skipped ({len(failed)}): {', '.join(failed)}")
 
-    print("\n--- COMPLETE ---")
+    print("\n--- COMPLETE (run curated.py then build_fundamentals_dataset.py to push to HF) ---")
 
 
 if __name__ == "__main__":
@@ -661,23 +557,13 @@ if __name__ == "__main__":
         "--full-market", action="store_true",
         help=(
             "Download all ~15,000 public companies via companyfacts.zip (~1 GB download). "
-            "Checks HF Hub cache first. Requires HF_TOKEN + HF_DATASET_REPO in .env."
+            "The pipeline extracts raw data only; run curated.py then "
+            "build_fundamentals_dataset.py to assemble + push the HF dataset."
         ),
-    )
-    parser.add_argument(
-        "--hf-repo", type=str, default=None,
-        help="Hugging Face dataset repo ID (e.g. username/financial-fundamentals). "
-             "Falls back to HF_DATASET_REPO env var.",
-    )
-    parser.add_argument(
-        "--no-cache", action="store_true",
-        help="Force re-download from EDGAR even if HF Hub cache exists.",
     )
     args = parser.parse_args()
     main(
         n_quarters=args.quarters,
         refresh_cik=args.refresh_cik,
         full_market=args.full_market,
-        hf_repo=args.hf_repo,
-        use_hf_cache=not args.no_cache,
     )

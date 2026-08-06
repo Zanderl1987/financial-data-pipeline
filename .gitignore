@@ -17,6 +17,9 @@ storage/**/cik_map.json
 storage/dividend_research_cache.json
 storage/quality_reports/
 storage/reports/
+# HF fundamentals snapshot is a regenerable build artifact (built by
+# build_fundamentals_dataset.py; the authoritative copy lives on HF)
+storage/hf_fundamentals_snapshot/
 
 # cot_reports library dumps temp files to working directory
 Com95_16.txt
