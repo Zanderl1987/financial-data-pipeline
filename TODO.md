@@ -46,6 +46,9 @@
       facts 5,180,975 rows (us-gaap 5,120,697 + ifrs-full 60,231), 16,881
       companies, 415,581 filings, annual-latest 141,995, quarterly-latest 246,878,
       all snapshot.json coherence OK.
+- [x] **Committed + pushed — DONE (2026-08-05)**: commit `c3b4759` pushed to
+      `origin/master` (8 files, +894/-260). `.gitignore` now excludes
+      `storage/hf_fundamentals_snapshot/` (regenerable; HF is authoritative).
 
 ## Completed 2026-08-04 (see SESSION_NOTES_2026-08-04.md for detail)
 

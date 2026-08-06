@@ -155,3 +155,9 @@ All next steps DONE; live dataset updated.
 - verify_hf's filings dup check must use the composite key
   (accession, period, fiscal_year, fiscal_period) — one 10-K accession
   legitimately covers multiple fiscal years.
+
+### Committed
+
+- Commit `c3b4759` pushed to `origin/master` (`71be288..c3b4759`): 8 files
+  (+894/-260). `.gitignore` gained `storage/hf_fundamentals_snapshot/`
+  (regenerable build artifact; authoritative copy is on HF).
