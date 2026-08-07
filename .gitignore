@@ -40,3 +40,7 @@ storage/iceberg/pilot_catalog.db
 
 # Regenerable progress state for the long-running universe backfill
 schwab_universe_backfill_progress.json
+
+# Automation failure flags -- created/cleared by scheduled task scripts,
+# not repo state (see AUTOMATION.md)
+*_FAIL.txt

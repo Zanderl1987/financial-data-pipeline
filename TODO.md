@@ -1,5 +1,55 @@
 # TODO — 2026-08-05
 
+## Completed 2026-08-07 (HF sync verification pass)
+
+- [x] **HF `financial-data-pipeline` was stale — found + fixed**: checked both HF
+      datasets' `lastModified` via the API. `financial-fundamentals` was current
+      (pushed 08-06 00:49, unrelated to AV). `financial-data-pipeline` (the
+      `upload_huggingface.py` full-snapshot push) had gone out at 08-06 13:17:59,
+      but `curated.py` had last run at 09:16 that morning — BEFORE the manual
+      `av_earnings_pacing.ps1` rerun wrote its 5 new raw files (overview/earnings/
+      dividends/earnings_calendar/insider_transactions) at 10:59-11:02am. So that
+      push shipped without them. Root cause is timing, not a real gap:
+      `av_earnings_pacing.ps1` doesn't chain `curated.py`/HF-sync itself, but the
+      next `daily_accumulators.ps1` (9am, via `run_all.py`'s `sync_huggingface()`)
+      would have picked it up within 24h anyway since `curated.py` rebuilds all
+      178 tables from raw every time, not just the freshly-fetched ones. Reran
+      `curated.py` (178 tables, 23.0M dupes removed) and `upload_huggingface.py`
+      manually to close the gap immediately rather than wait; verified
+      `alpha_vantage_earnings` curated table now shows 16 distinct tickers,
+      `fetched_at` up to 2026-08-06T15:00. Push confirmed via HF API
+      (`ZanderL1337/financial-data-pipeline`, 92,473,153 rows, up from 91,857,600).
+      Caught an accidental duplicate `curated.py` invocation (started once ad-hoc,
+      once tracked) mid-run and killed the redundant one before it could race the
+      other's writes — no actual corruption, confirmed via row-count spot check.
+
+## Completed 2026-08-06 (verification pass, no new session-notes file)
+
+- [x] **Full Schwab price-history backfill — CONFIRMED DONE**: had been listed as
+      "sizing + running as of 2026-08-01 session end" and never marked complete.
+      Verified live: `storage/raw/prices/year=2026/month=08/prices_full_20260802.parquet`
+      (137MB, written 2026-08-02) holds the full S&P 500 (501 symbols), daily bars
+      1970-01-02 -> 2026-07-31, 3.8M rows, via `price_history_pipeline.py --full`.
+      Already merged into curated `prices` (46.9M rows total across all price
+      sources, `fetched_at` max 2026-08-02). No further action needed.
+- [x] **AV earnings pacing — real progress at last, root cause of today's fluke found**:
+      DJI earnings-history coverage moved 9/30 -> **16/30 symbols** today (IBM, JNJ,
+      JPM, MCD, MRK, MSFT, NKE added). NOT because earnings_sentiment_tool's transcript
+      cache finished (it's still 488/725 as of 08-05, ~24/day pace, real ETA is more
+      like mid-August, not 08-06 as previously estimated) — instead, both
+      `ClaudeAuto-TranscriptPull` (10:30am) AND `ClaudeAuto-AVEarningsPacing` (10:45am)
+      were killed today with the identical Windows exit code `0xC000013A`
+      (STATUS_CONTROL_C_EXIT, both report files end in a literal `^C`), 15 minutes
+      apart — root cause NOT identified (checked System event log for
+      sleep/wake/logoff around that window, nothing found; `ClaudeAuto-DailyAccumulators`
+      at 9:00am the same morning ran clean, so it's localized to that ~10:30-10:46
+      window specifically). The TranscriptPull kill happened to leave AV's shared
+      daily quota unused, so a manual rerun of `av_earnings_pacing.ps1` at ~11:00am
+      went through with a full 20-request budget and real progress instead of hitting
+      QUOTA. Flag file cleared, summary log shows `2026-08-06 | OK`. Worth watching
+      whether the 10:30/10:45 kill recurs tomorrow — if so it's a real scheduling
+      conflict, not a one-off.
+
 ## This Session (2026-08-05, see SESSION_NOTES_2026-08-05.md for detail)
 
 - [x] **HF `financial-fundamentals` expansion — research + design DONE (2026-08-05)**:
@@ -164,7 +214,6 @@
       per that repo's own ETA) and its daily pull becomes a zero-quota no-op — no
       further action needed, this is expected and self-resolving. See AUTOMATION.md.
 - [ ] **Patents pipeline rewrite** — blocked: need ODP API key from USPTO.gov account.
-- [ ] **Full Schwab price-history backfill** — sizing + running as of 2026-08-01 session end.
 
 ## Backlog
 
