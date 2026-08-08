@@ -1,5 +1,11 @@
 # Session Notes — running log
 
+## 2026-08-07 (cont.) — HF token + standing rule
+
+- **HF token added to `.env`** (`financial-data-pipeline`): appended a new `HF_TOKEN=` line with the user's write token — the pre-existing `HF_TOKEN` line was left untouched (dotenv last-wins → new token is effective). Token was already present as `HF_WRITE_TOKEN`.
+- **Standing rule recorded** in `C:\Users\Zander\.claude\CLAUDE.md` (Zander standing rules): never delete or replace anything unless asked twice; prefer append/new-line additions. Applies to all future sessions.
+- Note: docs commit `5029780` (session notes + TASKS.md) is on master but **not yet pushed** (local ahead 1).
+
 ## 2026-08-07 (cont.) — Ported data-integrity fixes + wired shipping HF sync
 
 - **Financial fixes ported to master and pushed** (`e3512e3`): the `fdp-review` branch's 4 fixes were assessed against master — #2 (query dedup) and #4 (validator `period_end`/`theo_price`) already landed via `curated.py` + later `validate.py` commits, so only #3 and #6 were ported, no merge/rebase needed.
