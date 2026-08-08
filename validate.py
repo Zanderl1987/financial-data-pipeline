@@ -1327,6 +1327,46 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['record_date', 'line_code_nbr'],
         "date_col":    "record_date",
     },
+    # ── SEC EDGAR raw filing text (TeraflopAI/SEC-EDGAR) ────────────────────────
+    "sec_edgar_text": {
+        "required":    ["cik", "company_name", "form_type", "filing_date", "accession_number", "period_of_report", "filing_text", "fetched_at"],
+        "critical_nn": ["cik", "accession_number", "form_type"],
+        "date_col":    "filing_date",
+    },
+    # ── CFPB consumer finance complaints ────────────────────────────────────────
+    "cfpb_complaints": {
+        "required":    ["complaint_id", "date_received", "company", "product", "issue", "fetched_at"],
+        "critical_nn": ["complaint_id", "date_received", "company"],
+        "date_col":    "date_received",
+    },
+    # ── Redfin housing market tracker ───────────────────────────────────────────
+    "redfin_market_tracker": {
+        "required":    ["period_begin", "region", "region_level", "property_type", "fetched_at"],
+        "critical_nn": ["period_begin", "region", "property_type"],
+        "date_col":    "period_begin",
+        "value_ranges": {"median_sale_price": (0, 50_000_000),
+                         "median_list_price": (0, 50_000_000),
+                         "homes_sold": (0, 1_000_000),
+                         "inventory": (0, 5_000_000),
+                         "months_of_supply": (0, 200)},
+    },
+    # ── AQR factor library (long-format factor returns) ─────────────────────────
+    "aqr_factors": {
+        "required":    ["date", "source", "factor", "value", "fetched_at"],
+        "critical_nn": ["date", "source", "factor", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (-1, 1)},   # monthly factor returns, decimals
+    },
+    # ── ETF holdings with quant scores (SecuritiesDB) ──────────────────────────
+    "etf_holdings": {
+        "required":    ["snapshot_date", "fund_ticker", "fund_name",
+                        "holding_ticker", "holding_name",
+                        "weight_pct", "sector", "market_cap", "piotroski_f",
+                        "altman_z", "source", "fetched_at"],
+        "critical_nn": ["snapshot_date", "fund_ticker", "holding_ticker", "weight_pct"],
+        "date_col":    "snapshot_date",
+        "value_ranges": {"weight_pct": (0, 100), "piotroski_f": (0, 9)},
+    },
 }
 
 

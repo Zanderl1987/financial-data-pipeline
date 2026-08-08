@@ -4,14 +4,15 @@ Free/public-source financial data pipelines → partitioned Parquet → DuckDB q
 analytics/factor signals → event backtesting. Owner: Zander (GitHub `Zanderl1987`, private,
 default branch `master`).
 
-**133 CATALOG tables, 273 tests passing** as of 2026-07-07. Verify with the
+**236 CATALOG tables, 446 tests passing** as of 2026-08-02. Verify with the
 commands below rather than trusting this line if it looks stale.
 
 ## Environment
 
-- Python: `C:\ProgramData\anaconda3\python.exe` — ALWAYS use this full path. Bare `python`
-  on this machine is a broken MS Store stub.
-- Run everything from the repo root (`C:\Users\zande\PycharmProjects\financial-data-pipeline`).
+- Python: `C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe` — ALWAYS use
+  this full path. Bare `python` also resolves here (real 3.12.3, not a stub) but the full
+  path is the safe canonical form.
+- Run everything from the repo root (`C:\Users\Zander\financial-data-pipeline`).
 - Secrets in `.env` at repo root (gitignored). Never commit it, never print key values.
   `anthropic` installed (user site) 2026-07-06 — only `fed_sentiment_pipeline.py` still
   needs ANTHROPIC_API_KEY (news sentiment is local VADER, no key).
@@ -21,13 +22,13 @@ commands below rather than trusting this line if it looks stale.
 ## Commands
 
 ```
-C:\ProgramData\anaconda3\python.exe -m pytest tests/ -v      # test suite
-C:\ProgramData\anaconda3\python.exe run_all.py --dry-run     # show pipeline plan
-C:\ProgramData\anaconda3\python.exe run_all.py               # run all (3 dependency stages)
-C:\ProgramData\anaconda3\python.exe validate.py              # data health check
-C:\ProgramData\anaconda3\python.exe curated.py               # rebuild deduped snapshots
-C:\ProgramData\anaconda3\python.exe evaluate.py --adapter sentiment   # unified eval framework (see docs/EVALUATION.md)
-C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest <name>   # HTML report from eval artifacts
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe -m pytest tests/ -v      # test suite
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe run_all.py --dry-run     # show pipeline plan
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe run_all.py               # run all (3 dependency stages)
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe validate.py              # data health check
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe curated.py               # rebuild deduped snapshots
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe evaluate.py --adapter sentiment   # unified eval framework (see docs/EVALUATION.md)
+C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe generate_eval_report.py --latest <name>   # HTML report from eval artifacts
 ```
 
 ## Architecture

@@ -22,6 +22,8 @@ schwabdev==3.0.5              # schwab_*_pipeline.py (Stage 2, interactive OAuth
 beautifulsoup4==4.15.0        # fed_sentiment_pipeline, fund_holdings_pipeline (HTML/XML scraping)
 lxml==6.1.1                   # bs4 parser backend
 pyiceberg==0.11.1             # index_constituents_pipeline, fund_holdings_pipeline, openfigi_pipeline, securities_reference_pipeline, create_securities_table
+sqlalchemy==2.0.51            # pyiceberg's sql-sqlite extra (Iceberg catalog on SQLite)
+xlrd==2.0.2                   # shipping_pipeline (GSCPI Excel parsing)
 edgartools==5.35.0            # fund_holdings_pipeline (N-PORT mutual fund holdings)
 vaderSentiment==3.3.2         # news_sentiment_pipeline
 websockets==16.0              # ais_pipeline (AISStream.io WebSocket feed)
@@ -30,7 +32,9 @@ huggingface_hub==0.35.0       # upload_huggingface.py
 datasets==2.12.0              # upload_huggingface.py
 transformers==4.56.2          # finbert_eval.py
 torch==2.8.0                  # finbert_eval.py
-plotly==5.9.0                 # generate_tv_rating_report.py
+plotly==5.9.0                 # generate_tv_rating_report.py, dashboard.py
+streamlit                     # dashboard.py (interactive earnings sentiment dashboard)
+seaborn                       # dashboard.py, earnings_sentiment_eval.py
 
 # ── Pipeline-specific, not currently installed (pin after installing) ──────
 pytrends       # google_trends_pipeline.py

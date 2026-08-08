@@ -108,6 +108,9 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `cboe_pipeline.py` | `cboe_volatility` | VIX, VIX9D, VIX3M, VIX6M, VVIX, SKEW daily OHLC | — |
 | `tsa_pipeline.py` | `tsa_checkpoint` | Daily TSA checkpoint traveler counts — leading indicator of travel demand | — |
 | `real_estate_pipeline.py` | `fhfa_hpi`, `zillow_zhvi`, `zillow_zori` | FHFA House Price Index (national/state/MSA) + Zillow home value/rent indices | — |
+| `redfin_pipeline.py` | `redfin_market_tracker` | Redfin housing market tracker — median sale/list price, homes sold, inventory, months of supply, price drops (national/metro/state) | — |
+| `aqr_factors_pipeline.py` | `aqr_factors` | AQR factor library — Value & Momentum Everywhere, Quality-Minus-Junk, Time-Series Momentum monthly factor returns | — |
+| `etf_holdings_pipeline.py` | `etf_holdings` | ETF holdings with per-holding quant scores (Piotroski F, Altman Z, market cap, sector) from SecuritiesDB (top-100 by weight) | — |
 | `shipping_pipeline.py` | `shipping_gscpi`, `shipping_freight_ppi` | NY Fed Global Supply Chain Pressure Index + FRED freight PPI series | `FRED_API_KEY` |
 
 ## Macro — global

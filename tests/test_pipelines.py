@@ -80,6 +80,11 @@ PIPELINE_MODULES = [
     "tiingo_fundamentals_pipeline",
     "treasury_fiscal_pipeline",
     "omkar_commodity_pipeline",
+    "sec_edgar_text_pipeline",
+    "cfpb_complaints_pipeline",
+    "redfin_pipeline",
+    "aqr_factors_pipeline",
+    "etf_holdings_pipeline",
 ]
 
 

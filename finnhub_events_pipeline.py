@@ -19,8 +19,9 @@ Rate-limit compliance:
   Finnhub pipelines throttle identically and can't drift apart.
 
 CLI:
-  python finnhub_events_pipeline.py             # incremental (recent window)
-  python finnhub_events_pipeline.py --backfill  # full history window
+  python finnhub_events_pipeline.py                   # incremental (recent window)
+  python finnhub_events_pipeline.py --backfill        # 1-year history window
+  python finnhub_events_pipeline.py --backfill --years 5  # 5-year earnings history
 
 Outputs:
   storage/raw/finnhub/earnings_calendar/earnings_calendar_{mode}_{YYYYMMDD}.parquet
@@ -149,6 +150,44 @@ def fetch_insider_transactions(symbol, start_date, end_date):
     return df
 
 
+def fetch_earnings_calendar_multiyear(today, years=5, chunk_days=365):
+    """
+    Fetch N years of earnings history in annual chunks.
+    Each chunk is one API call. Returns deduplicated DataFrame.
+    """
+    all_frames = []
+    start = today - datetime.timedelta(days=years * 365)
+    end = today + datetime.timedelta(days=EARNINGS_FWD["backfill"])
+
+    current = start
+    chunk_num = 0
+    while current < end:
+        chunk_end = min(current + datetime.timedelta(days=chunk_days), end)
+        chunk_num += 1
+        from_str = current.strftime("%Y-%m-%d")
+        to_str = chunk_end.strftime("%Y-%m-%d")
+        print(f"  [{chunk_num}] {from_str} -> {to_str} ...", end=" ", flush=True)
+        df = fetch_earnings_calendar(from_str, to_str)
+        if df is not None and not df.empty:
+            print(f"{len(df):,} rows")
+            all_frames.append(df)
+        else:
+            print("empty")
+        current = chunk_end
+
+    if not all_frames:
+        return None
+    combined = pd.concat(all_frames, ignore_index=True)
+    before = len(combined)
+    combined = combined.drop_duplicates(
+        subset=["symbol", "date"], keep="last"
+    ).reset_index(drop=True)
+    after = len(combined)
+    if before != after:
+        print(f"  Deduplicated: {before:,} -> {after:,} rows ({before - after:,} duplicates)")
+    return combined
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Finnhub earnings calendar + insider transactions pipeline"
@@ -157,6 +196,12 @@ def main():
         "--backfill",
         action="store_true",
         help="Fetch a wide history window instead of the recent incremental window.",
+    )
+    parser.add_argument(
+        "--years",
+        type=int,
+        default=5,
+        help="Years of earnings history to backfill (default: 5). Only used with --backfill.",
     )
     args = parser.parse_args()
 
@@ -174,18 +219,27 @@ def main():
     def fmt(dt):
         return dt.strftime("%Y-%m-%d")
 
-    # ---- Earnings calendar (single market-wide request) ----
-    earn_from = fmt(today - datetime.timedelta(days=EARNINGS_BACK[mode]))
-    earn_to = fmt(today + datetime.timedelta(days=EARNINGS_FWD[mode]))
-    print(f"[earnings_calendar] {mode}: {earn_from} -> {earn_to} (1 request)")
-    earn_df = fetch_earnings_calendar(earn_from, earn_to)
-    if earn_df is not None:
+    # ---- Earnings calendar ----
+    if args.backfill and args.years > 1:
+        # Multi-year backfill: chunk into annual API calls
+        print(f"[earnings_calendar] backfill: {args.years} years of history "
+              f"({args.years} API calls)")
+        earn_df = fetch_earnings_calendar_multiyear(today, years=args.years)
+    else:
+        # Single request (incremental or 1-year backfill)
+        earn_from = fmt(today - datetime.timedelta(days=EARNINGS_BACK[mode]))
+        earn_to = fmt(today + datetime.timedelta(days=EARNINGS_FWD[mode]))
+        print(f"[earnings_calendar] {mode}: {earn_from} -> {earn_to} (1 request)")
+        earn_df = fetch_earnings_calendar(earn_from, earn_to)
+
+    if earn_df is not None and not earn_df.empty:
         out = write_partitioned(
             earn_df,
             DIRS["earnings_calendar"],
             f"earnings_calendar_{mode}_{today_str}.parquet",
         )
-        print(f"  Saved earnings_calendar -> {out} ({len(earn_df):,} rows)")
+        n_syms = earn_df["symbol"].nunique() if "symbol" in earn_df.columns else 0
+        print(f"  Saved earnings_calendar -> {out} ({len(earn_df):,} rows, {n_syms} symbols)")
     else:
         print("  Warning: no earnings calendar data returned.")
 

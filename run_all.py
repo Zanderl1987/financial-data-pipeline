@@ -713,6 +713,46 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=['--backfill'],
         timeout=1800,
     ),
+    # ── CFPB consumer finance complaints ──────────────────────────────────────
+    PipelineSpec(
+        name="cfpb_complaints",
+        file="cfpb_complaints_pipeline.py",
+        desc="Consumer finance complaints from CFPB (CC0-1.0, no API key needed)",
+        stage=1,
+        tables=["cfpb_complaints"],
+        backfill_args=["--backfill"],
+        timeout=1200,
+    ),
+    # ── Redfin housing market tracker ─────────────────────────────────────────
+    PipelineSpec(
+        name="redfin",
+        file="redfin_pipeline.py",
+        desc="Redfin housing market tracker — national/metro/state metrics (keyless)",
+        stage=1,
+        tables=["redfin_market_tracker"],
+        backfill_args=["--backfill"],
+        timeout=1200,
+    ),
+    # ── AQR factor library (VME, QMJ, TSMOM) ──────────────────────────────────
+    PipelineSpec(
+        name="aqr_factors",
+        file="aqr_factors_pipeline.py",
+        desc="AQR factor library — Value & Momentum Everywhere, QMJ, TSMOM monthly factors (keyless)",
+        stage=1,
+        tables=["aqr_factors"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    # ── ETF holdings with quant scores (SecuritiesDB) ─────────────────────────
+    PipelineSpec(
+        name="etf_holdings",
+        file="etf_holdings_pipeline.py",
+        desc="ETF holdings with Piotroski/Altman Z quant scores (SecuritiesDB, keyless)",
+        stage=1,
+        tables=["etf_holdings"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
         name="openfigi",
@@ -790,6 +830,17 @@ PIPELINES: list[PipelineSpec] = [
         tables=["schwab_positions", "schwab_transactions"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
         backfill_args=["--backfill"],
+    ),
+    # ── SEC EDGAR raw filing text (TeraflopAI/SEC-EDGAR, HF datasets, streaming) ─
+    PipelineSpec(
+        name="sec_edgar_text",
+        file="sec_edgar_text_pipeline.py",
+        desc="10-K/10-Q raw filing text from TeraflopAI/SEC-EDGAR Hugging Face dataset",
+        stage=2,
+        tables=["sec_edgar_text"],
+        backfill_args=["--backfill"],
+        # 590 GB dataset — streaming, but still slow over large ranges
+        timeout=7200,
     ),
     # ── Stage 3 — Derived (depends on Stage 1/2 output) ────────────────────────
     PipelineSpec(

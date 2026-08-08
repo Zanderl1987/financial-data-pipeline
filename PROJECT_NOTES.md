@@ -62,6 +62,35 @@ previously gated the Schwab full price-history backfill. Schwab OAuth is now
 also done (2026-07-24, see In-flight initiative below) — that backfill is
 fully unblocked, just not yet started.
 
+**Local data lives on the Passport drive (2026-08-01):** the repo's `storage/`
+folder is a Windows directory junction → `D:\financial-data-pipeline\storage`
+(708 MB as of the move: raw 360MB / curated 347MB / iceberg 2MB). All relative
+`storage/...` paths, `query.py`, `validate.py`, `curated.py`, `run_all.py`, and
+`upload_huggingface.py` work through the junction unchanged. If the Passport
+drive is unplugged, every pipeline/query fails with missing-path errors — that
+is expected. `git` also follows the junction for the tracked `storage/**` files
+(verified: `git status --short -- storage` clean after the move). Recreate with:
+`cmd /c mklink /J "<repo>\storage" "D:\financial-data-pipeline\storage"`.
+Follow-up if needed: the CFPB + SEC text pipelines both landed in this checkout
+after the 2026-07-30 HF publish, so this machine now has 2 tables
+(`cfpb_complaints` 6.7M rows, `open_meteo_weather` 43K rows) that the HF dataset
+does not — push them the next time an HF token is available on this box.
+**(Both pushed 2026-08-02 — HF dataset now has all 152 tables / 96,973,945 rows.)**
+
+**New pipelines (2026-08-02):** `redfin_pipeline.py` (Redfin housing market
+tracker — national/metro/state, 58 metric columns, 624K rows) and
+`aqr_factors_pipeline.py` (AQR factor library — VME/QMJ/TSMOM monthly factors,
+27K rows) were added and fully wired (query.py/validate.py/run_all.py/curated.py/
+tests/docs). Redfin TSV.gz URLs live at
+`redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/`;
+AQR .xlsx at
+`https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/*.xlsx`.
+TSMOM quirk: its xlsx header row has no label in the date column — `_find_header_row`
+uses the first non-empty cell and `_parse_workbook` normalizes column 0 to `date`.
+Full test suite: 444 passed / 18 skipped. AQR backfill output has a stale filename
+(`aqr_factors_backfill_20260802.parquet`) from before the TSMOM fix but contains all
+three sources — safe to regenerate or leave.
+
 **Iceberg snapshot growth (watch this):** Iceberg keeps every historical
 metadata/manifest file with no expiration configured. The 2026-07-23 stage-1
 backfill alone generated 149 new snapshot files for `fund_holdings` (vs ~30
@@ -252,3 +281,39 @@ verified queryable via `query.py`. Not yet re-synced to HuggingFace — that
 publish is manual (`upload_huggingface.py`) and this is now a much bigger
 jump in size than the 270MB→~300MB deltas so far; worth doing deliberately
 rather than as an afterthought given the scale change.
+
+## HF datasets expansion (2026-07-30)
+
+Identified financial datasets on HuggingFace Datasets that fill gaps in the
+existing pipeline. Two high-value candidates chosen, both from public/US-gov
+sources with no API key needed:
+
+**TeraflopAI/SEC-EDGAR (590 GB, streaming, 8M filings):** Raw 10-K/10-Q filing
+text (not just structured XBRL fundamentals, which the pipeline already has).
+The `datasets` library streams directly — no auth, no API key, just a HF_TOKEN
+for rate-limit bump. Pipeline: `sec_edgar_text_pipeline.py` (stage 2), table
+`sec_edgar_text`. Backfill downloads all filings; incremental filters by
+`filing_date > cutoff`. Wiring done in all 6 registration files. Not yet run
+incrementally — 590 GB streaming dataset will need time and network bandwidth.
+Created storage dir.
+
+**CFPB/consumer-finance-complaints (CC0-1.0, 1M+ complaints):** Consumer
+finance complaint text + metadata for sentiment analysis, company-level
+complaint tracking, and alternative risk signals. The HF dataset's loading
+script (`consumer-finance-complaints.py`) is a legacy format not supported
+by `datasets >= 5.0` (`RuntimeError: Dataset scripts are no longer
+supported`). Switched to direct CSV download from CFPB's official bulk export
+at `https://files.consumerfinance.gov/ccdb/complaints.csv.zip` — no auth,
+no rate limit, ~560MB zip. Pipeline: `cfpb_complaints_pipeline.py` (stage 1),
+table `cfpb_complaints`. Writes partitioned Parquet in 100K-row chunks via
+`write_partitioned()`. Verified live: incremental run (last 12 months) pulled
+6,714,496 records across 68 batches. `validate.py`: PASS (0 errors, 0 warnings).
+`curated.py`: 6,714,496 → 6,706,597 rows (~0.1% dupes). Storage dir populated.
+
+Fix: `test_storage_dirs_exist` was failing on 124 pre-existing missing
+directories from previously added pipelines that never had their storage dirs
+created. Created all 124 dirs; test now passes.`cfpb_complaints` dir was
+already created and populated; `sec_edgar_text` dir created (empty until first
+run). `test_stage_ordering_is_monotone` also fixed — the new PipelineSpec
+entries (stage 2 and stage 1) were originally appended after stage 3 entries;
+moved to correct stage-ordering positions.

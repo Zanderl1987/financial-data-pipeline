@@ -272,11 +272,13 @@ CATALOG: dict[str, str] = {
     "schwab_transactions":     _glob("schwab/transactions/**/*.parquet"),
     # ── Signal health monitor (maintained backtest performance tracking) ─────
     "signal_health":           _glob("signal_monitor/**/*.parquet"),
+    # ── FRED macro indicators ──────────────────────────────────────────────────
     "fred_macro_housing":     _glob("fred_macro/housing/**/*.parquet"),
     "fred_macro_sentiment":   _glob("fred_macro/sentiment/**/*.parquet"),
     "fred_macro_industrial":  _glob("fred_macro/industrial/**/*.parquet"),
     "fred_macro_consumer":    _glob("fred_macro/consumer/**/*.parquet"),
     "fred_macro_trade":       _glob("fred_macro/trade/**/*.parquet"),
+    # ── FRED rates & GDP ───────────────────────────────────────────────────────
     "fred_rates_gdp_interest_rates":  _glob("fred_rates_gdp/interest_rates/**/*.parquet"),
     "fred_rates_gdp_money_supply":    _glob("fred_rates_gdp/money_supply/**/*.parquet"),
     "fred_rates_gdp_gdp":             _glob("fred_rates_gdp/gdp/**/*.parquet"),
@@ -286,6 +288,7 @@ CATALOG: dict[str, str] = {
     "fred_rates_gdp_exchange_rates":  _glob("fred_rates_gdp/exchange_rates/**/*.parquet"),
     "fred_rates_gdp_markets":         _glob("fred_rates_gdp/markets/**/*.parquet"),
     "fred_rates_gdp_federal_debt":    _glob("fred_rates_gdp/federal_debt/**/*.parquet"),
+    # ── Alpha Vantage fundamentals ────────────────────────────────────────────
     "alpha_vantage_overview":              _glob("alpha_vantage/overview/**/*.parquet"),
     "alpha_vantage_income_statement":      _glob("alpha_vantage/income_statement/**/*.parquet"),
     "alpha_vantage_balance_sheet":         _glob("alpha_vantage/balance_sheet/**/*.parquet"),
@@ -296,15 +299,18 @@ CATALOG: dict[str, str] = {
     "alpha_vantage_insider_transactions":  _glob("alpha_vantage/insider_transactions/**/*.parquet"),
     "alpha_vantage_news_sentiment":        _glob("alpha_vantage/news_sentiment/**/*.parquet"),
     "alpha_vantage_top_gainers_losers":    _glob("alpha_vantage/top_gainers_losers/**/*.parquet"),
+    # ── CoinGecko (extended) ──────────────────────────────────────────────────
     "coingecko_global_market":   _glob("coingecko/global_market/**/*.parquet"),
     "coingecko_coins_markets":   _glob("coingecko/coins_markets/**/*.parquet"),
     "coingecko_trending":        _glob("coingecko/trending/**/*.parquet"),
     "coingecko_categories":      _glob("coingecko/categories/**/*.parquet"),
     "coingecko_derivatives":     _glob("coingecko/derivatives/**/*.parquet"),
     "coingecko_exchange_rates":  _glob("coingecko/exchange_rates/**/*.parquet"),
+    # ── SEC EDGAR filings & fundamentals ──────────────────────────────────────
     "sec_edgar_submissions":        _glob("sec_edgar/submissions/**/*.parquet"),
     "sec_edgar_xbrl_fundamentals":  _glob("sec_edgar/xbrl_fundamentals/**/*.parquet"),
     "sec_edgar_efts_search":        _glob("sec_edgar/efts_search/**/*.parquet"),
+    # ── BLS labor market (extended) ───────────────────────────────────────────
     "bls_import_export_prices":  _glob("bls/import_export/**/*.parquet"),
     "bls_eci":                   _glob("bls/eci/**/*.parquet"),
     "bls_productivity":          _glob("bls/productivity/**/*.parquet"),
@@ -312,6 +318,7 @@ CATALOG: dict[str, str] = {
     "bls_qcew":              _glob("bls/qcew/**/*.parquet"),
     "bls_ecec":              _glob("bls/ecec/**/*.parquet"),
     "bls_cps_demographics":  _glob("bls/cps_demographics/**/*.parquet"),
+    # ── EIA energy data (extended) ────────────────────────────────────────────
     "eia_electricity_generation":  _glob("eia/electricity_generation/**/*.parquet"),
     "eia_electricity_sales":       _glob("eia/electricity_sales/**/*.parquet"),
     "eia_nuclear_outages":         _glob("eia/nuclear_outages/**/*.parquet"),
@@ -327,6 +334,7 @@ CATALOG: dict[str, str] = {
     "eia_natural_gas_prices":       _glob("eia/natural_gas_prices/**/*.parquet"),
     "eia_natural_gas_production":   _glob("eia/natural_gas_production/**/*.parquet"),
     "eia_lng_flows":                _glob("eia/lng_flows/**/*.parquet"),
+    # ── Finnhub fundamentals + market data (extended) ─────────────────────────
     "finnhub_esg":                    _glob("finnhub/esg/**/*.parquet"),
     "finnhub_congressional_trading":  _glob("finnhub/congressional_trading/**/*.parquet"),
     "finnhub_supply_chain":           _glob("finnhub/supply_chain/**/*.parquet"),
@@ -349,11 +357,13 @@ CATALOG: dict[str, str] = {
     "finnhub_filing_sentiment":        _glob("finnhub/filing_sentiment/**/*.parquet"),
     "finnhub_transcripts":             _glob("finnhub/transcripts/**/*.parquet"),
     "finnhub_company_news_sentiment":  _glob("finnhub/company_news_sentiment/**/*.parquet"),
+    # ── Tiingo corporate actions + fundamentals ───────────────────────────────
     "tiingo_corporate_actions_dividends":  _glob("tiingo/corporate_actions_dividends/**/*.parquet"),
     "tiingo_corporate_actions_splits":     _glob("tiingo/corporate_actions_splits/**/*.parquet"),
     "tiingo_corporate_actions_yield":      _glob("tiingo/corporate_actions_yield/**/*.parquet"),
     "tiingo_fundamentals_daily":       _glob("tiingo/fundamentals_daily/**/*.parquet"),
     "tiingo_fundamentals_statements":  _glob("tiingo/fundamentals_statements/**/*.parquet"),
+    # ── US Treasury fiscal data (extended) ────────────────────────────────────
     "treasury_debt_to_penny":          _glob("treasury/debt_to_penny/**/*.parquet"),
     "treasury_avg_interest_rates":     _glob("treasury/avg_interest_rates/**/*.parquet"),
     "treasury_interest_expense":       _glob("treasury/interest_expense/**/*.parquet"),
@@ -364,6 +374,16 @@ CATALOG: dict[str, str] = {
     "treasury_mts_outlays_by_agency":  _glob("treasury/mts_outlays_by_agency/**/*.parquet"),
     "treasury_dts_operating_cash":     _glob("treasury/dts_operating_cash/**/*.parquet"),
     "treasury_mts_budget_comparison":  _glob("treasury/mts_budget_comparison/**/*.parquet"),
+    # ── SEC EDGAR raw filing text (10-K/10-Q from TeraflopAI/SEC-EDGAR) ─────────
+    "sec_edgar_text":          _glob("sec_edgar_text/**/*.parquet"),
+    # ── CFPB consumer finance complaints ───────────────────────────────────────
+    "cfpb_complaints":        _glob("cfpb_complaints/**/*.parquet"),
+    # ── Redfin housing market tracker (national / metro / state) ──────────────
+    "redfin_market_tracker":  _glob("redfin/market_tracker/**/*.parquet"),
+    # ── AQR factor library (VME, QMJ, TSMOM monthly factors) ──────────────────
+    "aqr_factors":            _glob("aqr/factors/**/*.parquet"),
+    # ── ETF holdings with quant scores (SecuritiesDB, keyless) ─────────────────
+    "etf_holdings":           _glob("etf_holdings/**/*.parquet"),
 }
 
 # ---------------------------------------------------------------------------

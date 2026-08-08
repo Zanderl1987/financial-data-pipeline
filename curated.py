@@ -203,6 +203,16 @@ KEYS: dict[str, list[str]] = {
     "treasury_mts_outlays_by_agency":  ['record_date', 'line_code_nbr'],
     "treasury_dts_operating_cash":     ['record_date', 'src_line_nbr'],
     "treasury_mts_budget_comparison":  ['record_date', 'line_code_nbr'],
+    # SEC EDGAR raw filing text
+    "sec_edgar_text":                  ["cik", "accession_number", "form_type"],
+    # CFPB consumer finance complaints
+    "cfpb_complaints":                 ["complaint_id"],
+    # Redfin housing market tracker — one row per region/property_type/period
+    "redfin_market_tracker":           ["period_begin", "region", "property_type", "is_seasonally_adjusted"],
+    # AQR factor library — one value per date/source/factor
+    "aqr_factors":                     ["date", "source", "factor"],
+    # ETF holdings — one row per fund/holding/snapshot
+    "etf_holdings":                    ["fund_ticker", "holding_ticker", "snapshot_date"],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
@@ -222,6 +232,23 @@ def _curated_path(table: str) -> str:
 _LARGE_TABLES = {"prices"}
 
 
+# `prices` columns that are actual dollar levels (or ratios built from them).
+# Schwab's historical close is additively dividend-adjusted (raw_close minus
+# cumulative *future* dividends), which drives old bars for long-lived
+# dividend payers negative before "crossing" back to positive years later —
+# see PROJECT_NOTES.md "Schwab additive dividend-adjustment" entry. The
+# distortion isn't confined to rows where close<=0: pct_change/log_return
+# spike (e.g. COST 2009-03-09 logs a +2700% day) around the crossing too,
+# and open/high/low can still dip negative for a day or two after close
+# has already crossed positive. Guard by nulling every price-derived column,
+# per symbol, through that symbol's last date where ANY of open/high/low/
+# close <= 0 — `volume`/`fetched_at` (real, unaffected) are left alone.
+_PRICE_DISTORTION_COLUMNS = [
+    "open", "high", "low", "close",
+    "pct_change", "log_return", "intraday_change", "intraday_range", "vwap",
+]
+
+
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     """DuckDB-native equivalent of compact() for oversized tables — returns
     (out_path, raw_rows, curated_rows), or None if there's no raw data."""
@@ -238,19 +265,46 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     partition_cols = ", ".join(key)
     raw_scan = f"read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)"
 
+    dedup_cte = f"""
+        deduped AS (
+            SELECT * EXCLUDE (_rn) FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY {partition_cols} ORDER BY fetched_at DESC
+                ) AS _rn
+                FROM {raw_scan}
+            )
+            WHERE _rn = 1
+        )
+    """
+
+    if table == "prices":
+        guarded_cols = ",\n                    ".join(
+            f"CASE WHEN c.bad_through IS NOT NULL AND d.date <= c.bad_through "
+            f"THEN NULL ELSE d.{col} END AS {col}"
+            for col in _PRICE_DISTORTION_COLUMNS
+        )
+        select_sql = f"""
+            WITH {dedup_cte},
+            cutoffs AS (
+                SELECT symbol, MAX(date) AS bad_through
+                FROM deduped
+                WHERE close <= 0 OR open <= 0 OR high <= 0 OR low <= 0
+                GROUP BY symbol
+            )
+            SELECT
+                d.* EXCLUDE ({", ".join(_PRICE_DISTORTION_COLUMNS)}),
+                {guarded_cols}
+            FROM deduped d
+            LEFT JOIN cutoffs c USING (symbol)
+        """
+    else:
+        select_sql = f"WITH {dedup_cte} SELECT * FROM deduped"
+
     con = duckdb.connect()
     try:
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         con.execute(f"""
-            COPY (
-                SELECT * EXCLUDE (_rn) FROM (
-                    SELECT *, ROW_NUMBER() OVER (
-                        PARTITION BY {partition_cols} ORDER BY fetched_at DESC
-                    ) AS _rn
-                    FROM {raw_scan}
-                )
-                WHERE _rn = 1
-            ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+            COPY ({select_sql}) TO '{out_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
         """)
         curated_rows = con.execute(
             f"SELECT count(*) FROM read_parquet('{out_path}')"

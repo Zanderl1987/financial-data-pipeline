@@ -314,6 +314,11 @@ EXPECTED_TABLES = [
     "treasury_mts_outlays_by_agency",
     "treasury_dts_operating_cash",
     "treasury_mts_budget_comparison",
+    "sec_edgar_text",
+    "cfpb_complaints",
+    "redfin_market_tracker",
+    "aqr_factors",
+    "etf_holdings",
 ]
 
 

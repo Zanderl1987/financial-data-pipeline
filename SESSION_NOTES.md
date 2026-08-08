@@ -1,5 +1,196 @@
 # Session Notes — running log
 
+## 2026-08-02 — session 2, part 2: etf_holdings orphan wired in + CLAUDE.md/requirements/task cleanup
+
+- **etf_holdings orphan resolved (user: wire it into CATALOG).** Was the only HF table (of
+  152) with no CATALOG entry — provenance: a one-off snapshot from SecuritiesDB's free
+  keyless API (top-100 holdings/ETF with Piotroski F / Altman Z / market_cap / sector),
+  leaked onto HF because `upload_huggingface.py`'s `upload_folder` sweeps
+  `storage/curated/**` and never deletes. Built `etf_holdings_pipeline.py` (119-fund
+  universe from the HF snapshot's tickers + embedded ETF_NAME_MAP, retry/backoff, 0.4s
+  throttle) and wired it fully: CATALOG `_glob("etf_holdings/**/*.parquet")`, validate
+  SCHEMAS (weight_pct (0,100), piotroski_f (0,9)), run_all PipelineSpec stage 1
+  (timeout 600), curated KEYS (fund_ticker/holding_ticker/snapshot_date), both test
+  lists, docs/PIPELINE_CATALOG.md. Verified: live pull 210 rows/3 funds, validate PASS
+  0/0, curated 0 dupes, run_all --dry-run picks it up, full suite **446 passed / 18
+  skipped** (was 444).
+- **CLAUDE.md de-stale'd (TASKS item):** 133→**235 CATALOG tables**, 273→**444 tests**,
+  python path `C:\ProgramData\anaconda3\python.exe`→`C:\Users\Zander\AppData\Local\Programs\Python\Python312\python.exe`
+  (verified: anaconda gone, Python312 live, bare `python` now resolves to Python312 not a
+  MS Store stub), repo root `C:\Users\zande\PycharmProjects\...`→`C:\Users\Zander\financial-data-pipeline`
+  (verified on disk). All command examples updated.
+- **CATALOG category headers added (TASKS item):** the ~93-headerless block
+  (`fred_macro_` → `treasury_mts_budget_comparison`) now has `# -- <category> (extended) --`
+  headers matching lake_manifest.py's prefix-fallback labels, so the source (not the
+  parser) owns categorization. Verified: `parse_categories()` returns 0 "unlabeled in
+  source" entries across all 235 tables.
+- **requirements.txt fixed (TASKS item):** added `sqlalchemy==2.0.51` (pyiceberg
+  sql-sqlite extra) + `xlrd==2.0.2` (GSCPI Excel), both verified installed.
+
+**Still open as of end of this part:** HF 152-config rebuild — background poller had been
+busy-500 for ~45+ min (README configs YAML landed 01:49Z; per-config convert branch
+appears only at completion, still absent). Re-poll `/splits` until `ready=152/pending=0`.
+
+## 2026-08-02 — session 2, part 3: etf_holdings full-universe run + merge + HF push
+
+- **Full 119-fund universe run** of `etf_holdings_pipeline.py` completed: 7,539 rows
+  (08-02 snapshot), validated PASS 0/0, curated 0 dupes.
+- **Merged with existing HF history rather than overwriting** (fresh pull was *smaller*
+  than HF's 7,723: holdings lists drift between snapshots). Pulled
+  `etf_holdings/etf_holdings.parquet` (07-30: 7,524 + 07-31: 199), concat + dedup on
+  (fund_ticker, holding_ticker, snapshot_date) → **15,262 rows / 3 snapshot dates / 119
+  funds**, wrote to curated, validated PASS 0/0.
+- **Pushed to HF** via `upload_file` (242kB, replace existing) — commit msg
+  "etf_holdings: merge 08-02 fresh pull with 07-30/07-31 history (15,262 rows, 119
+  funds)". HF repo path is `etf_holdings/etf_holdings.parquet` (NOT `data/...` — 404'd on
+  first attempt; used `api.list_repo_files` to find the real path).
+- **README re-uploaded**: row total 96,973,945 → **96,981,484** (text-only change; the
+  152-entry configs YAML block untouched, so the in-flight per-config rebuild is
+  unaffected). Re-upload happened while rebuild still busy.
+- **CLAUDE.md synced**: 236 CATALOG tables / 446 tests (etf_holdings wired in).
+
+## 2026-08-02 — Redfin + AQR factor pipelines; HF multi-config viewer fix; last 2 local tables pushed
+
+Two new keyless pipelines (Redfin housing tracker, AQR factor library) built, wired, and
+verified end-to-end; HF dataset finished at 152 tables / 96,973,945 rows; HF viewer
+one-config problem fixed via README configs YAML (rebuild still running in background).
+
+**HF last-2-tables push:** `cfpb_complaints` (6.7M) and `open_meteo_weather` (43K) were the
+only local tables missing from HF (landed after the 2026-07-30 publish). Pushed via temp
+`push_missing_tables.py` (`api.upload_folder` per table) → 152 parquet tables / 96,973,945
+rows on HF (row total arithmetic re-verified: 90,223,873 + 6,706,597 + 43,475).
+
+**HF viewer / one-config fix (in progress):** diagnosed that HF auto-conversion had merged
+ALL 152 files into one config (`refs/convert/parquet/default/train`) — that's why the
+viewer showed everything as one dataset. Fix: added a 152-entry `configs:` YAML block to
+the README front matter (generated from the 152 repo parquet files), rewrote the usage
+example to `load_dataset(repo, "<table_name>")` + `ds["train"]`, bumped counts to 152
+tables / 96,973,945 rows, uploaded. datasets-server picked it up and began a per-config
+rebuild — the `refs/convert/parquet` branch now builds one folder per config (observed
+111/152 at one point) instead of a single `default`. Still processing in background.
+**Polling note:** `/configs` is a dead endpoint now (404s even on known-good datasets, don't
+poll it); `/splits` returns busy-500 while processing and `ready=<n> / pending=<m>` when
+settled — those are normal states, not failures. Verify `ready=152 / pending=0` before
+calling this done.
+
+**Data source research (task 4):** confirmed pipeline already covers GSCPI, World Bank,
+Zillow, Fama-French, USGS — no overlap. New buildable sources: Redfin (live
+`redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/` TSV.gz files) and
+AQR factor library (live `.xlsx` at `aqr.com/-/media/AQR/Documents/Insights/Data-Sets/`).
+Skipped: IEA EV battery prices (403-gated .Stat), MSRB EMMA (paid), FINRA TRACE
+(registration-gated; not user-approved to build).
+
+**Redfin pipeline (`redfin_pipeline.py`):** downloads national/metro/state by default
+(`--granularity all` adds county/city/zip_code; `--only <level>` for one), parses quoted
+TSV (58 cols), lowercases columns, DATE_COLS→datetime + numeric casts, drops null
+period_begin/region, adds `region_level` + `fetched_at`, writes via `write_partitioned`
+to `storage/raw/redfin/market_tracker/`. Live result: 624,234 rows (national 1,903 /
+metro 579,544 / state 42,787), 2012-01 → 2026-05.
+
+**AQR factor library (`aqr_factors_pipeline.py`):** downloads VME/QMJ/TSMOM xlsx, locates
+header row (first row whose first non-empty cell is a non-numeric label followed by a
+parseable date), melts wide→long `(date, source, factor, value)`, `--backfill` for full
+history. **TSMOM quirk:** its header row has no label in the date column (first cell None)
+and both workbooks carry trailing pad cells — final fix uses first-non-empty-cell header
+detection, normalizes column 0 to `date`, and renames other blank headers `__padN__`
+(dropped after melt). Live result: 27,048 rows (VME 13,243 / QMJ 11,320 / TSMOM 2,485),
+56 factors, 1957-07 → 2026-05. Backfill parquet filename is stale
+(`aqr_factors_backfill_20260802.parquet` predates the TSMOM fix) but contains all three
+sources — safe to regenerate or leave.
+
+**Wiring (both pipelines):** `query.py` CATALOG (`_glob("redfin/market_tracker/**/*.parquet")`
++ `_glob("aqr/factors/**/*.parquet")`), `validate.py` SCHEMAS (`redfin_market_tracker`
+period_begin/region/property_type + value_ranges; `aqr_factors` date/source/factor/value
+modeled after `ff_factors`), `run_all.py` PipelineSpec stage 1 (`redfin` timeout 1200,
+`aqr_factors` timeout 600), `curated.py` KEYS (`redfin_market_tracker` →
+period_begin/region/property_type/is_seasonally_adjusted; `aqr_factors` →
+date/source/factor), `tests/test_catalog.py` EXPECTED_TABLES, `tests/test_pipelines.py`
+PIPELINE_MODULES, `docs/PIPELINE_CATALOG.md` rows.
+
+**Verification:** full suite **444 passed / 18 skipped**; `validate.py` both PASS (0
+errors); widened `months_of_supply` range to (0,200) — the 2 flagged values were real
+Vermont data (131/167 months of supply in early 2015), not parse errors; curated dedup
+clean (0 rows removed); `query.py` reads both tables; `run_all.py --dry-run --stage 1`
+picks both up.
+
+**Open:** HF config rebuild still running — poll `/splits` until `ready=152/pending=0`;
+re-upload README if row totals change with new tables.
+
+## 2026-08-01 (session 2) — negative-price guard + HF constituents/shipping refresh
+
+Set out to (1) refresh shipping/constituents data on HF and (2) guard against the
+Schwab additive-dividend-adjustment negative-price bug flagged in PROJECT_NOTES.md.
+Both done, but the actual work diverged a lot from the plan once live state was checked.
+
+**Negative-price guard:** `close<=0` alone wasn't enough — a synthetic COST test (mimicking
+the 2009-03-09 crossing) showed the day *after* crossing still had a negative `low` and a
+garbage `pct_change` (-304%). Guard in `curated.py`'s `_compact_large_table()` now computes,
+per symbol, the last date where ANY of open/high/low/close <= 0, and nulls open/high/low/
+close/pct_change/log_return/intraday_change/intraday_range/vwap through that date (volume/
+fetched_at untouched). Applied one-time to the live published `prices` table: 896,583 of
+46,950,543 rows affected, 0 remaining bad rows after, all 27,759 symbols intact.
+
+**HF sync reality check:** PROJECT_NOTES said `prices`/`cfpb_complaints`/`open_meteo_weather`
+were "not yet synced" — checked live and they already were (that note was stale). The
+genuinely stale table was `index_members` (9 days old, and no fresher local copy existed to
+push — this Passport-drive checkout's local Iceberg store for constituents/shipping was
+empty). Ran `index_constituents_pipeline.py` fresh (7,587 rows) and `shipping_pipeline.py`
+(gscpi full-history, matched HF exactly at 342 rows; freight_ppi incremental-only, 26 rows).
+
+**The catch that mattered most:** before uploading anything, compared every local curated
+table's size against its HF counterpart. **9 tables would have been silently gutted by a
+blind `upload_huggingface.py` run** — this checkout's `storage/curated/` is a partial subset
+(708MB) of the full published dataset. Worst cases: `fundamentals_quarterly` would have
+dropped to 0.4% of its published size, `fundamentals_annual` to 0.8% (`finnhub_news`,
+`news_sentiment`, and 5 others also affected). `upload_folder()` does a straight per-path
+file replace with no merge/delete_patterns logic. **Did not run the folder-wide upload.**
+Instead: merged `index_members` and `shipping_freight_ppi` with their existing HF history
+via DuckDB (UNION + keyed dedup, not overwrite) before pushing, and used targeted
+`api.upload_file()` calls for only the 4 verified files (`prices`, `index_members`,
+`shipping_gscpi`, `shipping_freight_ppi`). The other ~140 local tables were left untouched.
+
+**Blockers hit and fixed:**
+- `pyiceberg`, `sqlalchemy` (pyiceberg's sql-sqlite extra), and `xlrd` (GSCPI Excel parsing)
+  were all missing from `requirements.txt` — installed by hand, not yet added to the file.
+- The Iceberg catalog stale-path bug from `SESSION_NOTES_2026-07-18-constituents.md`
+  (`metadata_location` pointing at `C:\Users\zande\PycharmProjects\...`) had recurred on
+  this Passport-drive copy of `constituents_catalog.db`. Fixed by dropping + recreating
+  `constituents.index_members`, `shipping.gscpi`, `shipping.freight_ppi` (confirmed empty
+  locally first, so no data lost). `securities`/`fund_holdings`/`identifier_map` still have
+  the same stale pointer — not fixed, since HF already has current data for those and
+  nothing this session needed to write to them.
+
+**Decision:** `upload_huggingface.py` is not safe to run as-is from this checkout until
+either it gains a size-sanity/merge-aware guard, or this checkout gets a full local backfill
+first. Don't run the folder-wide upload blind again — check local-vs-remote sizes first.
+
+## 2026-08-01 (session 1) — data lake manifest exporter + interactive dashboard
+
+Built `scripts/lake_manifest.py`: exports a single JSON manifest of the data lake
+(category, row count, schema, size, date range, freshness, source pipeline) for every
+CATALOG table. Then built and published an interactive dashboard artifact (Structure &
+Size treemap, Schema & Relationships browser + join graph, Lineage flow, Freshness) on
+top of it.
+
+**Findings, not obvious from the code alone:**
+- This checkout's `storage/raw` is code-only — e.g. `storage/raw/prices` is just a
+  `.gitkeep`. The actual populated snapshot (150 tables, 90,223,873 rows, 2.68 GB) lives
+  only on the Hugging Face mirror (`ZanderL1337/financial-data-pipeline`), pushed by
+  `upload_huggingface.py` from wherever the pipelines actually ran. The manifest script
+  pulls live row counts/schema/size/date-range from the HF-hosted parquet footers via
+  DuckDB httpfs (no full download) rather than querying local `query.py`.
+- `query.py`'s CATALOG dict has **233 tables**, not the 133 CLAUDE.md states — that line
+  is stale (last verified 2026-07-07).
+- 93 of those 233 tables (`signal_health` onward through `cfpb_complaints`) have **no
+  category comment header** in the source — a naive parse dumps them all under
+  "Signal health monitor...". Worked around with a name-prefix fallback in the export
+  script; the source file itself is still uncommented for that block.
+- `etf_holdings` exists on HF but isn't in the current CATALOG — likely renamed or
+  retired since the last upload; not investigated further.
+
+**Decision:** re-run `scripts/lake_manifest.py` any time storage/HF changes, then
+republish the same artifact path to refresh the dashboard.
+
 ## 2026-07-20 (session 3) — FRED shipping expansion (+10 series)
 
 Expanded `FREIGHT_SERIES` in `shipping_pipeline.py` from 8 to 18 series, backfilled, curated, validated, tests pass (145/145).
