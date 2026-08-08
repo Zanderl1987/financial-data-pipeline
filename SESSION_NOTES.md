@@ -1,5 +1,13 @@
 # Session Notes — running log
 
+## 2026-08-07 (cont.) — Ported data-integrity fixes + wired shipping HF sync
+
+- **Financial fixes ported to master and pushed** (`e3512e3`): the `fdp-review` branch's 4 fixes were assessed against master — #2 (query dedup) and #4 (validator `period_end`/`theo_price`) already landed via `curated.py` + later `validate.py` commits, so only #3 and #6 were ported, no merge/rebase needed.
+  - `fundamentals_pipeline.py`: `extract_concept` now filters XBRL facts by period duration (~3-mo for 10-Q, ~12-mo for 10-K) so quarterly flow metrics are true discrete quarters, not YTD cumulatives filed under the same `period_end`. Instant balance-sheet facts always kept; other forms (20-F, 6-K, 8-K, amendments) untouched. Master already emits `start_date`/`duration_days`, so no new column was needed (fdp-review had added `period_start`).
+  - `finnhub_pipeline.py`: redacted API token from non-200/429 error logs.
+  - Verified: order-independence synthetic checks (YTD listed first) pass; 101 tests pass, 2 pre-existing env failures (missing Iceberg storage dirs). Branch kept for now per user; deletion to be revisited later.
+- **Shipping HF sync wired into CI** (`ShippingDataPipeline`, committed `6695730`, not pushed): added `Sync to HuggingFace` step to `collect.yml` after data-quality checks, gated on `HF_TOKEN`. Repo has NO HF_TOKEN secret yet — user must add it, then push. Local repo has no `pipeline.db`/`.env`, so a local manual refresh isn't possible without a local collect run.
+
 ## 2026-08-07 — HF dataset pipeline sync review
 
 Audited the 4 HF datasets vs their feeding repos. Findings:
