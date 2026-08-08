@@ -1,6 +1,28 @@
 # Session Notes — running log
 
-## 2026-07-29 — Cross-clone sync + full-universe factor-validation design (in progress)
+## 2026-08-07 (cont.) — HF token + standing rule
+
+- **HF token added to `.env`** (`financial-data-pipeline`): appended a new `HF_TOKEN=` line with the user's write token — the pre-existing `HF_TOKEN` line was left untouched (dotenv last-wins → new token is effective). Token was already present as `HF_WRITE_TOKEN`.
+- **Standing rule recorded** in `C:\Users\Zander\.claude\CLAUDE.md` (Zander standing rules): never delete or replace anything unless asked twice; prefer append/new-line additions. Applies to all future sessions.
+- Note: docs commit `5029780` (session notes + TASKS.md) is on master but **not yet pushed** (local ahead 1).
+
+## 2026-08-07 (cont.) — Ported data-integrity fixes + wired shipping HF sync
+
+- **Financial fixes ported to master and pushed** (`e3512e3`): the `fdp-review` branch's 4 fixes were assessed against master — #2 (query dedup) and #4 (validator `period_end`/`theo_price`) already landed via `curated.py` + later `validate.py` commits, so only #3 and #6 were ported, no merge/rebase needed.
+  - `fundamentals_pipeline.py`: `extract_concept` now filters XBRL facts by period duration (~3-mo for 10-Q, ~12-mo for 10-K) so quarterly flow metrics are true discrete quarters, not YTD cumulatives filed under the same `period_end`. Instant balance-sheet facts always kept; other forms (20-F, 6-K, 8-K, amendments) untouched. Master already emits `start_date`/`duration_days`, so no new column was needed (fdp-review had added `period_start`).
+  - `finnhub_pipeline.py`: redacted API token from non-200/429 error logs.
+  - Verified: order-independence synthetic checks (YTD listed first) pass; 101 tests pass, 2 pre-existing env failures (missing Iceberg storage dirs). Branch kept for now per user; deletion to be revisited later.
+- **Shipping HF sync wired into CI** (`ShippingDataPipeline`, committed `6695730`, not pushed): added `Sync to HuggingFace` step to `collect.yml` after data-quality checks, gated on `HF_TOKEN`. Repo has NO HF_TOKEN secret yet — user must add it, then push. Local repo has no `pipeline.db`/`.env`, so a local manual refresh isn't possible without a local collect run.
+
+## 2026-08-07 — HF dataset pipeline sync review
+
+Audited the 4 HF datasets vs their feeding repos. Findings:
+- `financial-data-pipeline` (HF): clean/current; HF sync wired into `run_all.py` (`--no-hf-sync`); HF updated ~18h ago. Healthy.
+- `financial-fundamentals` (HF): last built Aug 6, but **4 data-integrity fixes still unmerged** on the `fdp-review` worktree branch `fix/data-integrity-and-secrets`: #2 query-layer dedup, #3 discrete-quarter XBRL fundamentals (fixes YTD bug in quarterly tables pushed to HF), #4 validator schema drift, #6 Finnhub token leak in logs. Branch base `9cb0c4a` is behind current master `b81e65a` → needs rebase before merge.
+- `freight-rail-data-pipeline`: **local clone 7 commits behind origin/main** — origin holds the sources that produced the current HF tables (`bts_freight_indicators`, `fmcsa_carrier_census`, `fra_safety`, USDA GTR grain) plus `upload_huggingface.py`. Local uncommitted WIP diverges in the SAME files origin also changed (normalizer.py, schemas.py, freightos_fbx.py, usda_agtransport.py, storage.py) → needs rebase/reconcile. USDA Socrata resource-ID conflict: local WIP = `tb7q-kn5i`/`axkm-yjzy` vs origin = `swcm-ytjc`/`jvfn-6e7j` — **unverified which is correct**. Stray `=` scratch file present (failed Socrata test). HF last synced Aug 3.
+- `ShippingDataPipeline`: clean/current, but **HF sync gap** — `collect.yml` collects daily in CI yet never uploads to HF; HF dataset last updated Aug 3.
+
+Decision: session notes + task list live in `financial-data-pipeline` (repo with the SESSION_NOTES convention). No code changed this session — review only.
 
 **Discovered a second diverging local clone.** Continuing eval-framework/backlog work
 (see `financial-data-pipeline/FinancialDataPipeline_Future_Improvements.md` items P/G/H)
@@ -469,10 +491,10 @@ Schwab API Exploration.ipynb  SchwabDev1.py          (etc.)
 These are safe to ignore — they pre-date the current pipeline structure.
 
 ---
-## 2026-07-30 � ETF Holdings Pipeline + Fund Holdings Expansion
+## 2026-07-30 � ETF Holdings Pipeline + Fund Holdings Expansion
 
 ### What was built
-1. **etf_holdings_pipeline.py** � fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
+1. **etf_holdings_pipeline.py** � fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
 2. **fund_holdings_pipeline.py expanded**: ETF_PID_MAP 17 ? 65 iShares ETFs; MUTUAL_FUND_UNIVERSE 10 ? 52 mutual funds.
 3. **Wired etf_holdings** into validate.py, curated.py, query.py, run_all.py, test_catalog.py, test_pipelines.py. 155/155 wiring tests pass.
 4. **Wired error logging** into both write_to_iceberg() functions: catalog load, Arrow schema conversion, per-ticker overwrite, and verification query all wrapped in try/except.
@@ -484,10 +506,10 @@ These are safe to ignore — they pre-date the current pipeline structure.
 - This session worked from C:\Users\zande\financial-data-pipeline (not PycharmProjects version).
 
 ---
-## 2026-07-30 � ETF Holdings Pipeline + Fund Holdings Expansion
+## 2026-07-30 � ETF Holdings Pipeline + Fund Holdings Expansion
 
 ### What was built
-1. **etf_holdings_pipeline.py** � fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
+1. **etf_holdings_pipeline.py** � fetches full holdings for 200+ US ETFs from SecuritiesDB free API (no key, no auth). Writes to Iceberg table constituents.etf_holdings with per-fund-ticker partition overwrite. Live verified: 299 rows (SPY 99, IVV 100, VOO 100) written.
 2. **fund_holdings_pipeline.py expanded**: ETF_PID_MAP 17 -> 65 iShares ETFs (factor, sector, international, ESG, multi-asset, dividend, commodities, RE, short duration); MUTUAL_FUND_UNIVERSE 10 -> 52 mutual funds (Vanguard, Fidelity, Schwab, PIMCO, American Funds, T. Rowe Price, DFA).
 3. **Wired etf_holdings** into validate.py SCHEMAS, curated.py KEYS, query.py CATALOG, run_all.py PipelineSpec, test_catalog.py, test_pipelines.py. 155/155 wiring tests pass.
 4. **Wired error logging** into both write_to_iceberg() functions: catalog load, Arrow schema conversion, per-ticker overwrite, and verification query all wrapped in try/except with log.error()/log.warning().

@@ -197,6 +197,40 @@ def get_dji_symbols():
 # XBRL extraction — shared between DJI and full-market modes
 # ---------------------------------------------------------------------------
 
+# Income-statement and cash-flow facts are filed BOTH as the discrete period and
+# as year-to-date under the SAME period_end (e.g. a Q3 10-Q carries both the
+# 3-month Jul-Sep value and the 9-month Jan-Sep value, each ending Sep 30). The
+# companyfacts feed does not flag which is which, so we select by duration:
+#   10-Q -> keep the ~3-month discrete quarter (drop 6-/9-month YTD)
+#   10-K -> keep the ~12-month fiscal year     (drop any stray quarterly period)
+# Instant facts (balance sheet: assets, liabilities, shares) have no start date
+# and are always kept. Other forms (20-F, 6-K, 8-K, amendments) are left as-is.
+_QUARTER_DAYS = (80, 100)     # ~3 months, tolerant of 13-/14-week fiscal quarters
+_ANNUAL_DAYS  = (340, 380)    # ~12 months, tolerant of 52-/53-week fiscal years
+
+
+def _period_days(start, end):
+    """Length in days (end - start) of a fact's period, or None for instant facts."""
+    if not start or not end:
+        return None
+    try:
+        return (datetime.date.fromisoformat(end) - datetime.date.fromisoformat(start)).days
+    except (ValueError, TypeError):
+        return None
+
+
+def _duration_matches_form(form, days):
+    """Keep instant facts always; keep duration facts only when their length matches
+    the period implied by the form (a quarter for 10-Q, a fiscal year for 10-K)."""
+    if days is None:
+        return True
+    if form == "10-Q":
+        return _QUARTER_DAYS[0] <= days <= _QUARTER_DAYS[1]
+    if form == "10-K":
+        return _ANNUAL_DAYS[0] <= days <= _ANNUAL_DAYS[1]
+    return True
+
+
 def extract_concept(facts, metric_name, candidate_concepts, taxonomy):
     """
     Collect fact rows across all candidate XBRL concepts, deduplicating by
@@ -204,6 +238,11 @@ def extract_concept(facts, metric_name, candidate_concepts, taxonomy):
     mid-history (e.g. NVDA moving from RevenueFromContractWithCustomer to
     Revenues) return a complete time series rather than only the first concept's
     data, while restatements filed under a new accession number are preserved.
+
+    Flow metrics are filed as both the discrete period and a year-to-date
+    cumulative under the same period_end; only the fact whose duration matches
+    the form is kept, so quarterly values are true discrete quarters (~3 months)
+    rather than YTD cumulatives. See _duration_matches_form.
     """
     rows = []
     seen: set[tuple] = set()
@@ -214,7 +253,11 @@ def extract_concept(facts, metric_name, candidate_concepts, taxonomy):
             continue
         for unit_key, entries in node.get("units", {}).items():
             for e in entries:
-                key = (taxonomy, e.get("start"), e.get("end"), e.get("form"), e.get("accn"))
+                form = e.get("form")
+                days = _period_days(e.get("start"), e.get("end"))
+                if not _duration_matches_form(form, days):
+                    continue
+                key = (taxonomy, e.get("start"), e.get("end"), form, e.get("accn"))
                 if key in seen:
                     continue
                 seen.add(key)
@@ -228,7 +271,7 @@ def extract_concept(facts, metric_name, candidate_concepts, taxonomy):
                     "accession_number": e.get("accn"),
                     "fiscal_year":   e.get("fy"),
                     "fiscal_period": e.get("fp"),
-                    "form":          e.get("form"),
+                    "form":          form,
                     "filed":         e.get("filed"),
                     "frame":         e.get("frame"),
                     "taxonomy":      taxonomy,
