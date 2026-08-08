@@ -121,7 +121,8 @@ def get_with_backoff(endpoint, params=None):
                 print(f"  [429] Rate limit hit. Backing off {wait_time}s (attempt {attempt}/{MAX_RETRIES})...")
                 time.sleep(wait_time)
             else:
-                print(f"  [HTTP {r.status_code}] Error fetching {endpoint} for params {params}: {r.text[:120]}")
+                safe_params = {k: v for k, v in params.items() if k != "token"}
+                print(f"  [HTTP {r.status_code}] Error fetching {endpoint} for params {safe_params}: {r.text[:120]}")
                 return None
         except requests.RequestException as e:
             print(f"  Request connection error (attempt {attempt}): {e}")
