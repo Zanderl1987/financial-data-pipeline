@@ -91,33 +91,61 @@ def fetch_edgar_tickers() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 2. Index membership flags + GICS sector from existing index_members table
 # ---------------------------------------------------------------------------
+
+# NOTE: each index source (Wikipedia/BlackRock/etc.) reports its own company_name
+# (and only the SPX/Wikipedia source carries cik/gics_sector) for the same ticker,
+# so this must GROUP BY ticker alone -- grouping by those metadata columns too
+# (as this used to) splits one ticker into multiple rows, one per distinct
+# metadata combination, and each row only captures the flags that co-occurred
+# with it. That silently dropped is_russell3000/is_nasdaq100 for names like
+# AAPL/MSFT/NVDA once a later drop_duplicates(subset="ticker") kept only one
+# of the split rows. Metadata is picked with an explicit source priority
+# (SPX/Wikipedia first, since it's the only source with cik/gics_sector).
+_INDEX_FLAGS_SQL = """
+    SELECT
+        ticker,
+        COALESCE(
+            MAX(CASE WHEN index_code = 'SPX'     THEN company_name END),
+            MAX(CASE WHEN index_code = 'NDX'     THEN company_name END),
+            MAX(CASE WHEN index_code = 'RUT3000' THEN company_name END),
+            MAX(CASE WHEN index_code = 'W5000'   THEN company_name END),
+            MAX(CASE WHEN index_code = 'RUT2000' THEN company_name END)
+        ) AS company_name,
+        MAX(CASE WHEN index_code = 'SPX' THEN cik END) AS cik,
+        MAX(CASE WHEN index_code = 'SPX' THEN gics_sector END) AS gics_sector,
+        MAX(CASE WHEN index_code = 'SPX' THEN gics_sub_industry END) AS gics_sub_industry,
+        MAX(CASE WHEN index_code = 'SPX'     THEN 1 ELSE 0 END) AS is_sp500,
+        MAX(CASE WHEN index_code = 'NDX'     THEN 1 ELSE 0 END) AS is_nasdaq100,
+        MAX(CASE WHEN index_code = 'RUT3000' THEN 1 ELSE 0 END) AS is_russell3000,
+        MAX(CASE WHEN index_code = 'RUT2000' THEN 1 ELSE 0 END) AS is_russell2000,
+        MAX(CASE WHEN index_code = 'W5000'   THEN 1 ELSE 0 END) AS is_wilshire5000
+    FROM members
+    WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM members)
+    GROUP BY ticker
+"""
+
+
+def _aggregate_index_flags(members) -> pd.DataFrame:
+    """Run _INDEX_FLAGS_SQL against `members` (a DataFrame or duckdb relation with
+    ticker/company_name/cik/gics_sector/gics_sub_industry/index_code/snapshot_date
+    columns). Split out from build_index_flags() so the aggregation logic is
+    testable against synthetic data, not just the real Iceberg files."""
+    import duckdb
+
+    df = duckdb.sql(_INDEX_FLAGS_SQL).fetchdf()
+    for col in ["is_sp500", "is_nasdaq100", "is_russell3000", "is_russell2000", "is_wilshire5000"]:
+        df[col] = df[col].astype(bool)
+    return df
+
+
 def build_index_flags() -> pd.DataFrame:
     """Read the existing index_members Iceberg table and compute per-ticker index membership flags."""
     import duckdb
 
     log.info("[INDEX] Reading index_members for membership flags...")
     parquet_path = (ICEBERG_WAREHOUSE / "constituents" / "index_members" / "**" / "*.parquet").as_posix()
-
-    df = duckdb.sql(f"""
-        SELECT
-            ticker,
-            company_name,
-            cik,
-            gics_sector,
-            gics_sub_industry,
-            MAX(CASE WHEN index_code = 'SPX'     THEN 1 ELSE 0 END) AS is_sp500,
-            MAX(CASE WHEN index_code = 'NDX'     THEN 1 ELSE 0 END) AS is_nasdaq100,
-            MAX(CASE WHEN index_code = 'RUT3000' THEN 1 ELSE 0 END) AS is_russell3000,
-            MAX(CASE WHEN index_code = 'RUT2000' THEN 1 ELSE 0 END) AS is_russell2000,
-            MAX(CASE WHEN index_code = 'W5000'   THEN 1 ELSE 0 END) AS is_wilshire5000
-        FROM read_parquet('{parquet_path}', hive_partitioning=true)
-        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM read_parquet('{parquet_path}', hive_partitioning=true))
-        GROUP BY ticker, company_name, cik, gics_sector, gics_sub_industry
-    """).fetchdf()
-
-    # Cast boolean flags
-    for col in ["is_sp500", "is_nasdaq100", "is_russell3000", "is_russell2000", "is_wilshire5000"]:
-        df[col] = df[col].astype(bool)
+    members = duckdb.sql(f"SELECT * FROM read_parquet('{parquet_path}', hive_partitioning=true)")
+    df = _aggregate_index_flags(members)
 
     log.info("[INDEX] Computed flags for %d unique tickers", len(df))
     return df
