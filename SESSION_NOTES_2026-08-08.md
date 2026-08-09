@@ -258,6 +258,42 @@ section — this was genuinely a multi-hour, multi-attempt chase (4 separate ~1.
 background permutation runs across the night to get from "first Russell 3000 attempt" to
 "trustworthy final answer"), documented in full there rather than summarized further here.
 
+### 14. (2026-08-09) `securities.is_russell3000` bug found and fixed
+
+Followed up on the known gap noted in §10 (`AAPL`/`MSFT`/`NVDA` missing from the Russell
+3000 flag). Root cause: `securities_reference_pipeline.py::build_index_flags()` grouped
+`index_members` rows by `ticker, company_name, cik, gics_sector, gics_sub_industry` —
+but each index source (Wikipedia for SPX, BlackRock for RUT3000/RUT2000/W5000, etc.)
+reports its own `company_name` casing for the same ticker, and only the SPX/Wikipedia
+row carries `cik`/GICS fields. That split every multi-index ticker into several rows,
+each capturing only the flags that happened to co-occur with its specific metadata
+combination — a later `drop_duplicates(subset="ticker")` then kept just one of those
+split rows, silently dropping the rest. Confirmed live: AAPL/MSFT/NVDA each had exactly
+one flag `True` instead of all four (SPX/NDX/RUT3000/W5000).
+
+Fix: group by `ticker` alone, with metadata (company name, CIK, GICS sector) picked via
+explicit source priority (SPX/Wikipedia first, since it's the only source with CIK/GICS).
+Extracted the aggregation into `_aggregate_index_flags()` so it's directly testable
+against synthetic data (3 new tests in `tests/test_securities_reference_pipeline.py`).
+Patched the live `securities` table in place (didn't touch Finnhub-enriched fields —
+market_cap/shares/exchange/etc. — only the index flags and CIK/sector where those were
+missing), then rebuilt the curated snapshot (`curated.py --table securities`) since
+`query.py` reads that, not the raw Iceberg glob directly.
+
+Counts before -> after: S&P 500 235 -> 503, Nasdaq-100 46 -> 103, Russell 3000
+2,298 -> 2,564, Wilshire 5000 2,149 -> 2,418. Russell 2000 unchanged (1,947) — that
+index's rows apparently didn't collide the same way. All previous Russell-3000-scale
+work this session (§4, §10, §13) used the undercounted 2,298-symbol set — the
+conclusions (no tradeable edge) are extremely unlikely to flip from an 11%-larger,
+still-broad-market universe, but this wasn't re-run against the corrected universe.
+
+Also (re)confirmed: no Claude-in-Chrome browser connection available in this
+environment, so the published TV-rating artifact (§7) still hasn't been opened and
+visually checked in an actual browser — still only verified by reading the generated
+HTML/JS, not by looking at it render.
+
+Committed as `6d066b4`, pushed to `origin/master`.
+
 ## Verification
 
 - Full project suite: **567 passed, 0 failed**, run twice more after the §9-13 changes
@@ -305,6 +341,15 @@ background permutation runs across the night to get from "first Russell 3000 att
 - `yfinance_universe_backfill_progress.json` added to `.gitignore` (matching the existing
   `schwab_universe_backfill_progress.json` precedent — regenerable local run-state, not
   repo content).
+- (2026-08-09) After patching `securities` via `table.overwrite()`, querying it through
+  `query.py` still showed the old, wrong flag counts — because `pyiceberg` has no
+  on-disk orphan-file GC (already known, see CLAUDE.md's Iceberg section), every past
+  `overwrite()` left its old parquet files in place, and `query.py`'s `securities` view
+  prefers `storage/curated/securities/securities.parquet` if it exists (it did, and was
+  stale). Fix was to rerun `curated.py --table securities` to rebuild that snapshot from
+  the corrected data. Any direct patch to an Iceberg-backed table needs a matching
+  `curated.py --table <name>` afterward, or the fix won't actually be visible through
+  the normal query path.
 
 ## Committed
 
@@ -313,17 +358,19 @@ background permutation runs across the night to get from "first Russell 3000 att
   Pushed to `origin/master` via a merge commit (`532207f`) after fetching 3 commits that
   had landed from another session (`e3512e3`/`5029780`/`83076d9`, HF sync fixes — no file
   overlap, clean merge).
-- This session's remaining work (§8-13, plus this file) — see the commit this session
-  ends on; check `git log` for the actual hash rather than trusting a number written here.
+- `c98089f` — "Add Russell 3000 adjusted-close pipeline; fix dividend-adjustment bug in
+  price loading" — §8-13, the yfinance backfill and the two data-quality bugs. Pushed.
+- `6d066b4` — "Fix securities table losing index-membership flags on group-by collision"
+  — §14, the `is_russell3000`/`is_nasdaq100` fix. Pushed.
 
 ## What to do next
 
-1. Visually spot-check the published visualization artifact once a working browser tool
-   is available — it was only statically verified this session.
-2. Fix `securities.is_russell3000` — confirmed missing `AAPL`/`MSFT`/`NVDA` at minimum;
-   the "Russell 3000" universe used all session (both Schwab and yfinance passes) was
-   never the true, complete index. Check `index_constituents_pipeline.py`'s BlackRock IWV
-   holdings pull for why (stale snapshot? pagination bug? holdings-file quirk?).
+1. Open the published visualization artifact in an actual browser and look at it once a
+   working browser connection is available — so far it's only been checked by reading
+   the generated HTML/JS source, never by looking at the rendered page.
+2. Re-run the Russell 3000 fade backtest (§4/§13) against the corrected, 11%-larger
+   universe (2,564 symbols, not 2,298) — the "no tradeable edge" conclusion is unlikely
+   to flip but was never checked against the fixed universe.
 3. If picking the TV-rating thread back up: the one still-open lead is the mildly
    contrarian continuous-score IC (−0.0116 at 21d, t=−5.20) — never turned into an actual
    trade rule this session, only measured as an academic quintile-spread. Everything else
