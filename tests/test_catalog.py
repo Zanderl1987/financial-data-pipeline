@@ -87,6 +87,8 @@ EXPECTED_TABLES = [
     "finnhub_news",
     # Yahoo Finance deep market history
     "market_history",
+    # Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV)
+    "yfinance_universe_prices",
     # TradingView technical-rating snapshots
     "tv_ratings",
     # SEC EDGAR filing index

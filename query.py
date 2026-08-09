@@ -276,7 +276,9 @@ CATALOG: dict[str, str] = {
     "finnhub_upgrades":        _glob("finnhub/upgrades/**/*.parquet"),
     "finnhub_news":            _glob("finnhub/news/**/*.parquet"),
     # ── Yahoo Finance deep market history (indices, futures, FX, rates) ──────
-    "market_history":          _glob("yfinance/**/*.parquet"),
+    "market_history":          _glob("yfinance/**/market_history_*.parquet"),
+    # ── Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV) ────
+    "yfinance_universe_prices": _glob("yfinance/**/yfinance_universe_*.parquet"),
     # ── TradingView technical-rating snapshots ───────────────────────────────
     "tv_ratings":              _glob("tradingview/**/*.parquet"),
     # ── SEC EDGAR filing index (8-K, 10-K/Q, S-1, 13D/G, proxies) ────────────

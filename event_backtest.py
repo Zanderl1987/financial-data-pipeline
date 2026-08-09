@@ -53,7 +53,8 @@ import query as q
 HORIZONS = (1, 3, 5, 10, 21, 63)
 
 # price tables searched in order; (table, close preference)
-_PRICE_TABLES = ("tiingo_prices", "prices", "market_history", "sector_etfs")
+_PRICE_TABLES = ("tiingo_prices", "yfinance_universe_prices", "prices",
+                 "market_history", "sector_etfs")
 
 
 # ------------------------------------------------------------------ prices
@@ -69,11 +70,18 @@ def load_close(symbol: str, start: "str | None" = None,
                end: "str | None" = None,
                price_table: "str | None" = None) -> pd.Series:
     """
-    Daily (adjusted-when-available) close series for one symbol. Every price
-    table is checked and the longest series wins, so a deep source
+    Daily (split-adjusted-when-available) close series for one symbol. Every
+    price table is checked and the longest series wins, so a deep source
     (market_history) beats a shallow one (a recent tiingo watchlist pull).
     Date-indexed float series, ascending.
+
+    Uses split-only adjustment (analytics.technical._split_only_adjust),
+    NOT a source's dividend-adjusted column -- dividend adjustment
+    compounds backward over decades and distorts price history for
+    high-yield names; see that function's docstring and
+    experiments/2026-08-08_tv-technical-rating-signal-eval.md.
     """
+    from analytics.technical import _split_only_adjust
     tables = [price_table] if price_table else list(_PRICE_TABLES)
     best = pd.Series(dtype=float, name=symbol)
     for t in tables:
@@ -81,12 +89,12 @@ def load_close(symbol: str, start: "str | None" = None,
             df = q.load(t, symbol=symbol, start=start, end=end)
         except Exception:
             continue
-        if df.empty:
+        if df.empty or "close" not in df.columns:
             continue
-        col = "adj_close" if "adj_close" in df.columns and df["adj_close"].notna().any() else "close"
-        s = (df.assign(date=pd.to_datetime(df["date"]))
-               .drop_duplicates("date").sort_values("date")
-               .set_index("date")[col].astype(float).dropna())
+        df = (df.assign(date=pd.to_datetime(df["date"]))
+                .drop_duplicates("date").sort_values("date"))
+        df = _split_only_adjust(df)
+        s = df.set_index("date")["close"].astype(float).dropna()
         if len(s) > len(best):
             s.name = symbol
             best = s

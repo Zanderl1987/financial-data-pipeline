@@ -148,9 +148,61 @@ class TestBuildTvThresholdRule:
         assert short_entries[5] == False, "No short entry on day 5: -0.4 > -0.5, prev -0.5 NOT > -0.5"
 
 
+class TestBuildTvFadeRule:
+    def _df(self):
+        return pd.DataFrame({
+            "close": [10.0, 11.0, 12.0, 13.0, 14.0],
+            "rating_all": [0.0, 0.6, 0.05, -0.6, -0.05],
+        }, index=pd.bdate_range("2024-01-01", periods=5))
+
+    def test_fade_is_the_side_swapped_mirror_of_threshold(self):
+        """build_tv_fade_rule's long/short flags should exactly equal
+        build_tv_threshold_rule's short/long flags at the same thresholds
+        -- fading is defined as swapping which side each trigger drives,
+        not a different trigger definition."""
+        df = self._df()
+        threshold = ba.build_tv_threshold_rule(0.5, 0.1, -0.5, -0.1)
+        fade = ba.build_tv_fade_rule(0.5, 0.1, -0.5, -0.1)
+
+        t_le, t_lx, t_se, t_sx = ev_trades.rule_flags(threshold, df)
+        f_le, f_lx, f_se, f_sx = ev_trades.rule_flags(fade, df)
+
+        assert np.array_equal(f_le, t_se)
+        assert np.array_equal(f_lx, t_sx)
+        assert np.array_equal(f_se, t_le)
+        assert np.array_equal(f_sx, t_lx)
+
+    def test_fade_side_is_both(self):
+        rule = ba.build_tv_fade_rule(0.5, 0.1, -0.5, -0.1)
+        assert rule.side == "both"
+        assert rule.name == "tv_fade_live"
+
+    def test_fade_long_matches_fade_long_leg_only(self):
+        df = self._df()
+        fade = ba.build_tv_fade_rule(0.5, 0.1, -0.5, -0.1)
+        fade_long = ba.build_tv_fade_long_rule(0.5, 0.1, -0.5, -0.1)
+
+        f_le, f_lx, _, _ = ev_trades.rule_flags(fade, df)
+        fl_le, fl_lx, fl_se, fl_sx = ev_trades.rule_flags(fade_long, df)
+
+        assert np.array_equal(f_le, fl_le)
+        assert np.array_equal(f_lx, fl_lx)
+        assert not fl_se.any()
+        assert not fl_sx.any()
+
+    def test_fade_long_side_is_long(self):
+        rule = ba.build_tv_fade_long_rule(0.5, 0.1, -0.5, -0.1)
+        assert rule.side == "long"
+        assert rule.name == "tv_fade_long_live"
+
+
 class TestCacheAndSimulateLive:
     def test_has_trade_rule_true_for_known_signal(self):
         assert ba.has_trade_rule("tv_threshold") is True
+
+    def test_has_trade_rule_true_for_fade_signals(self):
+        assert ba.has_trade_rule("tv_fade") is True
+        assert ba.has_trade_rule("tv_fade_long") is True
 
     def test_has_trade_rule_false_for_unknown_signal(self):
         assert ba.has_trade_rule("factor_value") is False
@@ -163,7 +215,7 @@ class TestCacheAndSimulateLive:
             return {"AAPL": pd.DataFrame({"close": [1.0], "rating_all": [0.0]})}
 
         monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold",
-                            fake_rating_cache)
+                            (fake_rating_cache, ba.build_tv_threshold_rule))
         ba._CACHE.clear()
         ba._CACHE_RUN_ID.clear()
         first = ba.get_cache("tv_threshold", "run_001")
@@ -179,7 +231,7 @@ class TestCacheAndSimulateLive:
             return {"AAPL": pd.DataFrame({"close": [1.0], "rating_all": [0.0]})}
 
         monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold",
-                            fake_rating_cache)
+                            (fake_rating_cache, ba.build_tv_threshold_rule))
         ba._CACHE.clear()
         ba._CACHE_RUN_ID.clear()
         first = ba.get_cache("tv_threshold", "run_001")

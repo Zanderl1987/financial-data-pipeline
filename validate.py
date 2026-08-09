@@ -797,6 +797,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["symbol", "date", "close"],
         "date_col":    "date",
     },
+    # ── Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV) ─────
+    "yfinance_universe_prices": {
+        "required":    ["symbol", "date", "close", "adj_close", "fetched_at"],
+        "critical_nn": ["symbol", "date", "close", "adj_close"],
+        "date_col":    "date",
+    },
     # ── TradingView technical-rating snapshots ────────────────────────────────
     "tv_ratings": {
         "required":    ["symbol", "date", "rating_all", "rating_ma", "rating_osc",

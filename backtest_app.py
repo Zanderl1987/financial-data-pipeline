@@ -24,14 +24,20 @@ from evaluation import adapters as ev_adapters
 from evaluation.contracts import TradeRule
 from generate_eval_report import find_latest, load_run
 
-# Signals whose TradeRule shape we know how to rebuild live: name -> cache
-# builder. Only tv_threshold exists today (adapters.tv_threshold_rule() /
-# adapters.rating_cache()); a signal not in this dict still shows its IC &
-# Significance panel, just not the Live Trade Rule / Symbol Explorer / P&L
-# panels (see has_trade_rule()).
-KNOWN_TRADE_RULE_SIGNALS = {
-    "tv_threshold": ev_adapters.rating_cache,
-}
+# Signals whose TradeRule shape we know how to rebuild live: name -> (cache
+# builder, rule builder). Populated below, after the rule-builder functions
+# are defined (KNOWN_TRADE_RULE_SIGNALS itself is referenced by has_trade_rule/
+# get_cache/simulate_live throughout this module). A signal not in this dict
+# still shows its IC & Significance panel, just not the Live Trade Rule /
+# Symbol Explorer / P&L panels (see has_trade_rule()). All three entries
+# share the same default full-universe adapters.rating_cache() -- tv_fade/
+# tv_fade_long were evaluated on the same universe as tv_threshold, so this
+# is the correct cache for them too (basket-scoped runs like tv_fade_basket/
+# tv_fade_long_basket and the Russell-3000 run are NOT wired in: this cache
+# builder always rebuilds the default full universe, so a basket/
+# Russell-3000-named entry here would silently show the wrong live data
+# under a misleadingly-scoped dropdown label).
+KNOWN_TRADE_RULE_SIGNALS: dict = {}
 
 _CACHE: dict = {}          # signal name -> dict[symbol -> DataFrame], built lazily
 _CACHE_RUN_ID: dict = {}   # signal name -> run_id the cache was built for
@@ -87,6 +93,50 @@ def build_tv_threshold_rule(bull_min: float, exit_long_max: float,
         notional=notional)
 
 
+def build_tv_fade_rule(bull_min: float, exit_long_max: float,
+                       bear_max: float, exit_short_min: float,
+                       notional: float = DEFAULT_NOTIONAL) -> TradeRule:
+    """tv_threshold with sides swapped at each trigger (see
+    experiments/2026-08-08_tv-technical-rating-signal-eval.md): go LONG on
+    the bear-entry cross (buy the oversold crash) instead of short, go
+    SHORT on the bull-entry cross (fade the overbought surge) instead of
+    long. NOTE: the layout's slider labels ("Bull entry"/"Bear entry") are
+    shared across all signals and describe tv_threshold's semantics -- for
+    this rule "Bull entry" drives the SHORT trigger and "Bear entry" drives
+    the LONG trigger, the opposite of what the label says."""
+    return TradeRule(
+        name="tv_fade_live",
+        entries=lambda d: _crossed_down(d["rating_all"], bear_max),
+        exits=lambda d: d["rating_all"] > exit_short_min,
+        side="both",
+        short_entries=lambda d: _crossed_up(d["rating_all"], bull_min),
+        short_exits=lambda d: d["rating_all"] < exit_long_max,
+        notional=notional)
+
+
+def build_tv_fade_long_rule(bull_min: float, exit_long_max: float,
+                            bear_max: float, exit_short_min: float,
+                            notional: float = DEFAULT_NOTIONAL) -> TradeRule:
+    """Long-only half of build_tv_fade_rule (the side that showed a
+    significant edge on the 69-symbol universe but failed to replicate at
+    Russell 3000 scale -- see the writeup). bull_min/exit_long_max are
+    accepted for a uniform call signature but unused: this rule has no
+    short leg."""
+    return TradeRule(
+        name="tv_fade_long_live",
+        entries=lambda d: _crossed_down(d["rating_all"], bear_max),
+        exits=lambda d: d["rating_all"] > exit_short_min,
+        side="long",
+        notional=notional)
+
+
+KNOWN_TRADE_RULE_SIGNALS.update({
+    "tv_threshold": (ev_adapters.rating_cache, build_tv_threshold_rule),
+    "tv_fade": (ev_adapters.rating_cache, build_tv_fade_rule),
+    "tv_fade_long": (ev_adapters.rating_cache, build_tv_fade_long_rule),
+})
+
+
 def has_trade_rule(name: str) -> bool:
     return name in KNOWN_TRADE_RULE_SIGNALS
 
@@ -100,8 +150,8 @@ def get_cache(name: str, run_id: str) -> dict:
     rather than silently serving a stale panel under a fresh-looking
     banner."""
     if name not in _CACHE or _CACHE_RUN_ID.get(name) != run_id:
-        builder = KNOWN_TRADE_RULE_SIGNALS[name]     # raises KeyError if unknown
-        _CACHE[name] = builder()
+        cache_builder, _ = KNOWN_TRADE_RULE_SIGNALS[name]   # raises KeyError if unknown
+        _CACHE[name] = cache_builder()
         _CACHE_RUN_ID[name] = run_id
     return _CACHE[name]
 
@@ -121,9 +171,9 @@ def simulate_live(name: str, run_id: str, bull_min: float, exit_long_max: float,
     if key in _SIM_CACHE:
         return _SIM_CACHE[key]
     cache = get_cache(name, run_id)
-    rule = build_tv_threshold_rule(bull_min, exit_long_max, bear_max,
-                                   exit_short_min,
-                                   notional or DEFAULT_NOTIONAL)
+    _, rule_builder = KNOWN_TRADE_RULE_SIGNALS[name]
+    rule = rule_builder(bull_min, exit_long_max, bear_max, exit_short_min,
+                        notional or DEFAULT_NOTIONAL)
     trades = ev_trades.simulate(rule, cache)
     summary = ev_trades.trade_summary(trades)
     _SIM_CACHE[key] = (trades, summary)

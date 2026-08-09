@@ -290,11 +290,47 @@ def tv_rating(df: pd.DataFrame) -> pd.DataFrame:
 
 # ----------------------------------------------------------- stored-data API
 
+def _split_only_adjust(df: pd.DataFrame) -> pd.DataFrame:
+    """Split-adjust open/high/low/close/volume from a raw close + a
+    per-row split ratio (Tiingo's split_factor convention: recorded on the
+    split's effective date, e.g. 4.0 for a 4:1 split); requires `df`
+    already sorted ascending by date.
+
+    Deliberately does NOT use a source's dividend-adjusted column
+    (adj_close/adj_open/...). Dividend adjustment compounds backward
+    over a stock's whole history and can deflate decades-old prices to a
+    fraction of what actually traded that day (DUK: 1990 adj_close is
+    18.8% of that day's real close) -- harmless for a total-return chart,
+    but it manufactures a fake long-run "uptrend" when fed into a
+    technical indicator or a discrete trade-rule backtest that doesn't
+    model dividend reinvestment (this pipeline's evaluation/trades.py
+    engine doesn't). Discovered 2026-08-08 when a Russell 3000 TV-rating
+    backtest flipped from a decisive null (pnl_p=0.87, raw Schwab prices)
+    to a suspiciously strong "edge" (pnl_p=0.005) purely from switching to
+    a dividend-adjusted price source -- see
+    experiments/2026-08-08_tv-technical-rating-signal-eval.md.
+    """
+    cols = {c.lower(): c for c in df.columns}
+    if "split_factor" not in cols:
+        return df
+    sf = df[cols["split_factor"]].fillna(1.0).astype(float)
+    if (sf == 1.0).all():
+        return df
+    future_factor = sf[::-1].cumprod()[::-1] / sf   # product of every split AFTER this row
+    out = df.copy()
+    for key in ("open", "high", "low", "close"):
+        if key in cols:
+            out[cols[key]] = out[cols[key]].astype(float) / future_factor
+    if "volume" in cols:
+        out[cols["volume"]] = out[cols["volume"]].astype(float) * future_factor
+    return out
+
+
 def _load_ohlcv(symbol: str, price_table: "str | None",
                 start: "str | None", end: "str | None") -> pd.DataFrame:
     import query as q
     tables = [price_table] if price_table else \
-        ["tiingo_prices", "prices", "market_history"]
+        ["tiingo_prices", "yfinance_universe_prices", "prices", "market_history"]
     for t in tables:
         try:
             df = q.load(t, symbol=symbol, start=start, end=end)
@@ -302,18 +338,19 @@ def _load_ohlcv(symbol: str, price_table: "str | None",
             continue
         if df.empty:
             continue
-        cols = {c.lower(): c for c in df.columns}
-        # prefer adjusted prices when the table carries them
-        for adj, plain in (("adj_open", "open"), ("adj_high", "high"),
-                           ("adj_low", "low"), ("adj_close", "close"),
-                           ("adj_volume", "volume")):
-            if adj in cols:
-                df[plain] = df[cols[adj]]
         if not all(k in (c.lower() for c in df.columns) for k in _REQUIRED):
             continue
         df["date"] = pd.to_datetime(df["date"])
         df = (df.drop_duplicates("date").sort_values("date")
                 .set_index("date"))
+        # split-only adjustment when the source carries a split ratio
+        # (tiingo_prices); other sources are used as-is -- yfinance_universe_
+        # prices' plain close/open/high/low are already split-adjusted at
+        # the source (Yahoo's convention), and neither `prices` (Schwab) nor
+        # `market_history` carry a split ratio to adjust with. adj_close/
+        # adj_open/... are intentionally never preferred here -- see
+        # _split_only_adjust's docstring.
+        df = _split_only_adjust(df)
         df.attrs["price_table"] = t
         return df
     return pd.DataFrame()

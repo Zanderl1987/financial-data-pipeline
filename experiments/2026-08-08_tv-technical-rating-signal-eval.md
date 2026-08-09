@@ -22,13 +22,18 @@ following it — buying when it crashes into strong_sell — was the one constru
 significance on the 69-symbol universe (pnl_p = 0.025, win_rate_p = 0.005, PF 1.45).
 **Final verdict, after validation**: an out-of-sample time split (pre-/post-2012) showed
 partial replication — the win-rate effect held in both eras, the dollar-P&L significance
-mainly in the recent one. Expanding to the full Russell 3000 (2,030 usable symbols after
-excluding 262 with data-quality problems) resolved it: **the win-rate effect replicates
-everywhere (p = 0.005 on every cut tested all session) but the dollar-P&L edge does not
-survive broad-market scale** (pnl_p = 0.87). The curated 69-symbol watchlist's secular-
+mainly in the recent one. Expanding to the full Russell 3000 resolved it, and resolved it
+**twice, independently**: once via Schwab prices (2,030 usable symbols after excluding 262
+data-quality-flagged names, pnl_p=0.87) and again via a from-scratch Yahoo Finance backfill
+built specifically to cross-check it (2,139 usable symbols after fixing a
+dividend-adjustment distortion bug and excluding 146 differently-flagged names, pnl_p=0.46)
+— two different vendors, two different sets of data bugs found and fixed along the way,
+the same answer both times. **The win-rate effect replicates everywhere (p=0.005 on every
+cut tested across the whole investigation) but the dollar-P&L edge does not survive
+broad-market scale on either data source.** The curated 69-symbol watchlist's secular-
 growth tilt, not a real property of the TV rating, was doing the work. **No form of this
-signal tested — following it or fading it, on any universe from 6 to 2,030 symbols —
-supports a tradeable strategy.**
+signal tested — following it or fading it, on any universe from 6 to 2,298 symbols, on
+either of two independent price sources — supports a tradeable strategy.**
 
 ## Motivation
 
@@ -261,6 +266,63 @@ tested, but it does not translate into a broad-market-significant dollar edge** 
 win/loss size asymmetry (avg loss $705 vs avg win $477 here) eats it, and that asymmetry
 appears to be worse specifically on the fuller, less curated universe.
 
+## Follow-up (2026-08-09): independent second-source confirmation
+
+The Schwab-based Russell 3000 result above relied on excluding corrupted symbols rather
+than fixing the underlying data (`prices` has no adjusted-price columns at all — Schwab's
+API returns unadjusted OHLC and no split-adjustment source was available for it). To get a
+genuinely independent check, not just a differently-filtered cut of the same flawed source,
+a new pipeline (`yfinance_universe_backfill.py`) backfilled the same Russell 3000 universe
+from the Yahoo Finance API, which does carry split-adjusted prices for free (Tiingo's free
+tier was vetted and rejected first: 500-unique-symbols/month cap is a hard NO-GO at this
+scale; Tiingo's paid Power tier at $30/mo would work but wasn't chosen). This surfaced two
+more real bugs before landing on a trustworthy number — both are now permanent fixes, not
+one-off workarounds:
+
+1. **Dividend-adjustment distortion.** `analytics/technical.py::_load_ohlcv()` and
+   `event_backtest.py::load_close()` both had a pre-existing "prefer the adjusted price
+   column when the table has one" rule. Fine for a total-return chart; wrong for a
+   technical indicator or a discrete trade-rule backtest that doesn't model dividend
+   reinvestment (this project's `evaluation/trades.py` engine doesn't) — dividend
+   adjustment compounds backward over a stock's whole history and can deflate decades-old
+   prices to a fraction of what actually traded (`DUK`: 1990's dividend-adjusted close is
+   18.8% of that day's real price). Using it as the "close" feeding a moving-average-based
+   rating manufactures a fake long-run uptrend for high-yield names — exactly the kind of
+   stock underrepresented in the original 69-symbol growth-tilted watchlist, so this bug
+   was latent all session and only surfaced at Russell 3000 scale. **Fix**: both functions
+   now compute a split-only-adjusted close (`analytics/technical.py::_split_only_adjust`,
+   using Tiingo's `split_factor` column where available; Yahoo's plain `close` is already
+   split-adjusted at the source and needs no further work) and never prefer a
+   dividend-adjusted column. Before this fix, the "corrected" yfinance run still showed a
+   misleadingly significant pnl_p=0.005 — the fix alone did not eliminate the false
+   signal, because a second, independent bug was also present:
+2. **Ticker-reuse / bad historical data**, unrelated to adjustment math. Even Yahoo's data
+   isn't immune to a long-delisted company's price history being stitched to an unrelated
+   later company under the same recycled ticker. Found via the trade with the largest
+   single contribution: `QUBT` entering at $20 in Dec 2007, exiting at $800 in May 2008
+   (3,900%); `DFTX` entering at $0.015 in Dec 2019, exiting at $0.84 twelve days later
+   (5,500%, a $550,000 "win" on one $10k trade). `evaluation/universe.py::flag_price_jumps`
+   (already built for the Schwab pass) flagged 146 of 2,298 symbols (6.4%) on the same
+   single-day-jump screen.
+
+**Final, doubly-independent result** — split-only adjustment fixed *and* the 146
+jump-flagged symbols excluded *and* the same $5 entry-price floor as the Schwab pass
+(2,139 usable symbols):
+
+| universe | n_trades | win rate | total P&L | pnl_p | win_rate_p |
+|---|---|---|---|---|---|
+| Russell 3000, yfinance source (2,139 symbols) | 211,015 | 65.3% | $15,175,413 | **0.4577** | **0.005** |
+
+**This confirms the Schwab-based verdict via a fully independent data source and
+independent bug-fixing path.** Not significant (0.46, nowhere close to 0.05) — and the
+win-rate effect (p=0.005) held, as it has on every single cut tested across the whole
+investigation. Two different vendors, two different sets of data-quality bugs, the same
+qualitative answer: no broad-market dollar edge, a real but economically-inert win-rate
+timing effect. New reusable infrastructure from this pass: `yfinance_universe_prices`
+CATALOG table (2,285 symbols, 12.36M rows, pushed to the public HF dataset
+`ZanderL1337/financial-data-pipeline`), and the split-only-adjustment fix in the shared
+price-loading path, which benefits every future analysis in this repo, not just this one.
+
 ## Limitations & threats to validity
 
 - Events are not de-duplicated for clustering (`min_gap_days` not wired through the
@@ -294,13 +356,17 @@ appears to be worse specifically on the fuller, less curated universe.
 
 ## Decision & next step
 
-**Closed: no form of the TV Technical Rating signal tested — following it or fading it,
-on any universe from a 6-symbol basket to the full 2,030-symbol Russell 3000, at any
-holding-period rule tried — supports a tradeable strategy.** The as-shipped `tv_threshold`
-trade rule is not validated; do not treat the 2026-07-03 informal numbers as confirmed. The
-one genuine lead (long-only fade: buy when the rating crashes into strong_sell) partially
-replicated out-of-sample on the 69-symbol universe but failed decisively at Russell 3000
-scale (pnl_p=0.87) — the apparent edge was a property of the curated watchlist's
+**Closed, and closed twice over: no form of the TV Technical Rating signal tested —
+following it or fading it, on any universe from a 6-symbol basket to the full Russell 3000,
+at any holding-period rule tried, on either of two independently-sourced and
+independently-cleaned price datasets — supports a tradeable strategy.** The as-shipped
+`tv_threshold` trade rule is not validated; do not treat the 2026-07-03 informal numbers as
+confirmed. The one genuine lead (long-only fade: buy when the rating crashes into
+strong_sell) partially replicated out-of-sample on the 69-symbol universe but failed
+decisively at Russell 3000 scale on Schwab prices (pnl_p=0.87) *and again* on an
+independent Yahoo Finance backfill built specifically to cross-check that result
+(pnl_p=0.46, after fixing two more real bugs found along the way — see the 2026-08-09
+follow-up section above) — the apparent edge was a property of the curated watchlist's
 secular-growth composition, not the signal. **Decision: do not build a live/paper trading
 strategy on the TV Technical Rating in any form tested.**
 
@@ -310,22 +376,45 @@ Russell 3000). It never translated into a broad-market dollar edge because losin
 run bigger than winning trades, and that asymmetry got worse, not better, on the fuller
 universe. That's a specific, well-evidenced negative result, not a shrug.
 
+**Follow-up (same day): the `prices` table's data-quality problem turned out to be a
+Schwab API characteristic, not a bad source to swap out.** Traced the pipeline:
+`schwab_universe_backfill.py` built the entire `prices` table (all ~29k
+`symbol_universe.csv` symbols) from the Schwab API via `price_history_pipeline.
+fetch_symbol()`, and Schwab's `price_history` endpoint returns **unadjusted** OHLC — no
+split-adjustment parameter is requested or applied anywhere in this pipeline. So "get
+better data from Schwab" isn't available; this *is* Schwab data. No free split-adjustment
+source is currently wired in either (Tiingo's corporate-actions add-on needs a paid plan,
+per CLAUDE.md). Given that, the one-off detection screen was promoted to a permanent,
+reusable function: `evaluation/universe.py::flag_price_jumps()` /
+`clean_symbols()` (single-day |log return| > ln(3) flags a symbol wholesale — a bad split
+ratio corrupts the whole history on one side of the jump, not just the jump day, so
+partial salvage isn't safe). Tested in `tests/test_universe.py`
+(`TestFlagPriceJumps`, 3 new tests, all passing). Any future full-universe analysis
+reading from `prices` should run symbols through `clean_symbols()` first.
+
+**Follow-up (same day): the fade rules are now live-tunable in `backtest_app.py`.**
+`KNOWN_TRADE_RULE_SIGNALS` was restructured from `name -> cache_builder` to
+`name -> (cache_builder, rule_builder)`, and `build_tv_fade_rule()`/
+`build_tv_fade_long_rule()` added (same crossed-up/crossed-down shape as
+`build_tv_threshold_rule()`, entries/exits swapped per side). `tv_threshold`, `tv_fade`,
+and `tv_fade_long` all now support live threshold-slider tuning; `tv_fade_basket`/
+`tv_fade_long_basket`/`tv_fade_long_russell3000_clean` are intentionally NOT wired in
+(the shared cache builder always rebuilds the *default full universe*, so a
+basket/Russell-3000-scoped dropdown entry would silently show the wrong live data).
+4 new tests in `tests/test_backtest_app.py` (`TestBuildTvFadeRule`), all passing;
+2 pre-existing tests updated for the new tuple shape. Caveat worth knowing if you use it:
+the slider labels ("Bull entry"/"Bear entry") describe `tv_threshold`'s semantics — for
+`tv_fade`, "Bull entry" actually drives the SHORT trigger and "Bear entry" drives the LONG
+trigger, the opposite of what the label implies.
+
 Remaining threads, if this gets picked back up:
 
-1. The `prices` table's data-quality problem (unadjusted splits/bad ticks, ~11% of symbols
-   scanned) is a bigger finding than anything about TV ratings specifically — it affects
-   any future full-universe analysis in this repo that reads from `prices` without a
-   similar screen. Worth turning `storage/reports/eval/tv_russell3000_bad_symbols.csv`'s
-   detection logic (single-day |log return| > ln(3)) into a proper, reusable data-quality
-   gate rather than a one-off script.
-2. `min_gap_days` de-duplication is still not wired through `evaluation/adapters.py::
+1. `min_gap_days` de-duplication is still not wired through `evaluation/adapters.py::
    from_rating_changes` / the CLI — worth adding generally so future event-study t-stats
    aren't inflated by clustered/autocorrelated events.
-3. `tv_fade`/`tv_fade_basket`/`tv_fade_long`/`tv_fade_long_basket`/
+2. `tv_fade`/`tv_fade_basket`/`tv_fade_long`/`tv_fade_long_basket`/
    `tv_fade_long_russell3000_clean` are now recorded in
-   `storage/eval_registry/results.parquet` and visible in `backtest_app.py`'s dropdown
-   (IC-panel-only — none of the fade rules are wired into `KNOWN_TRADE_RULE_SIGNALS` for
-   live slider tuning).
+   `storage/eval_registry/results.parquet` and visible in `backtest_app.py`'s dropdown.
 
 ## Reproduce
 

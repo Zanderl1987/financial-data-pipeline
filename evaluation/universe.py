@@ -40,6 +40,62 @@ def exchange_listed_symbols(exclude_otc: bool = True) -> list[str]:
     return sorted(df["symbol"].dropna().unique().tolist())
 
 
+def flag_price_jumps(
+    symbols: "list[str]",
+    price_table: str = "prices",
+    max_abs_log_return: float = 1.0986,   # ln(3): a >3x jump or <1/3x drop in one day
+) -> pd.DataFrame:
+    """
+    Returns (symbol, max_abs_log_ret, min_close) for every symbol in
+    `symbols` whose day-over-day price ratio exceeds `max_abs_log_return`
+    in absolute log terms at least once in its history -- almost always an
+    unadjusted stock split or a bad tick, not a real one-day move (a real
+    move of that size is vanishingly rare even for distressed names).
+
+    Static per-symbol flag, not date-varying -- a data-quality screen, not
+    a liquidity filter (see point_in_time_eligible for that). Discovered
+    2026-08-08 auditing a Russell 3000 backtest against `prices`: that
+    table is built entirely from the Schwab API
+    (schwab_universe_backfill.py -> price_history_pipeline.fetch_symbol),
+    and Schwab's price_history endpoint returns UNADJUSTED closes -- no
+    split-adjustment is applied anywhere in this pipeline, and no free
+    corporate-actions source is currently wired in to backfill one
+    (Tiingo's corporate-actions add-on needs a paid plan -- see CLAUDE.md).
+    ~11% of Russell 3000 constituents were flagged by this screen. A
+    symbol is excluded wholesale, not date-range-trimmed: a bad split
+    ratio corrupts every price on one side of the jump, not just the jump
+    day itself, so salvaging a "clean half" isn't safe without knowing
+    which side (pre- or post-jump) is the unadjusted one.
+    """
+    if not symbols:
+        return pd.DataFrame(columns=["symbol", "max_abs_log_ret", "min_close"])
+    sql = f"""
+        WITH p AS (
+            SELECT symbol, CAST(date AS DATE) AS date, close,
+                   LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close
+            FROM {price_table}
+            WHERE symbol = ANY(?)
+        )
+        SELECT symbol, MAX(ABS(LN(close / NULLIF(prev_close, 0)))) AS max_abs_log_ret,
+               MIN(close) AS min_close
+        FROM p
+        WHERE prev_close IS NOT NULL AND prev_close > 0 AND close > 0
+        GROUP BY symbol
+    """
+    out = q._con().execute(sql, [list(symbols)]).df()
+    return out[out["max_abs_log_ret"] > max_abs_log_return].reset_index(drop=True)
+
+
+def clean_symbols(
+    symbols: "list[str]",
+    price_table: str = "prices",
+    max_abs_log_return: float = 1.0986,
+) -> "list[str]":
+    """`symbols` with flag_price_jumps()'s data-quality flags removed."""
+    flagged = set(flag_price_jumps(symbols, price_table, max_abs_log_return)["symbol"])
+    return sorted(set(symbols) - flagged)
+
+
 def point_in_time_eligible(
     symbols: "list[str]",
     min_dollar_volume: float,
