@@ -1,5 +1,38 @@
 # Session Notes — running log
 
+## 2026-08-10 (cont.) — full update pass across all 5 pipelines
+
+Follow-up to the health check below. This repo was the flagship; nothing was broken
+here beyond the already-known Schwab OAuth expiry. Work done this session:
+
+- **financial** — full test suite run: **578 passed**, 8 warnings, ~6.5 min. No
+  regressions. Schwab OAuth still expired (4 `schwab_*` accumulators) — **skipped per
+  user's "skip Schwab this round"**; `DAILY_ACCUMULATOR_FAIL.txt` stays until a real
+  terminal re-auth. Working tree unchanged (the pre-existing uncommitted local work is
+  still there, untouched).
+- **consumer-goods** — reconciled (committed 16-file local CPI batch `04e0432`, pulled
+  15 commits, resolved 3 conflicts in origin's favor, rewrote
+  `tests/test_eurostat_hicp.py` `f876ada`, merge `1c8b122`), fixed `run_all.py` cp1252
+  crash on non-ASCII (`7815e8a`), refreshed stale-format `openfoodfacts_prices`
+  (287,563 rows, validate PASS), 78 tests pass, pushed `8000856` (5 commits).
+  **Key finding: `.env` has only FRED + APININJA — the 8/4 USDA_AMS/NASS/EIA/KROGER
+  keys are NOT in this clone**, so 5 pipelines still SKIP (see TASKS.md).
+- **freight-rail** — ruff 329→0 errors + mypy + pre-commit installed, 98 tests; full
+  refresh run success (4,348,342 records, all 5 sources, `run_20260810_210252_ce9278`);
+  pushed `d7c0201`.
+- **shipping** — `uv sync --extra dev`, 268 tests, ruff/mypy clean; fixed the
+  date/datetime staleness crash (quality.py:140, alerts.py:219, freshness_sla.py) and
+  the dropped `ais_positions.flag` column (schema + migration `202608100001` applied);
+  refreshed 5 stale sources (1,789,777 rows); pushed `3228b29`.
+- **hardware** (4th repo, previously untracked) — deps installed (pandas) + pinned
+  requirements, DB init verified, BuildCores loader live-verified (5 GPU files),
+  pcpartpicker client fixed to the lib's real `retrieve()` API; initial commit `64a08e8`.
+
+Cross-cutting note: three repos (freight-rail, shipping, consumer-goods) each had a
+long-lived shell-timeout pitfall — the bash tool's 120s default kills child process
+trees on Windows, so long pipeline runs must be launched detached (`Start-Process` /
+scheduled task) and polled. Worth encoding in each repo's CLAUDE.md.
+
 ## 2026-08-10 — all-pipeline health check (4 repos)
 
 Health check across all data pipeline repos. Findings:
