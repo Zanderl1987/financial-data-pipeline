@@ -125,6 +125,16 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
 
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
 
+    # create_repo's `private` only applies when it actually creates the repo --
+    # with exist_ok=True it silently no-ops on an existing one, so --private
+    # would print "private=True" and still publish to a public repo. Found in
+    # the shipping pipeline 2026-08-10, where that sent a real upload out
+    # publicly. Enforce the requested visibility BEFORE any data is uploaded.
+    current = api.dataset_info(repo_id).private
+    if current != private:
+        print(f"  repo already existed with private={current}; setting private={private}")
+        api.update_repo_settings(repo_id=repo_id, repo_type="dataset", private=private)
+
     # Count rows and categorize
     total_rows = 0
     table_stats = []
