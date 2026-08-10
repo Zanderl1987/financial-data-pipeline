@@ -164,6 +164,26 @@ def _date_chunks(start_date: str, end_date: str, years_per_chunk: int = CHUNK_YE
     return chunks
 
 
+def _resume_state(path: str) -> tuple[pd.DataFrame | None, list[dict]]:
+    """
+    Inspect an existing chunk checkpoint and report which locations it lacks.
+
+    A chunk that lost batches to 429s is still a *valid parquet file* -- just
+    with fewer locations in it. An existence-only resume check accepts that as
+    complete and the gap never gets refilled (found 2026-08-09: chunks
+    1990-1992, 1993-1995 and 2005-2007 were short 5, 10 and 5 locations
+    respectively while the run log recorded them as done).
+    """
+    try:
+        existing = pd.read_parquet(path)
+    except Exception as exc:  # corrupt/truncated checkpoint -- refetch the chunk
+        print(f"    (unreadable checkpoint {path}: {exc}; re-fetching whole chunk)", flush=True)
+        return None, list(LOCATIONS)
+
+    present = set(existing["location"].unique()) if "location" in existing.columns else set()
+    return existing, [loc for loc in LOCATIONS if loc["name"] not in present]
+
+
 def _parse_location_data(loc_data: dict, loc_meta: dict) -> pd.DataFrame:
     """Convert one element of the API response array into a tidy DataFrame."""
     daily = loc_data.get("daily", {})
@@ -228,17 +248,31 @@ def main(backfill: bool = False) -> None:
         expected_path = os.path.join(
             OUTPUT_DIR, f"year={now.year}", f"month={now.month:02d}", f"open_meteo_{mode}_{suffix}.parquet"
         )
+        chunk_frames: list[pd.DataFrame] = []
+        chunk_batches = batches
+        carried_frames = 0  # frames already on disk (partial-checkpoint resume)
         if os.path.exists(expected_path):
-            print(f"  already written -> {expected_path} (skipping)", flush=True)
-            req_idx += len(batches)
-            skipped_chunks += 1
-            continue
+            existing, missing = _resume_state(expected_path)
+            if existing is not None and not missing:
+                print(f"  already written -> {expected_path} (skipping)", flush=True)
+                req_idx += len(batches)
+                skipped_chunks += 1
+                continue
+            if existing is not None:
+                # Partial checkpoint: refetch only the locations it's missing
+                # rather than the whole chunk -- every avoided request matters
+                # against this API's rolling rate limit.
+                print(f"  partial checkpoint ({len(missing)}/{len(LOCATIONS)} locations missing)"
+                      f" -> re-fetching just those", flush=True)
+                chunk_frames = [existing]
+                carried_frames = 1
+            chunk_batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+            req_idx += len(batches) - len(chunk_batches)
 
-        chunk_frames = []
-        for b_idx, batch in enumerate(batches):
+        for b_idx, batch in enumerate(chunk_batches):
             req_idx += 1
             names = ", ".join(loc["name"] for loc in batch)
-            print(f"  batch {b_idx + 1}/{len(batches)}: {names}", flush=True)
+            print(f"  batch {b_idx + 1}/{len(chunk_batches)}: {names}", flush=True)
             results = _fetch_batch(batch, chunk_start, chunk_end)
 
             if results is None:
@@ -261,7 +295,9 @@ def main(backfill: bool = False) -> None:
         # single end-of-run write means an interrupted run loses everything
         # fetched so far (confirmed 2026-08-03: a killed background run produced
         # zero output despite running 90+ minutes).
-        if chunk_frames:
+        # Only rewrite when this run actually fetched something new -- a resumed
+        # partial chunk whose refetch also failed should keep its file as-is.
+        if len(chunk_frames) > carried_frames:
             chunk_df = pd.concat(chunk_frames, ignore_index=True)
             chunk_df["date"] = pd.to_datetime(chunk_df["date"], errors="coerce")
             chunk_df["fetched_at"] = now.isoformat()
