@@ -1,5 +1,23 @@
 # Session Notes — running log
 
+## 2026-08-10 — all-pipeline health check (4 repos)
+
+Health check across all data pipeline repos. Findings:
+
+**financial-data-pipeline** — `DAILY_ACCUMULATOR_FAIL.txt` present (8/9): **4 PASS / 4 FAIL**.
+- All 4 FAILs are Schwab (`schwab_quotes/options/intraday/movers`) — **OAuth refresh token expired**, each timed out waiting for interactive auth (600/1800/900/600s → ~66 min wasted). First failure after 9 straight OK days (8/1–8/8). Fix requires Zander to re-auth in a real terminal (auth code expires ~30s). Fail file auto-clears on next clean run.
+- PASS: `short_interest` (30 yfinance rows, 54,960 SEC FTD rows; FINRA CDN still 403), `finnhub_events` (earnings 1,500 / insider 938 / IPO 61), `tradingview` (520 rows), `hf_sync` (180 tables, 105,146,966 rows, 2,986.9 MB, verified remotely).
+- `AV Earnings Pacing` (8/9) OK: 20/20 AV budget used, real progress (+1,013 earnings, 221 dividends, 15,439 insider). Note: news/sentiment request returned invalid-input error; `top_gainers_losers` skipped on budget. Cross-repo quota coordination with `earnings_sentiment_tool` still working.
+- `Fundamentals HF Refresh` (8/9) OK: full EDGAR companyfacts (20,188 companies, 2,122,746 annual / 4,661,213 quarterly rows), `build_fundamentals_dataset.py` pushed 6,026,022 rows, VERIFY PASS.
+- `PipelineQuality` scheduled task last ran 8/3 (weekly Monday; next 8/10) — no `QUALITY_FAIL.txt`.
+- Uncommitted local work present (not touched this session): modified `TODO.md`, `open_meteo_pipeline.py`, `storage/curated/README.md`; untracked `experiments/2026-08-07_hormuz-*`, `experiments/2026-08-08_hormuz-*`, `tests/test_open_meteo.py`. HEAD `968a16c`, in sync with origin/master.
+
+**consumer-goods-price-pipeline** — needs reconcile. Behind origin by 15 commits with 5 modified + 10 untracked files (new: `eurostat_hicp`, `statcan_retail_prices`, `fred_cpi`, `openfoodfacts_price`, `apininja_inflation` pipelines). Last data written 8/3; `bls_cpi` had 4 failure logs that day (log tail reads "boom"). No automation scheduled.
+
+**freight-rail-data-pipeline** — healthy. Clean, current with origin (`e085093`, 8/9). Run 8/9 21:21 UTC success (eurostat +1,329 records, total 7 sources). HF export refreshed 8/9 18:35.
+
+**ShippingDataPipeline** — healthy. Clean, current with origin (`3af9ba2`, 8/9). `collect.yml` HF-sync step (`6695730`) now pushed to origin; gated on `secrets.HF_TOKEN`. `open_meteo` + `digitraffic` collected 8/9; `ais_positions` last 8/3 (expected snapshot); `vessels` landed ~890 rows (Session 16 fix for the stale `imo PRIMARY KEY` migration).
+
 ## 2026-08-07 (cont.) — HF token + standing rule
 
 - **HF token added to `.env`** (`financial-data-pipeline`): appended a new `HF_TOKEN=` line with the user's write token — the pre-existing `HF_TOKEN` line was left untouched (dotenv last-wins → new token is effective). Token was already present as `HF_WRITE_TOKEN`.
