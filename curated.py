@@ -146,6 +146,13 @@ KEYS: dict[str, list[str]] = {
     "eia_crude_trade":        ["series_id", "date"],
     # TSA checkpoint travel volumes
     "tsa_checkpoint":         ["date"],
+    # Daily weather — one observation per location per day. Without this entry
+    # the table fell back to full-row dedup, which only drops byte-identical
+    # re-fetches: the 2-year incremental window re-pulls the same days every
+    # run, and Open-Meteo revises recent values (ERA5T preliminary data is
+    # restated within ~5 days), so a revised day survived as a second row.
+    # Found 2026-08-09 (2026-08-02 held 50 rows for 25 locations).
+    "open_meteo_weather":     ["location", "date"],
     "fred_macro_housing":     ['series_id', 'date'],
     "fred_macro_sentiment":   ['series_id', 'date'],
     "fred_macro_industrial":  ['series_id', 'date'],
