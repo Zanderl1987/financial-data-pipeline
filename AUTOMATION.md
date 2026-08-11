@@ -140,6 +140,30 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
   snapshot.json/actual row-count mismatch). Any future Claude session should check for
   that file. Auto-clears on the next clean run.
 
+## SchwabUniverseIncrementalPrices (Windows Scheduled Task)
+
+- **What:** runs `%TEMP%\opencode\schwab_universe_incr.bat` every day at 10:00 PM
+  (added 2026-08-11). Keeps the full-universe `prices` table current — the
+  27,759-symbol `schwab_universe_backfill.py` full-history pull is a one-shot backfill,
+  NOT incremental, so without this task the universe's daily bars freeze at the last
+  backfill date while only the DJI-30 (`prices` pipeline) stays fresh.
+- **Chain:** `schwab_universe_backfill.py --incremental --days 14 --chunk-size 250
+  --skip-empty-from schwab_universe_backfill_progress.json` (trailing 14-day window, ~4h15m
+  for 27,755 symbols at 0.55s/request, well under the 120 req/min cap; resumes per-batch via
+  a date-stamped progress file `schwab_universe_incremental_YYYY-MM-DD.json`) -> `curated.py
+  --table prices` (dedup merges new bars on the `["symbol","date"]` key) -> `upload_huggingface.py`
+  (re-push the curated snapshot). Logs to `%TEMP%\opencode\schwab_universe_incr.{out,err}.log`.
+- **Why 10 PM:** finishes ~2:15 AM, before `ClaudeAuto-DailyStage1` (3:00 AM) and the 9:00 AM
+  accumulator, so no two jobs contend for Schwab's 120 req/min cap.
+- **Gotchas learned 2026-08-11:** (1) `schtasks` stores `%TEMP%` literally — must pass the
+  full expanded path in `/tr`. (2) The shell tool kills child process trees when a command
+  times out, so the task must run fully detached under Task Scheduler. (3) `--incremental`
+  overrides `--progress-file` with the date-stamped default, so a manual test slice's symbols
+  land in the same per-day progress file the real run reads (harmless — resume just skips them).
+- **Requires a valid Schwab token** (7-day refresh expiry, reauth via
+  `scripts\schwab_reauth.py`); if it expires mid-week the run fails with the
+  "refresh token has expired" banner until re-authenticated.
+
 ## Managing
 
 ```powershell
@@ -150,6 +174,10 @@ Unregister-ScheduledTask ClaudeAuto-PipelineQuality -Confirm:$false         # re
 Get-ScheduledTask ClaudeAuto-DailyAccumulators | Get-ScheduledTaskInfo      # last/next run
 Start-ScheduledTask ClaudeAuto-DailyAccumulators                            # run now
 Unregister-ScheduledTask ClaudeAuto-DailyAccumulators -Confirm:$false       # remove
+
+Get-ScheduledTask SchwabUniverseIncrementalPrices | Get-ScheduledTaskInfo   # last/next run
+Start-ScheduledTask SchwabUniverseIncrementalPrices                         # run now
+Unregister-ScheduledTask SchwabUniverseIncrementalPrices -Confirm:$false    # remove
 
 Get-ScheduledTask ClaudeAuto-FundamentalsHFRefresh | Get-ScheduledTaskInfo  # last/next run
 Start-ScheduledTask ClaudeAuto-FundamentalsHFRefresh                       # run now
