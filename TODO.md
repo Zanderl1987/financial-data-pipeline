@@ -244,3 +244,13 @@
       `BLS_API_KEY` from `.env` if present). No further retry will help without it.
 - [ ] **Reddit/Comtrade/Census/USDA/AISStream** — all NO-DATA, all blocked purely on the user
       obtaining/renewing an API key or app registration (no code issue).
+- [ ] **Schwab OAuth re-login — PAUSED (2026-08-09)**: `tokens.db` refresh token expired;
+      every re-auth attempt failed because the ~30-second authorization-code window kept
+      getting blown by chat round-trip latency (user pastes code -> Claude exchanges it).
+      Found the right mechanism (`schwabdev.Client`/`Tokens` accept a `call_on_auth`
+      callback to bypass the blocking `input()` prompt) but the one workflow that's
+      worked before — Claude opens the Schwab login page in a browser tab, user logs in
+      there, pastes the redirect immediately — is blocked because the Claude-in-Chrome
+      extension reports "not connected." Next attempt: either get the extension
+      reconnected first, or have Zander run the OAuth flow directly in his own terminal
+      (no chat round-trip) and paste back within the window.
