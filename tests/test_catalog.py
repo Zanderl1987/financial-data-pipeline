@@ -461,6 +461,66 @@ class TestPilotIcebergViews:
         assert "iceberg_scan" not in sql[0]
 
 
+class TestNoOrphanedTables:
+    """
+    A table registered in CATALOG but not produced by any run_all.py
+    PipelineSpec never gets refreshed by a full run. It keeps serving whatever
+    was last written by hand, and nothing reports a failure -- validate.py
+    still PASSes it, because the data is there, just old.
+
+    That is not hypothetical: on 2026-08-11 six live, healthy sources
+    (wb_commodities, imf_commodities, metals_spot, fao_prices, fao_production,
+    options_history) were found frozen between 2026-06-17 and 2026-07-02 for
+    exactly this reason. All six were reachable and returned fresh data the
+    moment they were run by hand. The wiring checklist in CLAUDE.md lists the
+    run_all.py registration; nothing enforced it.
+    """
+
+    # Tables written by analytics/tooling rather than a source pipeline.
+    # Anything added here needs a reason, not just a green suite.
+    NOT_PIPELINE_PRODUCED = {
+        # written by event_backtest.py as a price cache, not fetched
+        "yfinance_universe_prices",
+    }
+
+    def test_every_catalog_table_has_a_producing_pipeline(self):
+        import run_all
+
+        produced = set()
+        for spec in run_all.PIPELINES:
+            produced.update(spec.tables or [])
+
+        orphans = set(q.CATALOG) - produced - self.NOT_PIPELINE_PRODUCED
+        assert not orphans, (
+            "CATALOG tables with no run_all.py PipelineSpec -- a full run will "
+            "never refresh them and they will silently go stale: "
+            f"{sorted(orphans)}"
+        )
+
+    def test_pipeline_specs_only_claim_real_tables(self):
+        """The inverse typo: a spec claiming a table that isn't in CATALOG."""
+        import run_all
+
+        known = set(q.CATALOG) | set(q.ANALYTICS_VIEWS)
+        unknown = {
+            (spec.name, t)
+            for spec in run_all.PIPELINES
+            for t in (spec.tables or [])
+            if t not in known
+        }
+        assert not unknown, f"PipelineSpec.tables entries missing from CATALOG: {sorted(unknown)}"
+
+    def test_every_spec_points_at_a_file_that_exists(self):
+        import run_all
+
+        missing = [
+            (spec.name, spec.file)
+            for spec in run_all.PIPELINES
+            if not os.path.exists(os.path.join(REPO_ROOT, spec.file))
+        ]
+        assert not missing, f"PipelineSpec.file does not exist: {missing}"
+
+
 class TestDiscoveryHelpers:
     def test_tables_runs_without_error(self):
         df = q.tables()

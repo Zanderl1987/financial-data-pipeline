@@ -164,6 +164,64 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=900,
     ),
+    # These five sources were live and healthy but had no spec here, so a full
+    # run_all.py never touched them and they quietly froze between 2026-06-17
+    # and 2026-07-02 (found 2026-08-11). See tests/test_catalog.py's
+    # orphaned-table guard, which now makes that omission fail the suite.
+    PipelineSpec(
+        name="worldbank_pink_sheet",
+        file="worldbank_pink_sheet.py",
+        desc="World Bank Pink Sheet monthly commodity prices — 71 commodities back to 1960",
+        stage=1,
+        tables=["wb_commodities"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="imf_commodities",
+        file="imf_commodities_pipeline.py",
+        desc="IMF Primary Commodity Prices — 14 series across 4 categories",
+        stage=1,
+        tables=["imf_commodities"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="metals",
+        file="metals_pipeline.py",
+        desc="Metals spot prices (FRED) — copper, aluminum, nickel, lead, iron ore, tin",
+        stage=1,
+        tables=["metals_spot"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="fao",
+        file="fao_pipeline.py",
+        desc="FAO FAOSTAT producer prices + production; falls back to bulk ZIP when the REST API times out",
+        stage=1,
+        tables=["fao_prices", "fao_production"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="yahoo_options",
+        file="yahoo_options_pipeline.py",
+        desc="Yahoo per-contract options OHLCV history (NVDA/PLTR/MSFT/AAPL) — feeds put_call_ratio",
+        # Stage 1, not 2: stage 2 is the Schwab-authenticated block, and this
+        # source needs no credentials and no upstream table.
+        stage=1,
+        tables=["options_history"],
+        # Phase 2 is one HTTP request per contract, so the incremental run is
+        # bounded on both axes: only the last 5 sessions, only contracts with
+        # real open interest. curated dedups on
+        # (symbol, expiration_date, strike_price, contract_type, date), so
+        # overlapping short pulls accumulate cleanly. Measured 2026-08-11:
+        # ~8 min for AAPL alone at --min-oi 500 (1,158 of 2,694 contracts).
+        incremental_args=["--range", "5d", "--min-oi", "500"],
+        backfill_args=["--range", "max"],
+        timeout=3600,
+    ),
     PipelineSpec(
         name="simfin",
         file="simfin_pipeline.py",
