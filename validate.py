@@ -204,9 +204,15 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
     },
     "schwab_options": {
-        "required":    ["symbol", "put_call", "expiration_date", "strike"],
-        "critical_nn": ["symbol", "expiration_date", "strike"],
-        "date_col":    "expiration_date",
+        "required":    ["symbol", "put_call", "expiration_date", "strike", "snapshot_date"],
+        "critical_nn": ["symbol", "expiration_date", "strike", "snapshot_date"],
+        # date_col drives the future-date check, so it has to be a column that
+        # should never exceed today. expiration_date was the opposite: an option
+        # is future-dated by definition, so that check warned on ~100% of rows
+        # every run and carried no information. snapshot_date is an observation
+        # date -- past it, and something is genuinely wrong (clock skew, or the
+        # market-time conversion in schwab_options_pipeline.py misbehaving).
+        "date_col":    "snapshot_date",
     },
     "news_sentiment": {
         "required":    ["symbol", "sentiment", "score"],

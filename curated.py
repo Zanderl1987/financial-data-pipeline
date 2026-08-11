@@ -70,6 +70,42 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
         ).dt.strftime("%Y-%m-%d")
     return df
 
+
+# Tables whose snapshot_date was introduced after data had already accumulated.
+# Raw parquet is append-only history and never gets rewritten, so those earlier
+# files stay on the old schema forever. Derive the column from fetched_at when
+# it is missing, otherwise _dedup_subset() would see an incomplete key on every
+# rebuild and silently drop back to full-row dedup for the whole table.
+_SNAPSHOT_DATE_FROM_FETCHED_AT = {"schwab_options"}
+
+
+def _backfill_snapshot_date(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fill snapshot_date from fetched_at for rows written before the column existed.
+
+    Safe for the schwab_options backfill specifically: every pre-existing
+    snapshot was taken by the 09:00 ET scheduled job (13:00 UTC), so the UTC
+    date and the market date are the same day. That equivalence does NOT hold
+    in general -- a post-20:00 ET fetch is already tomorrow in UTC -- which is
+    why the pipeline stamps market time at write time rather than relying on
+    this. This only ever repairs history that is already on disk.
+    """
+    if table not in _SNAPSHOT_DATE_FROM_FETCHED_AT or "fetched_at" not in df.columns:
+        return df
+    if "snapshot_date" in df.columns and df["snapshot_date"].notna().all():
+        return df
+
+    df = df.copy()
+    derived = pd.to_datetime(
+        df["fetched_at"], errors="coerce", format="mixed"
+    ).dt.strftime("%Y-%m-%d")
+    if "snapshot_date" in df.columns:
+        df["snapshot_date"] = df["snapshot_date"].fillna(derived)
+    else:
+        df["snapshot_date"] = derived
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Natural-key registry
 # ---------------------------------------------------------------------------
@@ -259,6 +295,21 @@ KEYS: dict[str, list[str]] = {
     "indeed_job_postings_national":    ['date', 'variable'],
     "indeed_job_postings_sector":      ['date', 'sector', 'variable'],
     "indeed_job_postings_state":       ['date', 'state'],
+    # Schwab serves NO options history -- this table's entire history exists
+    # because the daily job appends one snapshot per session, so snapshot_date
+    # is not decoration, it is what makes each day a distinct fact. Without it
+    # in the key the four contract identifiers alone would collapse every day
+    # ever captured into a single row per contract.
+    #
+    # Before 2026-08-11 there was no key here at all and the full-row fallback
+    # was carrying this table. It worked -- verified zero collapsed contracts
+    # across the 7 snapshots taken 08-02..08-08 -- but only because
+    # days_to_expiration and the quote fields happen to move daily. That is an
+    # accident, not a guarantee, and the fallback path is also unsupported by
+    # _compact_large_table(), which this table will need: ~93k rows/day is
+    # ~23M/year. Keyed now, while it is small enough that the transition is free.
+    "schwab_options":                  ['symbol', 'expiration_date', 'strike',
+                                        'put_call', 'snapshot_date'],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
@@ -370,6 +421,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _normalize_period_end(table, df)
+    df = _backfill_snapshot_date(table, df)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)

@@ -44,6 +44,67 @@ class TestKeyedDedup:
         assert out.iloc[0]["close"] == 5
 
 
+class TestSchwabOptionsSnapshotDate:
+    """
+    Schwab serves no options history, so schwab_options' entire history exists
+    only because the daily job appends one snapshot per session. snapshot_date
+    is the column that makes each session a distinct fact; drop it from the key
+    and every day ever captured collapses into one row per contract.
+
+    Added 2026-08-11 together with the column. Before that this table had no
+    KEYS entry and the full-row fallback happened to preserve history because
+    days_to_expiration and the quote fields move daily -- an accident, not a
+    guarantee, and one the _compact_large_table() path (which this table's
+    ~93k rows/day will require) does not support at all.
+    """
+
+    def _chain(self, snapshot_dates, bid=1.0):
+        n = len(snapshot_dates)
+        return pd.DataFrame({
+            "symbol":          ["AAPL"] * n,
+            "expiration_date": ["2026-09-18"] * n,
+            "strike":          [200.0] * n,
+            "put_call":        ["CALL"] * n,
+            "snapshot_date":   list(snapshot_dates),
+            "bid":             [bid] * n,
+            "fetched_at":      [f"{d}T13:00:00" for d in snapshot_dates],
+        })
+
+    def test_separate_sessions_are_kept(self):
+        # Identical quote on three days -- without snapshot_date in the key these
+        # would collapse to one row and two sessions of history would vanish.
+        out = curated.dedup("schwab_options", self._chain(
+            ["2026-08-05", "2026-08-06", "2026-08-07"]
+        ))
+        assert len(out) == 3
+        assert sorted(out["snapshot_date"]) == ["2026-08-05", "2026-08-06", "2026-08-07"]
+
+    def test_intraday_refetch_collapses_to_the_latest(self):
+        # A 429 retry re-fetches the same contract the same session. That is one
+        # fact, not two, and the newest fetch wins.
+        df = self._chain(["2026-08-05", "2026-08-05"])
+        df.loc[0, "bid"] = 1.0
+        df.loc[1, "bid"] = 1.25
+        df.loc[0, "fetched_at"] = "2026-08-05T13:00:00"
+        df.loc[1, "fetched_at"] = "2026-08-05T13:04:00"
+        out = curated.dedup("schwab_options", df)
+        assert len(out) == 1
+        assert out.iloc[0]["bid"] == 1.25
+
+    def test_snapshot_date_is_backfilled_from_fetched_at(self):
+        # Raw parquet written before the column existed is never rewritten, so
+        # dedup has to derive it -- otherwise the key is incomplete and the whole
+        # table silently reverts to the full-row fallback on every rebuild.
+        df = self._chain(["2026-08-05", "2026-08-06"]).drop(columns=["snapshot_date"])
+        out = curated.dedup("schwab_options", df)
+        assert len(out) == 2
+        assert sorted(out["snapshot_date"]) == ["2026-08-05", "2026-08-06"]
+
+    def test_key_is_used_not_the_full_row_fallback(self):
+        df = self._chain(["2026-08-05"])
+        assert curated._dedup_subset("schwab_options", df) == curated.KEYS["schwab_options"]
+
+
 class TestFullRowFallback:
     def test_unkeyed_table_drops_exact_duplicates(self):
         # 'finnhub_news' is not in KEYS -> full-row dedup
