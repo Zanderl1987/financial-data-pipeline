@@ -32,6 +32,7 @@ import datetime
 import argparse
 import pandas as pd
 import schwabdev
+from schwab_auth import preflight
 from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
@@ -109,6 +110,8 @@ def main(freq=5, days=5, backfill=False, symbols=None):
     if freq not in VALID_FREQS:
         raise SystemExit(f"--freq must be one of {VALID_FREQS}")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    preflight()
+
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,

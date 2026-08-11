@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import schwabdev
+from schwab_auth import preflight
 import datetime
 import time
 import os
@@ -126,6 +127,8 @@ def capture_daily_metrics(symbol, client):
 def main():
     os.makedirs(METRICS_DIR, exist_ok=True)
     os.makedirs(CHAIN_DIR, exist_ok=True)
+    preflight()
+
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,

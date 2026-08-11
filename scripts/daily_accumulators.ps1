@@ -32,8 +32,31 @@ if ($exit -eq 0) {
     if (Test-Path $flag) { Remove-Item $flag -Force }
     $status = "OK"
 } else {
-    $status = "FAIL"
-    "Daily accumulator run FAILED on $stamp (exit=$exit).`n$summary`nFull report: $report" |
-        Out-File $flag -Encoding utf8
+    # An expired Schwab refresh token is not a pipeline bug -- it needs an
+    # interactive login only Zander can do. schwab_auth.preflight() makes the
+    # Schwab pipelines exit 2 with this banner instead of hanging on input()
+    # until the timeout, so the flag can name the actual fix.
+    $authNeeded = Select-String -Path $report -Pattern "SCHWAB AUTH REQUIRED" -Quiet
+    if ($authNeeded) {
+        $status = "FAIL (schwab re-auth needed)"
+        $reauth = (Select-String -Path $report -Pattern "schwabdev\.Client" | Select-Object -First 1).Line
+        @(
+            "Daily accumulator run FAILED on $stamp (exit=$exit) -- SCHWAB RE-AUTH REQUIRED.",
+            "The Schwab refresh token expires every 7 days and renewing it is interactive.",
+            "Run this by hand in a real terminal (the auth code expires ~30s after login):",
+            "",
+            "  cd $repo",
+            "  $reauth",
+            "",
+            "Then re-run: `"$py`" run_all.py --only schwab_quotes,schwab_intraday,schwab_options,schwab_movers",
+            "",
+            $summary,
+            "Full report: $report"
+        ) | Out-File $flag -Encoding utf8
+    } else {
+        $status = "FAIL"
+        "Daily accumulator run FAILED on $stamp (exit=$exit).`n$summary`nFull report: $report" |
+            Out-File $flag -Encoding utf8
+    }
 }
 Add-Content (Join-Path $reportDir "accumulators_summary_log.txt") "$stamp | $status | $summary"

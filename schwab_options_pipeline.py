@@ -31,6 +31,7 @@ import datetime
 import argparse
 import pandas as pd
 import schwabdev
+from schwab_auth import preflight
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
 from symbol_universe import get_broad_universe
@@ -170,6 +171,8 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    preflight()
 
     client = schwabdev.Client(
         app_key=API_KEY,
