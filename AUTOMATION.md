@@ -28,6 +28,43 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   reports any FAIL. Any future Claude session should check for that file. Auto-clears on
   the next clean run.
 
+## ClaudeAuto-DailyStage1 (Windows Scheduled Task)
+
+- **What:** runs `scripts\daily_stage1.ps1` every day at 3:00 AM (catches up after boot if
+  the machine was off): `run_all.py --stage 1 --skip <15 names>`, output archived to
+  `storage\quality_reports\stage1_YYYY-MM-DD.txt`, one summary line per day appended to
+  `storage\quality_reports\stage1_summary_log.txt`. 62 pipelines selected, 3 skip for
+  missing env, so ~59 actually run. Budget 2-2.5h (a full 86-pipeline run measures ~173 min);
+  `ExecutionTimeLimit` is 6h.
+- **Why it exists:** added 2026-08-11. Until then the only scheduled *fetching* was
+  `ClaudeAuto-DailyAccumulators` — seven pipelines. Everything else refreshed only when a
+  human happened to run `run_all.py`, and a `fetched_at` sweep found 11 of 182 curated tables
+  stale in clusters dated to those manual runs (`cot` 56d, `alpha_vantage_forex`/`_technical`
+  49d, `bls_*` 27d, `eia_*`/`fred_rates_gdp`/`treasury_exchange_rates` 19d, `prices` 9d).
+  None of those pipelines were broken. Nothing ran them.
+- **Why `--stage 1 --skip` and not `--only <list>`:** a hand-maintained `--only` list is the
+  same defect one level up — add a stage-1 pipeline, forget the list, and it is silently never
+  scheduled, which is exactly how six sources went dark for six weeks before `891d97d`.
+  `--stage 1` picks up new pipelines automatically; only the skip list is hand-maintained, and
+  it names things that are known bad, which changes slowly. `tests/test_catalog.py::
+  TestScheduledJobSkipLists` fails the suite if a skip entry stops matching a real pipeline
+  (`--skip` ignores unknown names silently, so a typo would otherwise be invisible).
+- **Excluded, and why:** metered keys — `alpha_vantage_fundamentals` (25/day, reserved for
+  `ClaudeAuto-AVEarningsPacing`), `bls_expansion`/`bls_oes_qcew` (BLS keyless 25/day),
+  `eia`/`eia_expansion`/`eia_petng_prices`/`eia_hourly_grid`, `gas_prices`. Known-dead per
+  CLAUDE.md — `nasdaq_data_link`, `usda`, `trade`, `congressional_trades` (they fail every run
+  and would keep the job permanently red, masking real failures). Already daily —
+  `tradingview`, `short_interest`, `finnhub_events`.
+- **Does NOT cover:** stage 2 (Schwab — interactive OAuth) or stage 3 (derived: `alpha_vantage`,
+  `signal_monitor`). `prices`, `alpha_vantage_forex`, `alpha_vantage_technical` and
+  `signal_health` therefore still need another route.
+- **Failure signal:** `STAGE1_FAIL.txt` at repo root, naming the failed pipelines and the
+  archived report. Auto-clears on the next clean run.
+- **Note — this makes two full HuggingFace syncs per day.** `run_all.py` syncs the whole
+  curated snapshot at the end of every run, so 3:00 AM and 9:00 AM now each upload it. Nothing
+  is lost either way, but if the bandwidth matters, the one to disable is the 9:00 accumulator
+  job (`--no-hf-sync`) — the 3:00 run carries far more new data.
+
 ## HuggingFace dataset sync (`run_all.py`)
 
 `run_all.py` automatically syncs `storage/curated/` to the public HuggingFace dataset

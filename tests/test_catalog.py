@@ -521,6 +521,43 @@ class TestNoOrphanedTables:
         assert not missing, f"PipelineSpec.file does not exist: {missing}"
 
 
+class TestScheduledJobSkipLists:
+    """
+    `run_all.py --skip` silently ignores a name that matches no pipeline, so a
+    typo in a scheduled job's skip list is invisible: the job keeps passing and
+    the pipeline it meant to exclude quietly runs anyway (burning a metered API
+    key, or failing every night against a known-dead source and masking real
+    failures underneath). Added 2026-08-11 with scripts/daily_stage1.ps1.
+    """
+
+    SCRIPTS = ["scripts/daily_stage1.ps1"]
+
+    def _skip_names(self, path):
+        """Pull the names out of the `$skip = @( ... ) -join ","` block."""
+        import re
+
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        m = re.search(r"\$skip\s*=\s*@\((.*?)\)\s*-join", body, re.S)
+        assert m, f"{path}: no `$skip = @(...) -join` block found"
+        # Strip PowerShell line comments before pulling quoted names, so a name
+        # mentioned in an explanatory comment is not treated as a skip entry.
+        block = re.sub(r"#[^\n]*", "", m.group(1))
+        return re.findall(r'"([^"]+)"', block)
+
+    @pytest.mark.parametrize("script", SCRIPTS)
+    def test_skip_entries_name_real_pipelines(self, script):
+        import run_all
+
+        names = {p.name for p in run_all.PIPELINES}
+        skips = self._skip_names(os.path.join(REPO_ROOT, script))
+        assert skips, f"{script}: parsed an empty skip list"
+        unknown = [s for s in skips if s not in names]
+        assert not unknown, (
+            f"{script} skips names that match no PipelineSpec (silent no-op): {unknown}"
+        )
+
+
 class TestDiscoveryHelpers:
     def test_tables_runs_without_error(self):
         df = q.tables()
