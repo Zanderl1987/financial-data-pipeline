@@ -159,7 +159,17 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 - **Raw store ≠ deduped.** Incremental pipelines re-fetch overlapping windows; raw globs
   were once 42% duplicate rows. Always analyze via `query.py` (curated), never raw globs.
 - **Schwab**: `schwabdev` 3.0.4 uses `tokens_db=` (SQLite `tokens.db`), not `tokens_file=`.
-  OAuth is interactive — Zander must run it in a real terminal (auth code expires ~30s).
+  OAuth re-auth: use `scripts\schwab_reauth.py` — it binds an HTTPS listener on the
+  callback URL (127.0.0.1:8182), captures the browser redirect in-process well inside the
+  ~30s code window, so Zander just logs in (no paste), then proves the stored refresh
+  token actually advanced and spends one live quote call confirming it works. Persistent
+  cert under `%LOCALAPPDATA%\schwab_reauth\` is already trusted in CurrentUser\Root, so no
+  TLS warning; if the script reports it regenerated the cert (they expire), re-run the
+  `certutil -addstore` line it prints or the warning comes back mid-window. Since the bash
+  tool kills child trees on timeout, launch via Task Scheduler (`schtasks /create` +
+  `/run`, wrapper .bat captures logs) — see SESSION_NOTES_2026-08-11.md. Fallbacks:
+  `--paste` (prompt) and `--callback-url "<url>"` (non-interactive, for agent sessions
+  where a stdin prompt hits EOF). Tests: `tests/test_schwab_reauth.py`.
   App has Market Data API only; Trader API (positions/transactions) 401s until enabled at
   developer.schwab.com. Schwab has NO historical options — chains are snapshot-only.
 - **`validate.py` printed row counts** (fixed 2026-07-26) now spot-check the

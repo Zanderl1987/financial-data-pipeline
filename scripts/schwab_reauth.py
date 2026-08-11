@@ -11,8 +11,8 @@ Two problems this script solves:
 1. THE 30-SECOND WINDOW. schwabdev's stock flow asks you to copy the address
    bar out of a browser error page and paste it at a prompt. That is a human
    race against a 30s timer, and losing it looks exactly like winning (see 2).
-   By default this script runs a throwaway HTTPS server on the callback
-   address and catches the redirect itself, so no paste happens at all.
+   By default this script runs an HTTPS server on the callback address and
+   catches the redirect itself, so no paste happens at all.
 
 2. SILENT FAILURE. Constructing a Client by hand prints a wall of schwabdev
    log lines and returns normally whether or not a token was stored. On
@@ -21,16 +21,31 @@ Two problems this script solves:
    afterward and proves refresh_token_issued actually advanced, then spends
    one live API call confirming the credentials work.
 
-The listener uses a self-signed certificate, so the browser will warn once
-("Your connection is not private"). Click Advanced -> Proceed. That warning is
-expected: nothing but your own machine is on the other end.
+THE CERTIFICATE IS PERSISTED, deliberately. Schwab's callback is https, so the
+listener needs TLS, and a self-signed cert makes the browser interrupt with
+"Your connection is not private". That interstitial is not cosmetic: clicking
+through it costs seconds out of a ~30s budget, and on 2026-08-11 three
+consecutive re-auth attempts died in exactly that window. Reusing one cert from
+%LOCALAPPDATA%\\schwab_reauth\\ means it can be trusted once and the redirect
+then completes silently, every time. Run once, or whenever this script says the
+cert was regenerated:
+
+    certutil -addstore -f -user Root "%LOCALAPPDATA%\\schwab_reauth\\schwab.crt"
+
+The key is an end-entity cert for 127.0.0.1 with no CA bit, so trusting it
+authorizes exactly one thing: a loopback listener on this machine.
 
 Usage (a real terminal -- the browser must be able to reach 127.0.0.1):
     cd C:\\Users\\zande\\PycharmProjects\\financial-data-pipeline
     C:\\ProgramData\\anaconda3\\python.exe scripts\\schwab_reauth.py
 
-    --paste    skip the listener and paste the url by hand (fallback)
-    --timeout  seconds to wait for the redirect (default 180)
+    --paste            skip the listener and paste the url at a prompt
+    --callback-url U   exchange a redirect url captured elsewhere and exit;
+                       for agent/non-tty sessions, where the stdin prompt
+                       that --paste uses hits EOF instead of reading
+    --ephemeral-cert   generate a throwaway cert in a temp dir instead of
+                       reusing the trusted one (accepts the TLS warning)
+    --timeout          seconds to wait for the redirect (default 600)
 """
 
 import argparse
@@ -45,6 +60,14 @@ import tempfile
 import threading
 import urllib.parse
 import webbrowser
+
+# Task Scheduler is the supported way to launch this (the agent shell kills
+# child process trees on timeout), and a wrapper .bat redirects stdout to a log
+# the caller tails live. Block buffering would hold every line until exit,
+# turning "waiting for you to log in" into an apparently hung job.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 
 # Run from the repo root regardless of where the script was invoked, so the
 # relative default tokens.db path can never resolve to another directory.
@@ -68,14 +91,54 @@ BROWSER_PAGE = b"""<!doctype html>
 """
 
 
-def _self_signed_cert(directory: str, host: str) -> tuple[str, str]:
-    """
-    Write a throwaway cert/key for `host` into `directory`.
+# 825 days: long enough that the once-per-cert trust import is genuinely
+# once, short enough to stay inside every browser's maximum-lifetime policy.
+# The 7-day validity this replaced expired silently and brought the TLS
+# interstitial back despite the cert still being trusted.
+CERT_DAYS = 825
+CERT_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "schwab_reauth"
+)
+CERT_NAME = "schwab.crt"
+KEY_NAME = "schwab.key"
 
-    Schwab's callback is https, so the listener needs TLS. Nothing trusts this
-    certificate and nothing should -- it exists for one redirect from the
-    local browser to the local process, then it is deleted.
+
+def _cert_is_usable(cert_path: str, key_path: str) -> bool:
+    """True if both files exist and the cert has more than a day left."""
+    if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+        return False
+    from cryptography import x509
+
+    try:
+        with open(cert_path, "rb") as fh:
+            cert = x509.load_pem_x509_certificate(fh.read())
+    except Exception:
+        return False  # corrupt/truncated -- regenerate rather than crash at bind
+
+    # cryptography <42 exposes a naive-UTC .not_valid_after; 42+ deprecates it
+    # in favour of .not_valid_after_utc. Support both, since this file outlives
+    # any one pin.
+    expires = getattr(cert, "not_valid_after_utc", None)
+    if expires is None:
+        expires = cert.not_valid_after.replace(tzinfo=datetime.timezone.utc)
+    return expires - datetime.datetime.now(datetime.timezone.utc) > datetime.timedelta(days=1)
+
+
+def _self_signed_cert(directory: str, host: str) -> tuple[str, str, bool]:
     """
+    Return (cert_path, key_path, generated) for `host`, reusing what is there.
+
+    Schwab's callback is https, so the listener needs TLS. `generated` is True
+    when a new keypair was written, which is the caller's cue to tell the user
+    to re-run the certutil trust import -- a regenerated cert is a different
+    cert, and the old trust does not carry over.
+    """
+    os.makedirs(directory, exist_ok=True)
+    cert_path = os.path.join(directory, CERT_NAME)
+    key_path = os.path.join(directory, KEY_NAME)
+    if _cert_is_usable(cert_path, key_path):
+        return cert_path, key_path, False
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -100,13 +163,13 @@ def _self_signed_cert(directory: str, host: str) -> tuple[str, str]:
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - datetime.timedelta(minutes=5))
-        .not_valid_after(now + datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=CERT_DAYS))
         .add_extension(x509.SubjectAlternativeName(alt_names), critical=False)
+        # No CA bit: trusting this authorizes a loopback listener, nothing else.
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
     )
 
-    cert_path = os.path.join(directory, "cert.pem")
-    key_path = os.path.join(directory, "key.pem")
     with open(cert_path, "wb") as fh:
         fh.write(cert.public_bytes(serialization.Encoding.PEM))
     with open(key_path, "wb") as fh:
@@ -117,18 +180,28 @@ def _self_signed_cert(directory: str, host: str) -> tuple[str, str]:
                 encryption_algorithm=serialization.NoEncryption(),
             )
         )
-    return cert_path, key_path
+    return cert_path, key_path, True
 
 
 class _CallbackCatcher:
-    """One-shot HTTPS listener that captures Schwab's redirect."""
+    """
+    One-shot HTTPS listener that captures Schwab's redirect.
 
-    def __init__(self, callback_url: str):
+    By default it serves the persistent, trusted cert in CERT_DIR so the
+    browser does not interrupt. Pass ephemeral=True for a throwaway cert in a
+    temp dir that is deleted on exit -- correct for tests and for anyone who
+    would rather click through the warning than keep a key on disk.
+    """
+
+    def __init__(self, callback_url: str, ephemeral: bool = False):
         parsed = urllib.parse.urlparse(callback_url)
         self.callback_url = callback_url.rstrip("/")
         self.host = parsed.hostname or "127.0.0.1"
         self.port = parsed.port or 443
+        self.ephemeral = ephemeral
         self.captured: str | None = None
+        self.cert_path: str | None = None
+        self.cert_generated = False
         self._event = threading.Event()
         self._httpd: http.server.HTTPServer | None = None
         self._tmpdir: str | None = None
@@ -153,11 +226,28 @@ class _CallbackCatcher:
                 self.wfile.write(BROWSER_PAGE)
                 catcher._event.set()
 
+            def handle(self):
+                # Browsers open speculative connections and abandon them
+                # unread. That is a reset partway through serving, and the
+                # stdlib prints a traceback for it that reads exactly like the
+                # flow broke -- alarming, mid-login, when it did not.
+                # (A client rejecting the cert fails earlier, during accept();
+                # socketserver already drops those silently.)
+                try:
+                    super().handle()
+                except (ssl.SSLError, ConnectionError, OSError):
+                    pass
+
             def log_message(self, *args):  # keep the console clean
                 pass
 
-        self._tmpdir = tempfile.mkdtemp(prefix="schwab_reauth_")
-        cert, key = _self_signed_cert(self._tmpdir, self.host)
+        if self.ephemeral:
+            self._tmpdir = tempfile.mkdtemp(prefix="schwab_reauth_")
+            cert_dir = self._tmpdir
+        else:
+            cert_dir = CERT_DIR
+        cert, key, self.cert_generated = _self_signed_cert(cert_dir, self.host)
+        self.cert_path = cert
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert, key)
@@ -192,9 +282,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Re-authorize Schwab and verify it worked")
     parser.add_argument("--paste", action="store_true",
                         help="skip the listener and paste the callback url by hand")
-    parser.add_argument("--timeout", type=float, default=180.0,
-                        help="seconds to wait for the redirect (default 180)")
+    parser.add_argument("--callback-url", default=None,
+                        help="exchange a redirect url captured elsewhere, non-interactively "
+                             "(for sessions where a stdin prompt hits EOF)")
+    parser.add_argument("--ephemeral-cert", action="store_true",
+                        help="use a throwaway certificate instead of the trusted persistent one")
+    parser.add_argument("--timeout", type=float, default=600.0,
+                        help="seconds to wait for the redirect (default 600)")
     args = parser.parse_args()
+
+    if args.callback_url and not args.callback_url.strip().startswith("http"):
+        print("FAILED: --callback-url does not look like a url.", file=sys.stderr)
+        return 2
 
     callback_url = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
     path = os.path.abspath(token_path())
@@ -259,6 +358,14 @@ def _authorize(callback_url: str, before: dict, args) -> "schwabdev.Client":
     parsed = urllib.parse.urlparse(callback_url)
     host, port = parsed.hostname or "127.0.0.1", parsed.port or 443
 
+    if args.callback_url:
+        # The redirect was already captured somewhere this process cannot see
+        # (another shell, a browser the user drove by hand). Skip straight to
+        # the exchange -- no listener, no prompt.
+        supplied = args.callback_url.strip()
+        print("Exchanging the supplied callback url...")
+        return _build_client(callback_url, lambda _auth_url: supplied)
+
     use_listener = not args.paste
     if use_listener and not _port_is_free(host, port):
         print(f"NOTE: {host}:{port} is already in use -- falling back to manual paste.")
@@ -269,14 +376,23 @@ def _authorize(callback_url: str, before: dict, args) -> "schwabdev.Client":
         return _authorize_by_paste(callback_url)
 
     print("A browser window will open. Log in and approve.")
-    print("Your browser will warn about the certificate -- that is expected;")
-    print("this listener is your own machine. Click Advanced, then Proceed.")
     print(f"Waiting up to {args.timeout:.0f}s for the redirect...")
     print("-" * 70)
 
     try:
-        catcher_cm = _CallbackCatcher(callback_url)
+        catcher_cm = _CallbackCatcher(callback_url, ephemeral=args.ephemeral_cert)
         with catcher_cm as catcher:
+            if catcher.cert_generated and not args.ephemeral_cert:
+                print("NOTE: a new certificate was generated (none was present, or the")
+                print("      old one expired). The browser will warn once until you trust it:")
+                print(f'      certutil -addstore -f -user Root "{catcher.cert_path}"')
+                print("      Until then: click Advanced, then Proceed. It is your own machine.")
+                print("-" * 70)
+            elif args.ephemeral_cert:
+                print("Using a throwaway certificate -- the browser will warn.")
+                print("Click Advanced, then Proceed. It is your own machine.")
+                print("-" * 70)
+
             def call_on_auth(auth_url: str) -> str:
                 print(f"[open] {auth_url}")
                 try:
@@ -313,8 +429,10 @@ def _authorize_by_paste(callback_url: str) -> "schwabdev.Client":
         # sessions, some IDE consoles) where the read still hits EOF at once.
         raise _AuthAborted(
             "could not read the pasted url -- stdin closed immediately.\n"
-            "  This shell cannot do an interactive paste. Use a real terminal:\n"
-            "  Windows Terminal, PowerShell, or cmd launched from the Start menu.",
+            "  This shell cannot do an interactive paste. Either use a real\n"
+            "  terminal (Windows Terminal, PowerShell, cmd from the Start menu),\n"
+            "  or capture the redirect yourself and pass it in:\n"
+            "    scripts\\schwab_reauth.py --callback-url \"<full redirect url>\"",
             code=2,
         ) from exc
 

@@ -558,6 +558,53 @@ class TestScheduledJobSkipLists:
         )
 
 
+class TestDocumentedScriptsAreTracked:
+    """
+    CLAUDE.md is the first thing a new session reads, so a script path in it is
+    an instruction. On 2026-08-11 it was pointed at `scripts\\schwab_local_reauth.py`
+    -- a file that existed on this machine but was never `git add`ed, so any
+    other clone got "can't open file" while the tracked, tested equivalent sat
+    unmentioned. Untracked is the dangerous case precisely because it looks fine
+    locally; only git can tell you.
+    """
+
+    DOCS = ["CLAUDE.md", "PROJECT_NOTES.md"]
+
+    def _tracked_files(self):
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            pytest.skip("not a git checkout")
+        return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_referenced_scripts_exist_and_are_tracked(self, doc):
+        import re
+
+        path = os.path.join(REPO_ROOT, doc)
+        if not os.path.exists(path):
+            pytest.skip(f"{doc} absent")
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+
+        # Match scripts/<name>.py or scripts\<name>.py however it is quoted.
+        referenced = {
+            m.replace("\\", "/")
+            for m in re.findall(r"scripts[\\/][A-Za-z0-9_./\\-]+\.py", body)
+        }
+        assert referenced, f"{doc}: no script references found -- regex likely stale"
+
+        tracked = self._tracked_files()
+        broken = sorted(r for r in referenced if r not in tracked)
+        assert not broken, (
+            f"{doc} points at script(s) git does not track: {broken}. "
+            f"Either `git add` them or point the doc at the tracked equivalent."
+        )
+
+
 class TestDiscoveryHelpers:
     def test_tables_runs_without_error(self):
         df = q.tables()

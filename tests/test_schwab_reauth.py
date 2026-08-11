@@ -39,6 +39,19 @@ def reauth():
     return _load_module()
 
 
+@pytest.fixture(autouse=True)
+def _sandboxed_cert_dir(reauth, tmp_path, monkeypatch):
+    """
+    Never let a test touch the real %LOCALAPPDATA%\\schwab_reauth\\.
+
+    That directory holds the certificate the user has imported into
+    CurrentUser\\Root. A test run that regenerated it would silently void that
+    trust and put the TLS interstitial back in front of the next real re-auth,
+    inside the ~30s code window -- a test breaking production, quietly.
+    """
+    monkeypatch.setattr(reauth, "CERT_DIR", str(tmp_path / "cert_dir"))
+
+
 def _free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -133,26 +146,112 @@ def test_server_releases_the_port_on_exit(reauth):
         probe.close()
 
 
-def test_temp_certificate_is_deleted(reauth):
+def test_ephemeral_certificate_is_deleted(reauth):
     port = _free_port()
-    with reauth._CallbackCatcher(f"https://127.0.0.1:{port}") as catcher:
+    with reauth._CallbackCatcher(f"https://127.0.0.1:{port}", ephemeral=True) as catcher:
         tmpdir = catcher._tmpdir
-        assert os.path.exists(os.path.join(tmpdir, "cert.pem"))
-        assert os.path.exists(os.path.join(tmpdir, "key.pem"))
+        assert os.path.exists(os.path.join(tmpdir, reauth.CERT_NAME))
+        assert os.path.exists(os.path.join(tmpdir, reauth.KEY_NAME))
     assert not os.path.exists(tmpdir), "private key left on disk after the flow"
+
+
+def test_persistent_certificate_is_reused(reauth, tmp_path, monkeypatch):
+    """
+    The trust import (`certutil -addstore`) is per-certificate. If a run
+    silently minted a new one, the browser would warn again and the ~30s code
+    window would be spent clicking through it -- which is the failure this
+    whole listener exists to avoid.
+    """
+    monkeypatch.setattr(reauth, "CERT_DIR", str(tmp_path / "certs"))
+
+    first, key1, generated1 = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    assert generated1, "first call must create the cert"
+    body = open(first, "rb").read()
+
+    second, key2, generated2 = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    assert (second, key2) == (first, key1)
+    assert not generated2, "reported a new cert when it reused the old one"
+    assert open(second, "rb").read() == body, "cert bytes changed -- trust would be void"
+
+
+def test_expired_certificate_is_regenerated(reauth, tmp_path, monkeypatch):
+    """
+    The previous implementation returned any existing file unconditionally, so
+    a cert that aged out came back expired and the browser warned again with
+    no explanation. Expiry must force a regeneration AND be reported, since
+    the user has to re-run the trust import.
+    """
+    monkeypatch.setattr(reauth, "CERT_DIR", str(tmp_path / "certs"))
+    monkeypatch.setattr(reauth, "CERT_DAYS", 0)  # expires immediately
+
+    stale, _, _ = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    stale_body = open(stale, "rb").read()
+    assert not reauth._cert_is_usable(stale, os.path.join(reauth.CERT_DIR, reauth.KEY_NAME))
+
+    monkeypatch.setattr(reauth, "CERT_DAYS", 825)
+    fresh, _, generated = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    assert generated, "expired cert was reused"
+    assert open(fresh, "rb").read() != stale_body
+
+
+def test_corrupt_certificate_is_replaced_not_fatal(reauth, tmp_path, monkeypatch):
+    """A truncated cert must regenerate, not raise at TLS bind time."""
+    monkeypatch.setattr(reauth, "CERT_DIR", str(tmp_path / "certs"))
+    cert, key, _ = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    with open(cert, "wb") as fh:
+        fh.write(b"not a certificate")
+
+    assert not reauth._cert_is_usable(cert, key)
+    _, _, generated = reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")
+    assert generated
+
+
+def test_persistent_cert_actually_serves_tls(reauth, tmp_path, monkeypatch):
+    """The reused cert must still work as a server cert, not just exist."""
+    monkeypatch.setattr(reauth, "CERT_DIR", str(tmp_path / "certs"))
+    reauth._self_signed_cert(reauth.CERT_DIR, "127.0.0.1")  # pre-create, force reuse
+
+    port = _free_port()
+    callback = f"https://127.0.0.1:{port}"
+    with reauth._CallbackCatcher(callback) as catcher:
+        assert not catcher.cert_generated, "should have reused the pre-created cert"
+        threading.Thread(target=lambda: _get(f"{callback}/?code=REUSED")).start()
+        assert catcher.wait(15) is not None
 
 
 def test_port_is_free_detects_a_listener(reauth):
     port = _free_port()
     assert reauth._port_is_free("127.0.0.1", port)
-    with reauth._CallbackCatcher(f"https://127.0.0.1:{port}"):
+    with reauth._CallbackCatcher(f"https://127.0.0.1:{port}", ephemeral=True):
         assert not reauth._port_is_free("127.0.0.1", port)
 
 
 class _Args:
-    def __init__(self, paste=False, timeout=1.0):
+    def __init__(self, paste=False, timeout=1.0, callback_url=None, ephemeral_cert=True):
         self.paste = paste
         self.timeout = timeout
+        self.callback_url = callback_url
+        self.ephemeral_cert = ephemeral_cert
+
+
+def test_supplied_callback_url_skips_the_listener(reauth, monkeypatch):
+    """
+    --callback-url is the agent/non-tty path: it must hand the url straight to
+    schwabdev without binding a port or prompting. Binding would fail here
+    anyway -- the point is that it never tries.
+    """
+    seen = {}
+    monkeypatch.setattr(
+        reauth.schwabdev, "Client",
+        lambda **kw: seen.setdefault("url", kw["call_on_auth"]("ignored-auth-url")),
+    )
+    port = _free_port()
+    url = "https://127.0.0.1:8182/?code=SUPPLIED%40&session=x"
+
+    reauth._authorize(f"https://127.0.0.1:{port}", {}, _Args(callback_url=f"  {url}  "))
+
+    assert seen["url"] == url, "url must be passed through stripped and unmodified"
+    assert reauth._port_is_free("127.0.0.1", port), "listener should never have bound"
 
 
 def test_timeout_aborts_with_a_usable_message(reauth, monkeypatch):
