@@ -530,7 +530,7 @@ class TestScheduledJobSkipLists:
     failures underneath). Added 2026-08-11 with scripts/daily_stage1.ps1.
     """
 
-    SCRIPTS = ["scripts/daily_stage1.ps1"]
+    SCRIPTS = ["scripts/daily_pipelines.ps1"]
 
     def _skip_names(self, path):
         """Pull the names out of the `$skip = @( ... ) -join ","` block."""

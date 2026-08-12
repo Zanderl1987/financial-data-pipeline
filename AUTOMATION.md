@@ -28,42 +28,64 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   reports any FAIL. Any future Claude session should check for that file. Auto-clears on
   the next clean run.
 
-## ClaudeAuto-DailyStage1 (Windows Scheduled Task)
+## ClaudeAuto-DailyPipelines (Windows Scheduled Task)
 
-- **What:** runs `scripts\daily_stage1.ps1` every day at 3:00 AM (catches up after boot if
-  the machine was off): `run_all.py --stage 1 --skip <15 names>`, output archived to
-  `storage\quality_reports\stage1_YYYY-MM-DD.txt`, one summary line per day appended to
-  `storage\quality_reports\stage1_summary_log.txt`. 62 pipelines selected, 3 skip for
-  missing env, so ~59 actually run. Budget 2-2.5h (a full 86-pipeline run measures ~173 min);
-  `ExecutionTimeLimit` is 6h.
+> Renamed 2026-08-11 from `ClaudeAuto-DailyStage1` (`scripts\daily_stage1.ps1`) when it was
+> widened from stage 1 to all three stages. The old task was unregistered — it had never
+> successfully run, and after the rename it pointed at a file that no longer exists.
+
+- **What:** runs `scripts\daily_pipelines.ps1` every day at 3:00 AM (catches up after boot if
+  the machine was off): `run_all.py --skip <16 names>`, all three dependency stages, output
+  archived to `storage\quality_reports\daily_pipelines_YYYY-MM-DD.txt`, one summary line per
+  day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`. ~73 pipelines
+  after skips. Budget 2.5-3h (a full 86-pipeline run measures ~173 min); `ExecutionTimeLimit`
+  is 6h.
 - **Why it exists:** added 2026-08-11. Until then the only scheduled *fetching* was
   `ClaudeAuto-DailyAccumulators` — seven pipelines. Everything else refreshed only when a
   human happened to run `run_all.py`, and a `fetched_at` sweep found 11 of 182 curated tables
   stale in clusters dated to those manual runs (`cot` 56d, `alpha_vantage_forex`/`_technical`
   49d, `bls_*` 27d, `eia_*`/`fred_rates_gdp`/`treasury_exchange_rates` 19d, `prices` 9d).
   None of those pipelines were broken. Nothing ran them.
-- **Why `--stage 1 --skip` and not `--only <list>`:** a hand-maintained `--only` list is the
-  same defect one level up — add a stage-1 pipeline, forget the list, and it is silently never
-  scheduled, which is exactly how six sources went dark for six weeks before `891d97d`.
-  `--stage 1` picks up new pipelines automatically; only the skip list is hand-maintained, and
-  it names things that are known bad, which changes slowly. `tests/test_catalog.py::
-  TestScheduledJobSkipLists` fails the suite if a skip entry stops matching a real pipeline
-  (`--skip` ignores unknown names silently, so a typo would otherwise be invisible).
-- **Excluded, and why:** metered keys — `alpha_vantage_fundamentals` (25/day, reserved for
-  `ClaudeAuto-AVEarningsPacing`), `bls_expansion`/`bls_oes_qcew` (BLS keyless 25/day),
+- **Why all three stages** (widened 2026-08-11, was `--stage 1`): stage 1 alone left 13 specs
+  unreachable, and the gap was invisible because the job would have passed every night while
+  doing nothing about them. Stage 3 is where it showed — it holds `signal_monitor` and
+  `news_sentiment`, which feed the **active** signal-health and sentiment factors, and
+  `signal_health` had gone 38 days stale unnoticed. `run_all.py` already orders the stages by
+  dependency, so one job running all three beats a second job racing this one on a guessed
+  start time: stage 3 reads what stages 1 and 2 just wrote.
+- **Why `--skip` and not `--only <list>`:** a hand-maintained `--only` list is the same defect
+  one level up — add a pipeline, forget the list, and it is silently never scheduled, which is
+  exactly how six sources went dark for six weeks before `891d97d`. Stage selection picks up
+  new pipelines automatically; only the skip list is hand-maintained, and it names things that
+  are known bad, which changes slowly. `tests/test_catalog.py::TestScheduledJobSkipLists` fails
+  the suite if a skip entry stops matching a real pipeline (`--skip` ignores unknown names
+  silently, so a typo would otherwise be invisible).
+- **Excluded, and why:** metered keys — `alpha_vantage` **and** `alpha_vantage_fundamentals`
+  (25/day/key, reserved for `ClaudeAuto-AVEarningsPacing` and the earnings-transcript work;
+  this is why stage 3's `alpha_vantage` is excluded even though stage 3 is otherwise cheap,
+  locally-derived work), `bls_expansion`/`bls_oes_qcew` (BLS keyless 25/day),
   `eia`/`eia_expansion`/`eia_petng_prices`/`eia_hourly_grid`, `gas_prices`. Known-dead per
   CLAUDE.md — `nasdaq_data_link`, `usda`, `trade`, `congressional_trades` (they fail every run
   and would keep the job permanently red, masking real failures). Already daily —
   `tradingview`, `short_interest`, `finnhub_events`.
-- **Does NOT cover:** stage 2 (Schwab — interactive OAuth) or stage 3 (derived: `alpha_vantage`,
-  `signal_monitor`). `prices`, `alpha_vantage_forex`, `alpha_vantage_technical` and
-  `signal_health` therefore still need another route.
-- **Failure signal:** `STAGE1_FAIL.txt` at repo root, naming the failed pipelines and the
-  archived report. Auto-clears on the next clean run.
-- **Note — this makes two full HuggingFace syncs per day.** `run_all.py` syncs the whole
-  curated snapshot at the end of every run, so 3:00 AM and 9:00 AM now each upload it. Nothing
-  is lost either way, but if the bandwidth matters, the one to disable is the 9:00 accumulator
-  job (`--no-hf-sync`) — the 3:00 run carries far more new data.
+- **Stage 2 needs a live Schwab token.** The refresh token expires every 7 days and renewing it
+  requires a human at a browser (`scripts\schwab_reauth.py`), so this job **will** go red for
+  the Schwab specs whenever it lapses. That is the intended signal — a silent skip would hide
+  the outage. The FAIL flag says so and names the renewal command.
+- **Still not covered:** `alpha_vantage_forex` and `alpha_vantage_technical` (owned by the
+  excluded `alpha_vantage` spec — they refresh only when someone spends the AV quota on them),
+  and the four tables whose owners are skipped as metered: `bls_cps_demographics`, `bls_qcew`,
+  `eia_petroleum_futures`, `eia_refiner_margins`. These will show as permanently stale in the
+  pipeline-explorer scan **by design**; that is the cost of the quota decision, not a fault.
+- **Failure signal:** `DAILY_PIPELINES_FAIL.txt` at repo root, naming the failed pipelines and
+  the archived report. Auto-clears on the next clean run.
+- **Note — there are now three full HuggingFace syncs per day.** `run_all.py` syncs the whole
+  curated snapshot at the end of every run, and `SchwabUniverseIncrementalPrices` calls
+  `upload_huggingface.py` directly, so the snapshot uploads at ~02:15 (universe job), ~06:00
+  (this job) and ~09:00 (accumulators). Nothing is lost, but if bandwidth matters the ones to
+  drop are the 02:15 and 09:00 uploads — this job carries by far the most new data. Note also
+  that if the 22:00 universe job overruns past 03:00 the two overlap; `MultipleInstances` only
+  protects a task from *itself*, not from a different task touching the same curated tree.
 
 ## HuggingFace dataset sync (`run_all.py`)
 
@@ -153,7 +175,7 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
   a date-stamped progress file `schwab_universe_incremental_YYYY-MM-DD.json`) -> `curated.py
   --table prices` (dedup merges new bars on the `["symbol","date"]` key) -> `upload_huggingface.py`
   (re-push the curated snapshot). Logs to `%TEMP%\opencode\schwab_universe_incr.{out,err}.log`.
-- **Why 10 PM:** finishes ~2:15 AM, before `ClaudeAuto-DailyStage1` (3:00 AM) and the 9:00 AM
+- **Why 10 PM:** finishes ~2:15 AM, before `ClaudeAuto-DailyPipelines` (3:00 AM) and the 9:00 AM
   accumulator, so no two jobs contend for Schwab's 120 req/min cap.
 - **Gotchas learned 2026-08-11:** (1) `schtasks` stores `%TEMP%` literally — must pass the
   full expanded path in `/tr`. (2) The shell tool kills child process trees when a command
@@ -164,9 +186,44 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
   `scripts\schwab_reauth.py`); if it expires mid-week the run fails with the
   "refresh token has expired" banner until re-authenticated.
 
+## Battery gating — read this before diagnosing a task that "didn't run"
+
+`Register-ScheduledTask` defaults `DisallowStartIfOnBatteries` and
+`StopIfGoingOnBatteries` to **true**, and every task here inherited that. On a laptop that
+means a scheduled job silently refuses to start whenever you happen to be unplugged, and
+reports last-result **`2147946720`** (`0x800710E0`, "The operator or administrator has
+refused the request") — which reads like a permissions problem and is not one. This is what
+was wrong with `ClaudeAuto-PipelineExplorerScan`; the script was fine and ran clean (exit 0)
+the moment it was started on AC power.
+
+Both flags were cleared on all tasks 2026-08-11, so they now run on battery and a long job
+is not killed mid-run by unplugging. To check or re-apply:
+
+```powershell
+# audit
+Get-ScheduledTask | Where-Object { $_.TaskName -like "ClaudeAuto*" -or $_.TaskName -like "SchwabUniverse*" } |
+  ForEach-Object { [PSCustomObject]@{ Name=$_.TaskName
+                                      NoBattStart=$_.Settings.DisallowStartIfOnBatteries
+                                      StopOnBatt=$_.Settings.StopIfGoingOnBatteries } }
+
+# re-apply to all
+Get-ScheduledTask | Where-Object { $_.TaskName -like "ClaudeAuto*" -or $_.TaskName -like "SchwabUniverse*" } |
+  ForEach-Object { $s = $_.Settings
+                   $s.DisallowStartIfOnBatteries = $false
+                   $s.StopIfGoingOnBatteries = $false
+                   Set-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -Settings $s }
+```
+
+A newly registered task will silently reacquire the default unless you pass
+`New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`.
+
 ## Managing
 
 ```powershell
+Get-ScheduledTask ClaudeAuto-DailyPipelines | Get-ScheduledTaskInfo         # last/next run
+Start-ScheduledTask ClaudeAuto-DailyPipelines                               # run now (2.5-3h)
+Unregister-ScheduledTask ClaudeAuto-DailyPipelines -Confirm:$false          # remove
+
 Get-ScheduledTask ClaudeAuto-PipelineQuality | Get-ScheduledTaskInfo        # last/next run
 Start-ScheduledTask ClaudeAuto-PipelineQuality                              # run now
 Unregister-ScheduledTask ClaudeAuto-PipelineQuality -Confirm:$false         # remove
