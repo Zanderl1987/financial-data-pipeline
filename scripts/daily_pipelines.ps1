@@ -27,8 +27,9 @@
 # far more slowly. tests/test_catalog.py asserts every name below still matches a
 # real PipelineSpec, because --skip ignores typos silently.
 #
-# Runtime: a full 86-pipeline run measures ~173 min; this is ~73 pipelines after
-# skips, so budget 2.5-3 h. Scheduled 03:00, which clears
+# Runtime: a full 86-pipeline run measures ~173 min. Of 90 specs, 16 are skipped
+# below and 3 more (comtrade, reddit, ais) skip for missing env, so 71 actually
+# run -- 62 stage 1, 9 stage 2, 3 stage 3. Budget 2.5-3 h. Scheduled 03:00, which clears
 # SchwabUniverseIncrementalPrices (22:00, finishes ~02:15) beforehand and
 # DailyAccumulators (09:00) after, so nothing else is hitting Schwab's rate limit
 # while stage 2 runs.

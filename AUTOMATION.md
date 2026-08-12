@@ -37,9 +37,10 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
 - **What:** runs `scripts\daily_pipelines.ps1` every day at 3:00 AM (catches up after boot if
   the machine was off): `run_all.py --skip <16 names>`, all three dependency stages, output
   archived to `storage\quality_reports\daily_pipelines_YYYY-MM-DD.txt`, one summary line per
-  day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`. ~73 pipelines
-  after skips. Budget 2.5-3h (a full 86-pipeline run measures ~173 min); `ExecutionTimeLimit`
-  is 6h.
+  day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`. Of 90 specs, 16
+  are skipped and 3 more (`comtrade`, `reddit`, `ais`) skip for missing env, so **71 actually
+  run** — 62 stage 1, 9 stage 2, 3 stage 3. Budget 2.5-3h (a full 86-pipeline run measures
+  ~173 min); `ExecutionTimeLimit` is 6h.
 - **Why it exists:** added 2026-08-11. Until then the only scheduled *fetching* was
   `ClaudeAuto-DailyAccumulators` — seven pipelines. Everything else refreshed only when a
   human happened to run `run_all.py`, and a `fetched_at` sweep found 11 of 182 curated tables
