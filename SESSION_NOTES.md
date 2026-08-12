@@ -1,5 +1,16 @@
 # Session Notes — running log
 
+## 2026-08-12 — TV strategy catalog: campaign committed to git
+
+The whole campaign finally left the untracked state: `strategies/` (collect.py,
+screen.py, 24 tests), `storage/tv_scripts/` (6 .pine, 5 meta.json, both sampling
+rosters), the pre-registration + amendments, and session notes — commit `91be7d3`.
+`boosted_moving_average.pine` was deliberately left untracked (no meta.json, no
+provenance, not from the strategies frame; its fate stays an open TASKS.md item).
+Also fixed a stale roster line: `hezSShJr` (hybrid_breakout_vcp) was marked TODO but
+is collected/admitted. The separate dataset-card refresh (`c2fe2ad`) closed the last
+of the long-open "uncommitted local work" item. Not pushed; local master = origin + 2.
+
 ## 2026-08-12 — TV strategy catalog: Batch 1 collection (4 more scripts)
 
 Detail in `SESSION_NOTES_2026-08-12_tv-catalog.md`; summary here.
