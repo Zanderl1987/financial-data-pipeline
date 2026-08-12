@@ -1,0 +1,69 @@
+//@version=6
+// Apply to NAS100 5-minute standard candles.
+strategy("NAS100 Practical SMC 5m v1", overlay=true, pyramiding=0, process_orders_on_close=true,
+ initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+ commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, calc_on_order_fills=false)
+
+g1 = "SMC setup"
+sessionNY = input.session("0935-1200", "New York session", group=g1)
+lookback = input.int(12, "Liquidity lookback bars", minval=3, group=g1)
+emaLen = input.int(20, "Confirmed 1-hour bias EMA", minval=2, group=g1)
+g2 = "Risk"
+buffer = input.float(8, "Stop beyond sweep", minval=1, group=g2)
+rr = input.float(2.0, "Reward/risk", minval=1, step=0.25, group=g2)
+maxTrades = input.int(2, "Max trades per day", minval=1, group=g2)
+
+inSession = not na(time(timeframe.period, sessionNY, "America/New_York"))
+// Last closed H1 bar only: prevents look-ahead.
+h1Close = request.security(syminfo.tickerid, "60", close[1], lookahead=barmerge.lookahead_on)
+h1Ema = request.security(syminfo.tickerid, "60", ta.ema(close, emaLen)[1], lookahead=barmerge.lookahead_on)
+bullBias = h1Close > h1Ema
+bearBias = h1Close < h1Ema
+sellSide = ta.lowest(low[1], lookback)
+buySide = ta.highest(high[1], lookback)
+// Sweep must take local liquidity and close back inside; confirmation is the next candle.
+bullSweep = inSession and bullBias and low < sellSide and close > sellSide
+bearSweep = inSession and bearBias and high > buySide and close < buySide
+var int bullBar = na
+var int bearBar = na
+var float bullLow = na
+var float bearHigh = na
+if bullSweep
+    bullBar := bar_index
+    bullLow := low
+if bearSweep
+    bearBar := bar_index
+    bearHigh := high
+buySignal = not na(bullBar) and bar_index == bullBar + 1 and close > high[1]
+sellSignal = not na(bearBar) and bar_index == bearBar + 1 and close < low[1]
+if not na(bullBar) and bar_index > bullBar
+    bullBar := na
+if not na(bearBar) and bar_index > bearBar
+    bearBar := na
+var int count = 0
+if ta.change(time("D")) != 0
+    count := 0
+var float entry = na
+var float stop = na
+var float target = na
+if strategy.position_size == 0 and count < maxTrades and buySignal
+    entry := close
+    stop := bullLow - buffer
+    target := entry + (entry-stop)*rr
+    count += 1
+    strategy.entry("SMC BUY", strategy.long)
+if strategy.position_size == 0 and count < maxTrades and sellSignal
+    entry := close
+    stop := bearHigh + buffer
+    target := entry - (stop-entry)*rr
+    count += 1
+    strategy.entry("SMC SELL", strategy.short)
+if strategy.position_size > 0
+    s = high >= entry + (entry-stop) ? math.max(stop, entry) : stop
+    strategy.exit("BUY exit", "SMC BUY", stop=s, limit=target)
+if strategy.position_size < 0
+    s = low <= entry - (stop-entry) ? math.min(stop, entry) : stop
+    strategy.exit("SELL exit", "SMC SELL", stop=s, limit=target)
+plot(h1Ema, "Confirmed 1h EMA", color=color.orange)
+plotshape(buySignal, "Buy", shape.triangleup, location.belowbar, color=color.lime, text="BUY")
+plotshape(sellSignal, "Sell", shape.triangledown, location.abovebar, color=color.red, text="SELL")

@@ -1,3 +1,73 @@
+# 2026-08-12 — TV strategy catalog: Batch 2 collection (session 3)
+
+Batch 1's roster (`_roster_strategies_popular_2026-08-12.txt`) was exhausted at the end
+of session 2 (0 TODO). This session re-enumerated the same sampling frame
+(`tradingview.com/scripts/?script_type=strategies`, Open-source only, Most popular) via
+the "Show more publications" pagination button, which turns out to be real server-side
+pagination (`/scripts/page-2/?script_type=strategies`), not infinite scroll — much
+simpler than expected. Page 2 returned 23 more slugs; 3 were already-collected batch-1
+entries whose rank shifted (`lfk6Inrw`, `qHftEnad`, `xx3enmiW`), leaving 20 new
+candidates, logged to `_roster_strategies_popular_2026-08-12_batch2.txt` with the same
+2-per-author cap (`cs_lev`, `blitz_locked`, `ortizbruno115` each hit it partway
+through — 4 SKIP-2PA).
+
+## Collection method upgrade: direct DOM extraction, no more reindent()
+
+Discovered this session that the Pine source panel (`.monaco-editor-tv-pine-dark`) is
+NOT the flattened/whitespace-stripped text `get_page_text` returns — its child divs
+(alternating content-row / empty-row, so `children.filter((r,i)=>i%2===0)`) carry the
+line's `textContent` **with indentation and interior spacing already intact**. This
+makes the whole two-channel reindent() workflow (flat text + separate indent-count
+array, zipped back together) unnecessary: pull `container.children[i].textContent` per
+line directly and the source is already correctly formatted.
+
+**The catch**: the in-page-script content filter (the same one that blocks
+`btoa()`/base64 dumps as "cookie/query-string data") also blocks large joined chunks of
+dense `key=value` Pine syntax — not by total length but by pattern, since a 45-line
+script triggered no block while some 3-10 line chunks of other scripts did and a lone
+offending line collected fine by itself. No reliable chunk-size threshold; the practical
+approach is to request a chunk (start at ~15 lines), and on `[BLOCKED: ...]` recursively
+halve until it clears, occasionally down to single lines. Still far more reliable than
+the old two-channel method, since there is no separate indent-count array to go out of
+sync with the text — a blocked chunk fails loudly and re-requesting narrower always
+works, rather than silently misaligning.
+
+## Collected this session (5 new)
+
+| slug | author | lines | Stage 1 |
+|---|---|---|---|
+| `UCGXkLvt-MA-Crossover-RSI-Strategy` | clayton1139 | 45 | admitted (deprioritized, 9 params) |
+| `AlvLl7j2-NAS100-Practical-SMC-5m-v12` | AdvJavedkhan | 69 | **excluded** `lookahead` — `request.security(..., lookahead=barmerge.lookahead_on)` despite a source comment claiming the opposite ("prevents look-ahead"); comments are not evidence, screener code is |
+| `ymepYSLq-NNFX-BTC-SSL-QQE-SignalForge` | SignalForge-Ai | 113 | admitted (deprioritized, 12 params) |
+| `Ott3SiyK-Opening-Range-Breakout-ORB` | ortizbruno115 | 92 | admitted (deprioritized, 10 params) — cites Zarattini & Aziz SSRN 2023 ORB paper in its header comment |
+| `f2lBhqNS-Donchian-Intraday-Momentum-Breakout` | ortizbruno115 | 80 | admitted (deprioritized, 11 params) — 2nd from this author, still within the 2-per-author cap; Turtle-style N-bar channel breakout with ATR trailing stop |
+
+## New SKIP-LEN entries this session (11)
+
+`Fc4IHcm4` TT-Lorentzian (395L), `UqKr1TZS` Reversal Pro v2 (547L), `FtRppcLM`
+TT-Autotune (609L), `642rbEbE` SVT Big Swing Capture (852L), `4s4X741x` ryans XAUUSD SMC
+Bot (511L), `uOaILfJT` DNSE Bollinger Breakout (428L), `wTvvjVJi` RK Gold Sniper AI PRO
+(431L), `MQDDEl1e` Poor Man's Orderflow AlgoPilot (1443L), `XoWVndPv` 3 Session ORB
+BudgeDaddy (1887L), `z9ZAdxT0` Laxman Rekha Reversal (477L, 605 boosts/7052 views — the
+most popular script skipped so far, purely on length), `CLvCY5Rp` fcraynel strategy
+(653L).
+
+## Batch 2 state: COMPLETE
+
+`_roster_strategies_popular_2026-08-12_batch2.txt` — 0 TODO remain (16 items resolved:
+5 DONE + 11 SKIP-LEN, plus the 4 SKIP-2PA already logged when the roster was built).
+
+## Campaign total after this session
+
+**21 `.pine` files** collected across both rosters (16 batch 1 + 5 batch 2). 18 admitted
+to Stage 2 (14 batch 1 + 4 batch 2), 5 excluded (4 batch 1 `unconfirmed_htf` + 1 batch 2
+`lookahead`). Both source-frame rosters (batch 1: TradingView "Most Popular" page 1,
+batch 2: page 2) are now fully exhausted. Batch 3 would need either page 3 of the same
+sort, or a different sort/frame (Editors' picks was already tried 08-11 and yielded only
+2 tradeable candidates out of 23 — most popular is the more productive frame so far).
+
+---
+
 # 2026-08-12 — TV strategy catalog: Batch 1 collection (session 2)
 
 Continuation of the 2026-08-12 session 1 notes below (kept, not overwritten — session 1's

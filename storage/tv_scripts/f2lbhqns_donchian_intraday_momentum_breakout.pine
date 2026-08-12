@@ -1,0 +1,80 @@
+//@version=6
+// ============================================================
+// 5) DONCHIAN INTRADAY MOMENTUM BREAKOUT
+// Turtle-style breakout adapted for daytrading: stop orders at
+// the N-bar highest high / lowest low, ATR trailing stop to ride
+// momentum, optional volume-surge confirmation to cut false
+// breaks. Flat by EOD.
+// Recommended chart: 5-min or 15-min, NQ/MNQ, CL, GC
+// ============================================================
+strategy("5 — Donchian Intraday Momentum Breakout", shorttitle="DONCH",
+     overlay=true, initial_capital=25000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=2.50,
+     slippage=1, margin_long=0, margin_short=0)
+
+// -- Inputs ------------------------------------------------
+sessionStr  = input.session("0930-1600", "Trading session")
+flatStr     = input.session("1555-1600", "Force-flat window")
+tz          = input.string("America/New_York", "Session timezone")
+donLen      = input.int(20, "Donchian length (bars)", minval=5)
+atrLen      = input.int(14, "ATR length")
+trailMult   = input.float(2.0, "ATR trailing-stop multiple", step=0.1)
+useVol      = input.bool(true, "Require volume surge on breakout bar")
+volLen      = input.int(20, "Volume average length")
+volMult     = input.float(1.2, "Volume surge multiple", step=0.1)
+maxTrades   = input.int(3, "Max entries per day", minval=1)
+allowShorts = input.bool(true, "Allow shorts")
+
+// -- Session -----------------------------------------------
+inSession = not na(time(timeframe.period, sessionStr, tz))
+inFlat    = not na(time(timeframe.period, flatStr, tz))
+newDay    = inSession and not inSession[1]
+
+// -- Indicators --------------------------------------------
+donHigh = ta.highest(high, donLen)[1]
+donLow  = ta.lowest(low, donLen)[1]
+atr     = ta.atr(atrLen)
+volOk   = not useVol or volume > ta.sma(volume, volLen) * volMult
+
+var int tradesToday = 0
+if newDay
+    tradesToday := 0
+justEntered = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justEntered
+    tradesToday += 1
+
+// -- Entries (stop orders at channel extremes) --------------
+canTrade = inSession and not inFlat and volOk and tradesToday < maxTrades and strategy.position_size == 0
+if canTrade
+    strategy.entry("Long", strategy.long, stop=donHigh)
+    if allowShorts
+        strategy.entry("Short", strategy.short, stop=donLow)
+else if strategy.position_size == 0
+    strategy.cancel_all()
+
+// Once filled, cancel the opposite stop-entry so it can't reverse us
+if strategy.position_size > 0
+    strategy.cancel("Short")
+if strategy.position_size < 0
+    strategy.cancel("Long")
+
+// -- ATR trailing stop -------------------------------------
+var float trail = na
+if justEntered
+    trail := strategy.position_size > 0 ? close - atr * trailMult : close + atr * trailMult
+if strategy.position_size > 0
+    trail := math.max(trail, close - atr * trailMult)
+    strategy.exit("XL", "Long", stop=trail)
+if strategy.position_size < 0
+    trail := math.min(trail, close + atr * trailMult)
+    strategy.exit("XS", "Short", stop=trail)
+
+// -- End-of-day flat ---------------------------------------
+if inFlat or not inSession
+    strategy.cancel_all()
+    strategy.close_all(comment="EOD flat")
+
+// -- Plots -------------------------------------------------
+plot(donHigh, "Donchian High", color=color.new(color.green, 30))
+plot(donLow,  "Donchian Low",  color=color.new(color.red, 30))
