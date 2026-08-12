@@ -1,0 +1,101 @@
+//@version=6
+strategy("Fair Value Gap + Break of Structure", overlay=true,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ── INPUTS ─────────────────────────────────────────────
+swingLen = input.int(10, "Swing Lookback", group="Structure", minval=3)
+fvgExpiry = input.int(20, "FVG Max Age (bars)", group="FVG", minval=5)
+atrLen = input.int(14, "ATR Length", group="Risk")
+tpMult = input.float(2.0,"TP ATR Multiplier", group="Risk", step=0.1)
+slBuffer = input.float(0.1,"SL Buffer ATR Mult", group="Risk", step=0.1)
+
+// ── ATR ──────────────────────────────────────────────
+atrVal = ta.atr(atrLen)
+
+// ── SWING DETECTION ─────────────────────────────────
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow = ta.pivotlow(low, swingLen, swingLen)
+
+// ── BREAK OF STRUCTURE ──────────────────────────────
+var float lastSwingHigh = na
+var float lastSwingLow = na
+var int bosUpBar = na
+var int bosDnBar = na
+
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+bosUp = not na(lastSwingHigh) and close > lastSwingHigh and barstate.isconfirmed
+bosDn = not na(lastSwingLow) and close < lastSwingLow and barstate.isconfirmed
+
+if bosUp
+    bosUpBar := bar_index
+if bosDn
+    bosDnBar := bar_index
+
+// ── FAIR VALUE GAP DETECTION ─────────────────────────
+bullFvgHigh = low[0] > high[2] ? low[0] : na
+bullFvgLow = low[0] > high[2] ? high[2] : na
+bearFvgHigh = high[0] < low[2] ? low[2] : na
+bearFvgLow = high[0] < low[2] ? high[0] : na
+
+var float bFvgH = na
+var float bFvgL = na
+var int bFvgBar = na
+var float sFvgH = na
+var float sFvgL = na
+var int sFvgBar = na
+
+recentBosUp = not na(bosUpBar) and (bar_index - bosUpBar) <= fvgExpiry
+recentBosDn = not na(bosDnBar) and (bar_index - bosDnBar) <= fvgExpiry
+
+if not na(bullFvgHigh) and recentBosUp
+    bFvgH := bullFvgHigh
+    bFvgL := bullFvgLow
+    bFvgBar := bar_index
+
+if not na(bearFvgHigh) and recentBosDn
+    sFvgH := bearFvgHigh
+    sFvgL := bearFvgLow
+    sFvgBar := bar_index
+
+// ── ENTRY CONDITIONS ────────────────────────────────
+fvgValid = (bar_index - bFvgBar) <= fvgExpiry
+sfvgValid = (bar_index - sFvgBar) <= fvgExpiry
+
+longCond = not na(bFvgL) and fvgValid and low <= bFvgH and close >= bFvgL and barstate.isconfirmed and strategy.position_size == 0
+shortCond = not na(sFvgH) and sfvgValid and high >= sFvgL and close <= sFvgH and barstate.isconfirmed and strategy.position_size == 0
+
+// ── EXECUTION ───────────────────────────────────────
+if longCond
+    strategy.entry("Long", strategy.long,
+         alert_message="FVG long entry — BOS confirmed — {{ticker}} @ {{close}}")
+    strategy.exit("Long Exit", "Long",
+         stop = bFvgL - atrVal * slBuffer,
+         limit = close + atrVal * tpMult)
+    bFvgH := na
+    bFvgL := na
+
+if shortCond
+    strategy.entry("Short", strategy.short,
+         alert_message="FVG short entry — BOS confirmed — {{ticker}} @ {{close}}")
+    strategy.exit("Short Exit", "Short",
+         stop = sFvgH + atrVal * slBuffer,
+         limit = close - atrVal * tpMult)
+    sFvgH := na
+    sFvgL := na
+
+// ── VISUALS ─────────────────────────────────────────
+plotshape(bosUp, location=location.belowbar, color=color.new(color.green, 60),
+     style=shape.diamond, size=size.tiny, text="BOS")
+plotshape(bosDn, location=location.abovebar, color=color.new(color.red, 60),
+     style=shape.diamond, size=size.tiny, text="BOS")
+
+plotshape(longCond, location=location.belowbar, color=color.green,
+     style=shape.triangleup, size=size.small, text="FVG↑")
+plotshape(shortCond, location=location.abovebar, color=color.red,
+     style=shape.triangledown, size=size.small, text="FVG↓")

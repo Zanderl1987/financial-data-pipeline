@@ -15,21 +15,21 @@ DONE     njRv2ENC-Supertrend-with-Entry-TP1-TP2-and-TP3 :: jlockhart1316 :: admi
 SKIP-LEN mikVFwAu-Alpha-S-R-Channel-Strategy :: Awab_Hassan :: 801 lines
 DONE     J6JxBgkr-Vegas-Channel-Tunnel-Strategy-v1-1 :: yubinzhang802 :: admitted
 DONE     hezSShJr-Hybrid-Breakout-VCP-Inspired-Trend :: blitz_locked :: admitted
-TODO     1FgHp6Cv-MRR-Mean-Reversion-Range :: abdulrehmantatvacare ::
-TODO     SPvazS2g-Elite-Hybrid-ORB-Artillery :: ArtilleryTrades :: 2nd for this author, still within cap
-TODO     kYJLrfun-ORB-Laboratory-v1-0-12 :: DominicFerri ::
-TODO     VFP7QkqV :: DNSE ::
-TODO     9o35mG93-PDH-PDL-Break-0DTE :: samirdave1992 ::
-TODO     jd1KSVn7 :: newton61 ::
-TODO     jyhTizLX-Fair-Value-Gap-Strategy-with-Break-of-Structure-Confirmation :: AIScripts ::
-TODO     wgsvzsT3-TRADLEWARE-HODL :: cs_lev ::
-TODO     OmrCq7H3-TRADLEWARE-DCA :: cs_lev ::
+DONE     1FgHp6Cv-MRR-Mean-Reversion-Range :: abdulrehmantatvacare :: admitted (deprioritized, 11 params)
+DONE     SPvazS2g-Elite-Hybrid-ORB-Artillery :: ArtilleryTrades :: 2nd for this author, still within cap; admitted (deprioritized, 15 params)
+SKIP-LEN kYJLrfun-ORB-Laboratory-v1-0-12 :: DominicFerri :: 1209 lines
+SKIP-LEN VFP7QkqV :: DNSE :: 389 lines
+DONE     9o35mG93-PDH-PDL-Break-0DTE :: samirdave1992 :: screened OUT (unconfirmed_htf, always-on entry gate)
+DONE     jd1KSVn7 :: newton61 :: admitted (deprioritized, 12 params)
+DONE     jyhTizLX-Fair-Value-Gap-Strategy-with-Break-of-Structure-Confirmation :: AIScripts :: admitted
+DONE     wgsvzsT3-TRADLEWARE-HODL :: cs_lev :: admitted (single-trade buy&hold benchmark -- flag for campaign discussion, not directly comparable under pnl_p permutation test)
+DONE     OmrCq7H3-TRADLEWARE-DCA :: cs_lev :: admitted (deprioritized, 10 params; buy-only benchmark, same flag as HODL)
 SKIP-2PA 71yKm18B-TRADLEWARE-Ichimoku-TK-Cross-MFI-SOL :: cs_lev :: 3rd by this author
-TODO     U2DYOXw6 :: zqzmvtonjz2567 ::
-TODO     fgESdFcb :: zqzmvtonjz2567 ::
+SKIP-LEN U2DYOXw6 :: zqzmvtonjz2567 :: 886 lines
+SKIP-LEN fgESdFcb :: zqzmvtonjz2567 :: 886 lines
 SKIP-2PA 6QxmcfIk :: zqzmvtonjz2567 :: 3rd by this author
-TODO     diZ8Oes6-EMA-Fib-Confluence-with-3-Targets-Trailing-v6 :: alanshospitality ::
-TODO     lfk6Inrw-Cash-Account-Portfolio-Trend-System-v2 :: junseok_bong ::
+DONE     diZ8Oes6-EMA-Fib-Confluence-with-3-Targets-Trailing-v6 :: alanshospitality :: admitted (deprioritized, 11 params)
+SKIP-LEN lfk6Inrw-Cash-Account-Portfolio-Trend-System-v2 :: junseok_bong :: 345 lines
 TODO     qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing :: ipuneet ::
 TODO     xx3enmiW-Cloud-Pro-Ichimoku-Confluence :: blitz_locked :: 2nd for this author, still within cap
 

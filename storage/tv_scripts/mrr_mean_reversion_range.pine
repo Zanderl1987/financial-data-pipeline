@@ -1,0 +1,121 @@
+//@version=6
+// Mean Reversion Range Trading -- a standalone script, deliberately separate from the
+// NIFTY/SENSEX Signal Engine (trend-following). That engine gates OUT range-bound/choppy
+// conditions via ADX>threshold before firing; this script does the opposite -- it only
+// fires WHEN the market is ranging (ADX below threshold), betting price snaps back toward
+// the mean (the Bollinger basis) from a stretched extreme (band tag + RSI exhaustion),
+// rather than continuing to trend. Running both at once on the same symbol is intentional:
+// whichever one's regime filter currently agrees with the market is the one that should
+// have live signals; the other stays flat.
+strategy("Mean Reversion Range Trading", shorttitle = "MeanRevRng", overlay = true,
+     calc_on_every_tick = false, process_orders_on_close = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1, initial_capital = 100000)
+
+// ---------------- Inputs ----------------
+bbLength = input.int(20, "Bollinger Length", minval = 2, group = "Range (Bollinger Bands)")
+bbMult = input.float(2.0, "Bollinger Multiplier", minval = 0.5, step = 0.1, group = "Range (Bollinger Bands)")
+
+rsiLength = input.int(14, "RSI Length", minval = 2, group = "Confirmation (RSI)")
+rsiOversold = input.int(30, "RSI Oversold (buy the lower band below this)", minval = 1, maxval = 50, group = "Confirmation (RSI)")
+rsiOverbought = input.int(70, "RSI Overbought (sell the upper band above this)", minval = 50, maxval = 99, group = "Confirmation (RSI)")
+
+adxLength = input.int(14, "ADX Length", minval = 2, group = "Regime Filter (ADX)")
+adxRangeMax = input.float(20.0, "Max ADX to call it 'ranging'", minval = 1, group = "Regime Filter (ADX)")
+adxAbortBuffer = input.float(8.0, "Early-exit if ADX rises this far above max mid-trade", minval = 0, group = "Regime Filter (ADX)")
+
+atrLength = input.int(14, "ATR Length", minval = 2, group = "Risk")
+atrStopMult = input.float(1.0, "Stop = band ± ATR ×", minval = 0.1, step = 0.1, group = "Risk")
+
+showTable = input.bool(true, "Show decision table", group = "Display")
+
+// ---------------- Range (the channel we're trading bounces inside) ----------------
+basis = ta.sma(close, bbLength)
+dev = bbMult * ta.stdev(close, bbLength)
+upper = basis + dev
+lower = basis - dev
+
+// ---------------- Confirmation (is the extreme actually exhausted?) ----------------
+rsi = ta.rsi(close, rsiLength)
+
+// ---------------- Regime filter (is this actually a range, not a trend?) ----------------
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+ranging = adx < adxRangeMax
+
+// ---------------- Risk sizing reference ----------------
+atrVal = ta.atr(atrLength)
+
+// ---------------- Signals ----------------
+// Fixed qty=1 -- like the Signal Engine, this validates signal TIMING against the raw
+// price series, not realistic position sizing/margin (that belongs in the Python/broker
+// layer against actual instrument lot sizes, not here).
+longSignal = ranging and close <= lower and rsi <= rsiOversold and strategy.position_size == 0
+shortSignal = ranging and close >= upper and rsi >= rsiOverbought and strategy.position_size == 0
+
+var float longStop = na
+var float shortStop = na
+
+if longSignal
+    strategy.entry("Long", strategy.long, comment = "BUY RANGE " + str.tostring(math.round(rsi)))
+    longStop := lower - atrStopMult * atrVal
+
+if shortSignal
+    strategy.entry("Short", strategy.short, comment = "SELL RANGE " + str.tostring(math.round(rsi)))
+    shortStop := upper + atrStopMult * atrVal
+
+// Mean reversion's single biggest failure mode is the range breaking into a real trend
+// mid-trade -- if ADX pushes well past the ranging threshold while a position is open,
+// that's the regime disagreeing with the trade's whole premise, so exit early rather than
+// wait for the fixed stop to eventually catch up.
+regimeBroke = adx > (adxRangeMax + adxAbortBuffer)
+
+if strategy.position_size > 0
+    strategy.exit("Exit Long", from_entry = "Long", stop = longStop, limit = basis,
+         comment_profit = "MEAN REACHED", comment_loss = "STOP")
+    if regimeBroke
+        strategy.close("Long", comment = "REGIME SHIFT")
+
+if strategy.position_size < 0
+    strategy.exit("Exit Short", from_entry = "Short", stop = shortStop, limit = basis,
+         comment_profit = "MEAN REACHED", comment_loss = "STOP")
+    if regimeBroke
+        strategy.close("Short", comment = "REGIME SHIFT")
+
+if strategy.position_size == 0
+    longStop := na
+    shortStop := na
+
+// ---------------- Visuals ----------------
+// Plain grey filled channel + grey mean line, matching the reference style directly --
+// no colored band outlines, no regime background tint. The regime is still computed and
+// gates entries exactly as before; it's just no longer painted on the chart.
+upperPlot = plot(upper, "Upper Band", color = color.new(color.gray, 55), linewidth = 1)
+lowerPlot = plot(lower, "Lower Band", color = color.new(color.gray, 55), linewidth = 1)
+fill(upperPlot, lowerPlot, color = color.new(color.gray, 88), title = "Range")
+plot(basis, "Mean", color = color.new(color.gray, 10), linewidth = 2)
+
+if longSignal
+    label.new(bar_index, low, "BUY\n" + str.tostring(close, "#.##"), style = label.style_label_up,
+         color = color.new(color.green, 0), textcolor = color.white, size = size.small)
+if shortSignal
+    label.new(bar_index, high, "SELL\n" + str.tostring(close, "#.##"), style = label.style_label_down,
+         color = color.new(color.red, 0), textcolor = color.white, size = size.small)
+
+// ---------------- Decision table ----------------
+var table dt = table.new(position.top_right, 2, 5, border_width = 1)
+if showTable and barstate.islast
+    signalTxt = strategy.position_size > 0 ? "LONG (range)" : strategy.position_size < 0 ? "SHORT (range)" : "FLAT"
+    entryTxt = strategy.position_size != 0 ? str.tostring(strategy.position_avg_price, "#.##") : "-"
+    stopTxt = strategy.position_size > 0 ? str.tostring(longStop, "#.##") : strategy.position_size < 0 ? str.tostring(shortStop, "#.##") : "-"
+    targetTxt = strategy.position_size != 0 ? str.tostring(basis, "#.##") : "-"
+    regimeTxt = ranging ? "RANGING (ADX " + str.tostring(adx, "#.#") + ")" : "TRENDING (ADX " + str.tostring(adx, "#.#") + ")"
+
+    table.cell(dt, 0, 0, "Signal", text_color = color.white, bgcolor = color.gray)
+    table.cell(dt, 1, 0, signalTxt, text_color = color.white, bgcolor = color.gray)
+    table.cell(dt, 0, 1, "Entry", text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 1, 1, entryTxt, text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 0, 2, "Stop", text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 1, 2, stopTxt, text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 0, 3, "Target (mean)", text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 1, 3, targetTxt, text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 0, 4, "Regime", text_color = color.white, bgcolor = color.new(color.gray, 50))
+    table.cell(dt, 1, 4, regimeTxt, text_color = color.white, bgcolor = color.new(color.gray, 50))

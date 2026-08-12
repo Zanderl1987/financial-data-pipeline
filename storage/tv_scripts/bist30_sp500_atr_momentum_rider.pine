@@ -1,0 +1,159 @@
+//@version=6
+// This Source Code Form is subject to the terms of the Mozilla Public License 2.0.
+// Copyright (c) newton61
+// Release 2.0: Locks the PF-priority HMA-S 3-day slope filter at -0.180 ATR/day.
+strategy(
+     "BIST30 to S&P 500 — ATR Momentum Rider",
+     shorttitle = "ATR Rider",
+     overlay = true,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     pyramiding = 2,
+     commission_type = strategy.commission.percent,
+     commission_value = 0,
+     slippage = 1,
+     margin_long = 1,
+     close_entries_rule = "ANY",
+     calc_on_every_tick = false,
+     calc_on_order_fills = false,
+     process_orders_on_close = false)
+
+// -----------------------------------------------------------------------------
+// Inputs
+// -----------------------------------------------------------------------------
+string GROUP_SIGNAL = "Signal"
+string GROUP_K1 = "K1"
+string GROUP_TEST = "Backtest"
+string GROUP_VIEW = "Display"
+
+int fastLength = input.int(8, "HMA-F", minval = 2, group = GROUP_SIGNAL)
+int midLength = input.int(9, "HMA-M", minval = 3, group = GROUP_SIGNAL)
+int slowLength = input.int(20, "HMA-S", minval = 5, group = GROUP_SIGNAL)
+int atrLength = input.int(14, "ATR-L", minval = 2, group = GROUP_SIGNAL)
+
+// Locked research values. With the default HMA-S length of 20, this is the
+// HMA20 three-day ATR-normalized slope filter selected on 2020-2023 data.
+const int SLOPE_LOOKBACK = 3
+const float SLOPE_MIN_ATR_PER_DAY = -0.18
+
+float k1A = input.float(1.50, "K1-A · ATR activation", minval = 0.25, step = 0.25, group = GROUP_K1)
+float k1T = input.float(5.75, "K1-T · Peak trail (%)", minval = 0.25, step = 0.25, group = GROUP_K1)
+int k1W = input.int(4, "K1-W · Wait sessions", minval = 0, group = GROUP_K1)
+
+// The backtest window is defined with simple year inputs.
+int startYear = input.int(2020, "Start year", minval = 1970, maxval = 2098, group = GROUP_TEST)
+int endYear = input.int(2099, "End year", minval = 1971, maxval = 2099, group = GROUP_TEST)
+
+bool showHMAs = input.bool(true, "Show HMA set", group = GROUP_VIEW)
+bool showK1 = input.bool(true, "Show active K1 trail", group = GROUP_VIEW)
+bool shadeRegime = input.bool(false, "Shade active regime", group = GROUP_VIEW)
+
+// -----------------------------------------------------------------------------
+// Signal engine
+// -----------------------------------------------------------------------------
+hma(float source, int length) =>
+    int halfLength = math.max(1, int(math.floor(length / 2.0)))
+    int rootLength = math.max(1, int(math.round(math.sqrt(length))))
+    ta.wma(2.0 * ta.wma(source, halfLength) - ta.wma(source, length), rootLength)
+
+float hmaF = hma(close, fastLength)
+float hmaM = hma(close, midLength)
+float hmaS = hma(close, slowLength)
+float atrValue = ta.atr(atrLength)
+
+bool regime = hmaF > hmaM and hmaM > hmaS
+bool rawSetup = regime and not regime[1]
+float hmaSSlope3 = atrValue > 0 ? (hmaS - hmaS[SLOPE_LOOKBACK]) / SLOPE_LOOKBACK / atrValue : na
+bool slopeAllowed = not na(hmaSSlope3) and hmaSSlope3 >= SLOPE_MIN_ATR_PER_DAY
+// The filter is evaluated only on the first establishment of the HMA order.
+// A rejected raw setup does not enter later inside the same regime.
+bool setup = rawSetup and slopeAllowed
+bool inDateRange = year >= startYear and year <= endYear
+
+// -----------------------------------------------------------------------------
+// Single-stage K1 state
+// -----------------------------------------------------------------------------
+var string activeEntryId = "L-A"
+var bool resetOnNextBar = false
+var int resetOrderBar = na
+var float pendingEntryATR = na
+
+var float entryPrice = na
+var float entryATR = na
+var float peakPrice = na
+var float k1Trail = na
+var bool k1Active = false
+var int entryBar = na
+
+// Market orders created at a bar close fill at the next available open because
+// process_orders_on_close is false. After that fill, initialize the new state
+// with the ATR that was known when the setup order was created.
+if resetOnNextBar and bar_index > resetOrderBar and strategy.position_size > 0
+    entryPrice := strategy.position_avg_price
+    entryATR := pendingEntryATR
+    peakPrice := high
+    k1Trail := na
+    k1Active := false
+    entryBar := bar_index
+    resetOnNextBar := false
+
+if strategy.position_size == 0 and not resetOnNextBar
+    entryPrice := na
+    entryATR := na
+    peakPrice := na
+    k1Trail := na
+    k1Active := false
+    entryBar := na
+
+bool k1ExitSignal = false
+
+if strategy.position_size > 0 and not resetOnNextBar
+    peakPrice := math.max(nz(peakPrice, high), high)
+
+    // A previously activated K1 can act on the current close. The absolute
+    // trail can only rise. A close breach creates a next-open market exit.
+    if k1Active
+        float candidateTrail = peakPrice * (1.0 - k1T / 100.0)
+        k1Trail := math.max(nz(k1Trail, candidateTrail), candidateTrail)
+        k1ExitSignal := bar_index >= entryBar + k1W and close <= k1Trail
+
+    // Activation is evaluated after the exit test, so the activation bar
+    // cannot stop itself retroactively.
+    float mfeATR = entryATR > 0 ? (peakPrice - entryPrice) / entryATR : na
+    if not k1Active and not na(mfeATR) and mfeATR >= k1A
+        k1Active := true
+        k1Trail := na
+
+// A fresh setup refreshes the campaign at the next open. Alternating entry
+// IDs allow the old trade to close and the new trade to open on that same tick.
+if inDateRange and setup and not na(atrValue)
+    float knownATR = atrValue
+    if strategy.position_size > 0
+        string nextEntryId = activeEntryId == "L-A" ? "L-B" : "L-A"
+        strategy.close(activeEntryId, comment = "SET-R", alert_message = "SET-R EXIT", immediately = false)
+        strategy.entry(nextEntryId, strategy.long, comment = "SET", alert_message = "SET LONG")
+        activeEntryId := nextEntryId
+    else
+        strategy.entry(activeEntryId, strategy.long, comment = "SET", alert_message = "SET LONG")
+    pendingEntryATR := knownATR
+    resetOrderBar := bar_index
+    resetOnNextBar := true
+else if k1ExitSignal
+    strategy.close(activeEntryId, comment = "K1", alert_message = "K1 EXIT", immediately = false)
+
+if year > endYear and strategy.position_size > 0
+    strategy.close(activeEntryId, comment = "DATE", alert_message = "DATE EXIT", immediately = false)
+
+// -----------------------------------------------------------------------------
+// Display
+// -----------------------------------------------------------------------------
+plot(showHMAs ? hmaF : na, "HMA-F", color = color.new(color.aqua, 0), linewidth = 2)
+plot(showHMAs ? hmaM : na, "HMA-M", color = color.new(color.blue, 10), linewidth = 1)
+plot(showHMAs ? hmaS : na, "HMA-S", color = color.new(color.orange, 0), linewidth = 2)
+plot(showK1 and k1Active ? k1Trail : na, "K1", color = color.new(color.fuchsia, 0), linewidth = 2, style = plot.style_linebr)
+
+plotshape(inDateRange and setup, title = "SET", text = "SET", style = shape.labelup, location = location.belowbar, color = color.new(color.teal, 0), textcolor = color.white, size = size.tiny)
+plotshape(k1ExitSignal and not setup, title = "K1", text = "K1", style = shape.labeldown, location = location.abovebar, color = color.new(color.fuchsia, 0), textcolor = color.white, size = size.tiny)
+
+bgcolor(shadeRegime and regime ? color.new(color.teal, 90) : na, title = "Regime")

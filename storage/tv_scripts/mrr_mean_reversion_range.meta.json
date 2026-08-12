@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "reindent(page_text, js_indent_array)",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "abdulrehmantatvacare",
+  "tv_boosts": 3,
+  "tv_script_name": "MRR(Mean Reversion Range)",
+  "tv_url": "https://www.tradingview.com/script/1FgHp6Cv-MRR-Mean-Reversion-Range/",
+  "tv_views": 178
+}

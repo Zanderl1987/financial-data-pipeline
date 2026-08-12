@@ -1,0 +1,87 @@
+//@version=6
+// Author: cs_lev
+// Strategy: TRADLEWARE-DCA
+// Hypothesis: baseline reference — deploy a fixed tranche of the initial capital
+// at a regular interval; never add external money beyond initial_capital.
+// Assumed regime: regime-agnostic (passive)
+// Timeframe: any (adjust frequency inputs to match your bar size)
+// Assets: any
+// Known failure modes: full deployment in the first N weeks; no active risk management.
+//
+// Fair-comparison notes:
+// initial_capital here should match the strategy you are benchmarking against.
+// The script stops buying once the total invested reaches initial_capital,
+// so no external capital is ever added — the same total pool as the active strategy.
+// Adjust DCA quantity for pricier ETFs like QQQ,VOO, as Tradingview might not show trades that would be fractional (<1)
+
+strategy("TRADLEWARE-DCA", overlay=true,
+     initial_capital=10000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     slippage=3,
+     pyramiding=500,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     fill_orders_on_standard_ohlc=true)
+
+// === Inputs ===
+// Date range — integer year/month/day fields instead of input.time(), which does
+// not reliably trigger a recalculation in TradingView.
+startYear = input.int(2018, "Start year", minval=2000, maxval=2099, group="Date Range")
+startMonth = input.int(1, "Start month", minval=1, maxval=12, group="Date Range")
+startDay = input.int(1, "Start day", minval=1, maxval=31, group="Date Range")
+endYear = input.int(2099, "End year", minval=2000, maxval=2099, group="Date Range")
+endMonth = input.int(12, "End month", minval=1, maxval=12, group="Date Range")
+endDay = input.int(31, "End day", minval=1, maxval=31, group="Date Range")
+startDate = timestamp(startYear, startMonth, startDay, 0, 0)
+endDate = timestamp(endYear, endMonth, endDay, 23, 59)
+
+basedOnDayOfWeek = input.bool(title="Use Day of Week Mode", defval=false, group="Frequency",
+     tooltip="Buy on a fixed day of the week (e.g. every Monday). Uncheck to buy every X bars instead.")
+buyOnDayOfWeek = input.int(title="Day of Week", defval=2, minval=1, maxval=7,
+     tooltip="1=Sunday, 2=Monday … 7=Saturday. Only active when 'Use Day of Week Mode' is checked.", group="Frequency")
+basedOnXBars = input.int(title="Every X Bars", defval=30, minval=1,
+     tooltip="Buy every X bars. Default 30 ≈ monthly on a daily chart. Use 7 for weekly, 1 for daily. Tip: set Amount per buy so that (bars in period / Every X Bars) × amount ≈ initial capital for full deployment.", group="Frequency")
+
+toInvestQuote = input.float(title="Amount per buy (quote currency)", defval=100.0, minval=1.0,
+     tooltip="Fixed dollar amount to invest on each buy event. Buying stops automatically once the total invested equals the strategy's initial capital.", group="Strategy")
+
+// === State ===
+var float investedCapital = 0.0
+var int lastBuyBarIndex = 0
+
+toInvestBase = toInvestQuote / close // units to buy at current price
+
+// Exclude the last confirmed bar so DCA and close_all never fire on the same bar.
+timeCondition = time >= startDate and time <= endDate and not barstate.islastconfirmedhistory
+
+// Frequency condition
+// Use >= not == so a missed cycle (capital cap, reload) doesn't permanently break the schedule.
+bool freqCondition = false
+if basedOnDayOfWeek
+    freqCondition := dayofweek(time) == buyOnDayOfWeek
+else
+    freqCondition := (lastBuyBarIndex == 0) or (bar_index >= lastBuyBarIndex + basedOnXBars)
+
+longCondition = freqCondition and timeCondition
+
+// === Orders ===
+// Always advance lastBuyBarIndex when the frequency fires, even if the capital cap blocks the buy.
+// This prevents the == → permanent-miss bug when capital runs out mid-schedule.
+// strategy.entry (not strategy.order) is required so TV's strategy tester tracks the trades
+// and generates a report. pyramiding=500 lets all DCA layers stack into the same "dca" position.
+if longCondition
+    lastBuyBarIndex := bar_index
+    if investedCapital + toInvestQuote <= strategy.initial_capital
+        strategy.entry(id="dca", direction=strategy.long, qty=toInvestBase)
+        investedCapital += toInvestQuote
+
+// Close the entire accumulated position on the last confirmed (fully closed) bar.
+// islastconfirmedhistory = yesterday's bar. With process_orders_on_close=false (default),
+// the fill happens at today's open — so a sell arrow appears in chart history immediately.
+// islast (the forming bar) won't show a sell until today's market close, which is why it looked missing.
+if barstate.islastconfirmedhistory or time > endDate
+    strategy.close_all()
+
+// === Equity line ===
+plot(strategy.equity, title="Equity", display=display.data_window, color=color.teal)
