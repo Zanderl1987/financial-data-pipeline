@@ -1,0 +1,33 @@
+# TradingView Editors' picks roster, collected 2026-08-11
+# Format: title :: author :: script path
+# Triage column added by hand: LIB=library/engine, VIZ=visualization/profile,
+# TOOL=screener/backtester, OSC=indicator-only filter or oscillator (no trade rule),
+# NOVEL=non-trading novelty, CAND=plausible trade-rule candidate
+
+LIB    Regression_Toolkit :: Steversteves :: gSLL5PC1-Regression-Toolkit/
+VIZ    Time-of-Day/Session Performance Stats [QuantAlgo] :: QuantAlgo :: Yr3kT0uI-Time-of-Day-Session-Performance-Stats-QuantAlgo/
+TOOL   Universal Signal Backtester [LuxAlgo] :: LuxAlgo :: Y5CIZ9CB-Universal-Signal-Backtester-LuxAlgo/
+VIZ    MACD with HTF Panels [theUltimator5] :: TheUltimator5 :: pUwmpOyc-MACD-with-HTF-Panels-theUltimator5/
+NOVEL  Chess :: SimpleCryptoLife :: HmMDG0mr-Chess/
+VIZ    Directional Volume Shapes (Zeiierman) :: Zeiierman :: 3XE8qqfr-Directional-Volume-Shapes-Zeiierman/
+OSC    IQ Trend Beams [TradingIQ] :: Trading-IQ :: SG7Vk6uH-IQ-Trend-Beams-TradingIQ/
+CAND   TASC 2026.08 An Ag Selling Model :: PineCodersTASC :: VFzCk3HX-TASC-2026-08-An-Ag-Selling-Model/
+OSC    Machine Learning Neural Network Engine :: Julien_Exe :: 7sKZIrbB-Machine-Learning-Neural-Network-Engine/
+VIZ    Intrabar Profile [Kioseff Trading] :: KioseffTrading :: j38vuAvW-Intrabar-Profile-Kioseff-Trading/
+OSC    Kinetic Slippage Index (KSI) :: HPotter :: CUjAnbtS-Kinetic-Slippage-Index-KSI/
+VIZ    Session Edge Profiler | Flux Charts :: fluxchart :: T1V41Bl5-Session-Edge-Profiler-Flux-Charts/
+VIZ    Supertrend Parameter Sensitivity 3D [LuxAlgo] :: LuxAlgo :: kSMLs0Hh-Supertrend-Parameter-Sensitivity-3D-LuxAlgo/
+LIB    ExprLib :: A1trdX :: QNGQtaZJ-ExprLib/
+TOOL   Chart Patterns Screener [Trendoscope] :: Trendoscope :: a7a6yS0y-Chart-Patterns-Screener-Trendoscope/
+OSC    Machine Learning RSI | AI Classification & Ranking (Zeiierman) :: Zeiierman :: VrTL3VwF-Machine-Learning-RSI-AI-Classification-Ranking-Zeiierman/
+VIZ    Polynomial/Linear Regression Volume Profile [BigBeluga] :: BigBeluga :: 4rlNNL5e-Polynomial-Linear-Regression-Volume-Profile-BigBeluga/
+VIZ    Whale Liquidity and Absorption Profile [AlgoAlpha] :: AlgoAlpha :: cWm8UcfQ-Whale-Liquidity-and-Absorption-Profile-AlgoAlpha/
+OSC    Fractional EMA Kalman Filter [D7] :: et20tradeview :: c75aF3t1-Fractional-EMA-Kalman-Filter-D7/
+OSC    Neural Weight Oscillator (Zeiierman) :: Zeiierman :: bfu1hmkS-Neural-Weight-Oscillator-Zeiierman/
+LIB    NeuraLib: A Native AI and Deep Learning Runtime :: Alien_Algorithms :: GewgOj30-NeuraLib-A-Native-AI-and-Deep-Learning-Runtime/
+LIB    Pine3D: A Native 3D Graphical Rendering Engine :: Alien_Algorithms :: I2K4hIdP-Pine3D-A-Native-3D-Graphical-Rendering-Engine/
+CAND   TASC 2026.05 The AutoTune Filter :: PineCodersTASC :: GqKlw3yv-TASC-2026-05-The-AutoTune-Filter/
+
+# YIELD: 2 CAND / 23 (~9%). Editors' picks rewards originality and craft, which
+# selects for tooling and visualization, not tradeable entry+exit systems.
+# See the 2026-08-11 amendment in the pre-registration.

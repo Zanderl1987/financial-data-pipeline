@@ -1,0 +1,115 @@
+//@version=6
+// This source code is subject to the terms of the Mozilla Public License, v. 2.0.
+// If a copy of the MPL was not distributed with this file, You can obtain one at
+// https://mozilla.org/MPL/2.0/.
+// Derived from prior work by stockone1231 and perrycc007 (MPL-2.0).
+// Modifications: Simplified Trend + Volatility-Squeeze Breakout Strategy
+
+strategy("Hybrid Breakout", overlay=true, initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.05,
+     process_orders_on_close=true)
+
+// ============================================================
+// INPUTS
+// ============================================================
+grpTrend = "Trend Filter"
+src = input.source(close, "MA Source", group=grpTrend)
+len50 = input.int(50, "Fast MA Length", group=grpTrend)
+len150 = input.int(150, "Mid MA Length", group=grpTrend)
+len200 = input.int(200, "Slow MA Length", group=grpTrend)
+maUpLookback = input.int(20, "Bars Slow MA Must Be Rising Over", group=grpTrend)
+
+grpVola = "Volatility / Pivot Filter"
+atrLen = input.int(3, "Range Length", group=grpVola)
+lookback = input.int(150, "Percentile Lookback", group=grpVola)
+percentileMax = input.int(40, "Max Range Percentile (Squeeze)", minval=1, maxval=100, group=grpVola)
+closeRangeMax = input.float(4, "Max Close-Range % (Tight Squeeze)", group=grpVola)
+
+grpVol = "Volume Filter"
+useVolFilter = input.bool(true, "Require Volume Expansion on Breakout", group=grpVol)
+volMaLen = input.int(20, "Volume MA Length", group=grpVol)
+volMult = input.float(1.2, "Volume Must Exceed MA x", minval=1.0, step=0.1, group=grpVol)
+
+grpEntry = "Entry"
+breakoutLookback = input.int(3, "Stop-Entry High Lookback", minval=1, group=grpEntry)
+
+grpRisk = "Risk Management"
+stopLossPct = input.float(8.0, "Stop Loss %", minval=0.1, group=grpRisk) / 100
+take1Pct = input.float(10.0, "Take Profit 1 %", minval=0.1, group=grpRisk) / 100
+take2Pct = input.float(20.0, "Take Profit 2 %", minval=0.1, group=grpRisk) / 100
+take3Pct = input.float(30.0, "Take Profit 3 %", minval=0.1, group=grpRisk) / 100
+
+grpDate = "Date Range"
+startDate = input.time(timestamp("2018-01-01"), "Start", group=grpDate)
+endDate = input.time(timestamp("2099-01-01"), "End", group=grpDate)
+inDateRange = time >= startDate and time <= endDate
+
+// ============================================================
+// TREND TEMPLATE (simplified Minervini-style MA alignment)
+// ============================================================
+ma50 = ta.sma(src, len50)
+ma150 = ta.sma(src, len150)
+ma200 = ta.sma(src, len200)
+
+bullishTrend = close > ma50 and ma50 > ma150 and ma150 > ma200 and
+     ma200 > ma200[1] and ma200 > ma200[maUpLookback] and ma50 >= ma50[1]
+
+// ============================================================
+// VOLATILITY SQUEEZE / PIVOT DETECTION
+// ============================================================
+hRange = ta.highest(high, atrLen)
+lRange = ta.lowest(low, atrLen)
+rangePct = (hRange - lRange) / hRange * 100
+
+hClose = ta.highest(close, atrLen)
+lClose = ta.lowest(close, atrLen)
+closeRangePct = (hClose - lClose) / hClose * 100
+
+rangePercentile = ta.percentrank(rangePct, lookback)
+
+rangeSqueeze = rangePercentile <= percentileMax
+closeSqueeze = closeRangePct <= closeRangeMax
+pivot = rangeSqueeze or closeSqueeze
+
+// ============================================================
+// VOLUME CONFIRMATION
+// ============================================================
+volMa = ta.sma(volume, volMaLen)
+volumeOK = not useVolFilter or volume > volMa * volMult
+
+// ============================================================
+// ENTRY
+// ============================================================
+recentHigh = ta.highest(high, breakoutLookback)
+
+longSignal = bullishTrend and pivot and volumeOK and inDateRange
+
+if longSignal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, stop=recentHigh[1])
+
+// ============================================================
+// EXIT MANAGEMENT (tiered stop / take-profit)
+// ============================================================
+avgPrice = strategy.position_avg_price
+stopLevel = avgPrice * (1 - stopLossPct)
+target1 = avgPrice * (1 + take1Pct)
+target2 = avgPrice * (1 + take2Pct)
+target3 = avgPrice * (1 + take3Pct)
+
+if strategy.position_size > 0
+    strategy.exit("TP1", "Long", qty_percent=25, stop=stopLevel, limit=target1)
+    strategy.exit("TP2", "Long", qty_percent=50, stop=stopLevel, limit=target2)
+    strategy.exit("TP3", "Long", qty_percent=100, stop=stopLevel, limit=target3)
+
+// ============================================================
+// VISUALS
+// ============================================================
+plot(ma50, "MA 50", color=color.blue)
+plot(ma150, "MA 150", color=color.green)
+plot(ma200, "MA 200", color=color.red)
+
+bgcolor(pivot and bullishTrend ? color.new(color.yellow, 80) : na, title="Setup Zone")
+
+plotshape(longSignal and strategy.position_size == 0, title="Setup",
+     style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny)

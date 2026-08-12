@@ -1,0 +1,38 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# enumerated 2026-08-12 (sampling frame priority 1 per pre-registration amendment
+# 2026-08-11 (b)). Order below is the listing's own popularity order.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE     = .pine + .meta.json in this directory
+#         SKIP-2PA = author already at the 2-per-author cap
+#         SKIP-LEN = too large to collect through the two-channel workaround
+#                    (see pre-registration amendment 2026-08-12)
+#         TODO     = next to collect
+#
+DONE     PkUPYbw7-Ultimate-Prop-Firm-Artillery :: ArtilleryTrades :: collected 2026-08-11
+DONE     hKhtC6DE-Rabiah6X-High-Winrate-Scalper-UT-Bot-FVG-DEMA :: Soheibhussen357 :: screened OUT (unconfirmed_htf)
+DONE     njRv2ENC-Supertrend-with-Entry-TP1-TP2-and-TP3 :: jlockhart1316 :: admitted
+SKIP-LEN mikVFwAu-Alpha-S-R-Channel-Strategy :: Awab_Hassan :: 801 lines
+DONE     J6JxBgkr-Vegas-Channel-Tunnel-Strategy-v1-1 :: yubinzhang802 :: admitted
+DONE     hezSShJr-Hybrid-Breakout-VCP-Inspired-Trend :: blitz_locked :: admitted
+TODO     1FgHp6Cv-MRR-Mean-Reversion-Range :: abdulrehmantatvacare ::
+TODO     SPvazS2g-Elite-Hybrid-ORB-Artillery :: ArtilleryTrades :: 2nd for this author, still within cap
+TODO     kYJLrfun-ORB-Laboratory-v1-0-12 :: DominicFerri ::
+TODO     VFP7QkqV :: DNSE ::
+TODO     9o35mG93-PDH-PDL-Break-0DTE :: samirdave1992 ::
+TODO     jd1KSVn7 :: newton61 ::
+TODO     jyhTizLX-Fair-Value-Gap-Strategy-with-Break-of-Structure-Confirmation :: AIScripts ::
+TODO     wgsvzsT3-TRADLEWARE-HODL :: cs_lev ::
+TODO     OmrCq7H3-TRADLEWARE-DCA :: cs_lev ::
+SKIP-2PA 71yKm18B-TRADLEWARE-Ichimoku-TK-Cross-MFI-SOL :: cs_lev :: 3rd by this author
+TODO     U2DYOXw6 :: zqzmvtonjz2567 ::
+TODO     fgESdFcb :: zqzmvtonjz2567 ::
+SKIP-2PA 6QxmcfIk :: zqzmvtonjz2567 :: 3rd by this author
+TODO     diZ8Oes6-EMA-Fib-Confluence-with-3-Targets-Trailing-v6 :: alanshospitality ::
+TODO     lfk6Inrw-Cash-Account-Portfolio-Trend-System-v2 :: junseok_bong ::
+TODO     qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing :: ipuneet ::
+TODO     xx3enmiW-Cloud-Pro-Ichimoku-Confluence :: blitz_locked :: 2nd for this author, still within cap
+
+# Yield note: unlike the Editors' picks frame (2 tradeable candidates out of 23),
+# every entry here carries strategy() entries and exits by construction. The binding
+# constraint in this frame is collection cost, not candidacy.
