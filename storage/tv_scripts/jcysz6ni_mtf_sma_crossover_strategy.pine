@@ -1,0 +1,40 @@
+//@version=6
+strategy("MTF SMA Crossover Strategy v6", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// 1. INPUTS
+fast_len = input.int(50, title="Daily Fast SMA (or 10 Weekly)")
+slow_len = input.int(200, title="Daily Slow SMA (or 40 Weekly)")
+
+// 2. DAILY CHART INDICATORS (Top Chart)
+daily_fast = ta.sma(close, fast_len)
+daily_slow = ta.sma(close, slow_len)
+
+// Daily Buy Signal (Crossover)
+daily_buy_signal = ta.crossover(daily_fast, daily_slow)
+
+// 3. WEEKLY CHART INDICATORS (Bottom Chart)
+// Requesting background weekly data using barmerge.lookahead_off to ensure historical backtest accuracy
+weekly_fast = request.security(syminfo.tickerid, "W", ta.sma(close, fast_len), barmerge.gaps_off, barmerge.lookahead_off)
+weekly_slow = request.security(syminfo.tickerid, "W", ta.sma(close, slow_len), barmerge.gaps_off, barmerge.lookahead_off)
+
+// Weekly Bullish Condition (Fast SMA is above Slow SMA)
+weekly_trend_bullish = weekly_fast > weekly_slow
+
+// 4. STRATEGY LOGIC
+// Buy on daily crossover ONLY IF weekly trend is already bullish
+buy_condition = daily_buy_signal and weekly_trend_bullish
+
+// Exit when daily fast crosses under daily slow
+exit_condition = ta.crossunder(daily_fast, daily_slow)
+
+// 5. EXECUTION & PLOTTING
+if buy_condition
+    strategy.entry("MTF Long", strategy.long)
+
+if exit_condition
+    strategy.close("MTF Long")
+
+// Visuals on Chart
+plot(daily_fast, color=color.blue, title="Daily 50 SMA")
+plot(daily_slow, color=color.orange, title="Daily 200 SMA")
+plotshape(buy_condition, title="Confirmed Buy", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)

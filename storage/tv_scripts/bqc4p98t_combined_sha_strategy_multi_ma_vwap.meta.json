@@ -1,0 +1,12 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content rows, chunked)",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "mayankbhatia979",
+  "tv_boosts": 13,
+  "tv_script_name": "Combined: SHA Strategy + Multi MA/VWAP + EMA Band + 9/20 MA Fill",
+  "tv_url": "https://www.tradingview.com/script/bQC4p98T-Combined-SHA-Strategy-Multi-MA-VWAP-EMA-Band-9-20-MA-Fill/",
+  "tv_views": 483,
+  "note": "as-published source ends mid-declaration in section 2 (EMA Band fill) -- section 3 ('9/20 MA Fill') is never implemented despite the title. Section 1 (the actual strategy logic) is complete."
+}

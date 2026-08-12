@@ -1,0 +1,189 @@
+//@version=6
+strategy(
+     "Prakash BUY/SELL — Supertrend Filter + 1% Risk",
+     shorttitle="Prakash + ST Risk",
+     overlay=true,
+     pyramiding=0,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     calc_on_order_fills=true,
+     process_orders_on_close=true,
+     margin_long=0,
+     margin_short=0
+)
+
+//────────────────────────────────────────────────────────────────────
+// Prakash range-filter inputs
+//────────────────────────────────────────────────────────────────────
+source = input.source(close, "Source", group="Prakash Signals")
+per1 = input.int(27, "Fast Period", minval=1, group="Prakash Signals")
+mult1 = input.float(1.6, "Fast Range", minval=0.1, group="Prakash Signals")
+per2 = input.int(55, "Slow Period", minval=1, group="Prakash Signals")
+mult2 = input.float(2.0, "Slow Range", minval=0.1, group="Prakash Signals")
+
+//────────────────────────────────────────────────────────────────────
+// Supertrend and risk inputs
+//────────────────────────────────────────────────────────────────────
+atrPeriod = input.int(10, "ATR Length", minval=1, group="Supertrend Filter")
+factor = input.float(3.0, "Factor", minval=0.01, step=0.01, group="Supertrend Filter")
+
+riskPercent = input.float(1.0, "Account Risk per Trade (%)", minval=0.01, step=0.1, group="Risk and Exits")
+riskReward = input.float(3.0, "Target Risk/Reward", minval=0.1, step=0.1, group="Risk and Exits")
+quantityStep = input.float(0.01, "Quantity Step", minval=0.000001, group="Risk and Exits")
+minimumQuantity = input.float(0.01, "Minimum Quantity", minval=0.000001, group="Risk and Exits")
+trailSupertrendStop = input.bool(true, "Trail Stop with Supertrend", group="Risk and Exits")
+
+anchor = input.string("Session", "VWAP Anchor Period", options=["Session", "Week", "Month", "Year"], group="Display")
+showBackground = input.bool(true, "Show Supertrend Background", group="Display")
+showSignalLabels = input.bool(true, "Show BUY/SELL Labels", group="Display")
+
+//────────────────────────────────────────────────────────────────────
+// Original Prakash signal engine converted to Pine v6
+//────────────────────────────────────────────────────────────────────
+smoothrng(float x, int t, float m) =>
+    int wper = t * 2 - 1
+    float avrng = ta.ema(math.abs(x - x[1]), t)
+    ta.ema(avrng, wper) * m
+
+rngfilt(float x, float r) =>
+    float value = x
+    value := x > nz(value[1]) ? (x - r < nz(value[1]) ? nz(value[1]) : x - r) : (x + r > nz(value[1]) ? nz(value[1]) : x + r)
+    value
+
+smrng1 = smoothrng(source, per1, mult1)
+smrng2 = smoothrng(source, per2, mult2)
+smrng = (smrng1 + smrng2) / 2.0
+filt = rngfilt(source, smrng)
+
+var float upward = 0.0
+var float downward = 0.0
+upward := filt > filt[1] ? nz(upward[1]) + 1 : filt < filt[1] ? 0 : nz(upward[1])
+downward := filt < filt[1] ? nz(downward[1]) + 1 : filt > filt[1] ? 0 : nz(downward[1])
+
+longCondition = source > filt and upward > 0
+shortCondition = source < filt and downward > 0
+
+var int conditionState = 0
+conditionState := longCondition ? 1 : shortCondition ? -1 : nz(conditionState[1])
+
+prakashBuy = longCondition and nz(conditionState[1]) == -1
+prakashSell = shortCondition and nz(conditionState[1]) == 1
+
+//────────────────────────────────────────────────────────────────────
+// Supertrend direction filter
+//────────────────────────────────────────────────────────────────────
+[supertrendValue, direction] = ta.supertrend(factor, atrPeriod)
+supertrend = barstate.isfirst ? na : supertrendValue
+
+bullishFilter = direction < 0 and close > supertrend
+bearishFilter = direction > 0 and close < supertrend
+
+validBuy = prakashBuy and bullishFilter
+validSell = prakashSell and bearishFilter
+
+upTrend = plot(bullishFilter ? supertrend : na, "Bullish Supertrend", color=color.green, style=plot.style_linebr, linewidth=2)
+downTrend = plot(bearishFilter ? supertrend : na, "Bearish Supertrend", color=color.red, style=plot.style_linebr, linewidth=2)
+bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle", display=display.none)
+fill(bodyMiddle, upTrend, color=showBackground ? color.new(color.green, 90) : na, fillgaps=false)
+fill(bodyMiddle, downTrend, color=showBackground ? color.new(color.red, 90) : na, fillgaps=false)
+
+//────────────────────────────────────────────────────────────────────
+// One-percent risk sizing from entry price to Supertrend
+//────────────────────────────────────────────────────────────────────
+riskCash = strategy.equity * riskPercent / 100.0
+
+buyRiskDistance = close - supertrend
+buyCashRiskPerUnit = buyRiskDistance * syminfo.pointvalue
+buyRawQuantity = buyCashRiskPerUnit > 0 ? riskCash / buyCashRiskPerUnit : 0.0
+buyQuantity = math.floor(buyRawQuantity / quantityStep) * quantityStep
+buyQuantity := buyQuantity >= minimumQuantity ? buyQuantity : 0.0
+
+sellRiskDistance = supertrend - close
+sellCashRiskPerUnit = sellRiskDistance * syminfo.pointvalue
+sellRawQuantity = sellCashRiskPerUnit > 0 ? riskCash / sellCashRiskPerUnit : 0.0
+sellQuantity = math.floor(sellRawQuantity / quantityStep) * quantityStep
+sellQuantity := sellQuantity >= minimumQuantity ? sellQuantity : 0.0
+
+var float armedLongStop = na
+var float armedShortStop = na
+var float longStop = na
+var float shortStop = na
+var float longTarget = na
+var float shortTarget = na
+
+validBuyOrder = validBuy and buyRiskDistance > syminfo.mintick and buyQuantity > 0
+validSellOrder = validSell and sellRiskDistance > syminfo.mintick and sellQuantity > 0
+
+// An opposite Prakash signal always exits. If it is also Supertrend-aligned,
+// the opposite entry below reverses the position on the same closing bar.
+if strategy.position_size > 0 and prakashSell and not validSellOrder
+    strategy.close("Buy", comment="Opposite Prakash SELL", alert_message="BUY closed by opposite Prakash SELL")
+
+if strategy.position_size < 0 and prakashBuy and not validBuyOrder
+    strategy.close("Sell", comment="Opposite Prakash BUY", alert_message="SELL closed by opposite Prakash BUY")
+
+if validBuyOrder
+    armedLongStop := supertrend
+    strategy.entry("Buy", strategy.long, qty=buyQuantity, comment="Prakash BUY", alert_message="Prakash BUY aligned with bullish Supertrend")
+
+if validSellOrder
+    armedShortStop := supertrend
+    strategy.entry("Sell", strategy.short, qty=sellQuantity, comment="Prakash SELL", alert_message="Prakash SELL aligned with bearish Supertrend")
+
+newBuy = strategy.position_size > 0 and strategy.position_size[1] <= 0
+newSell = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if newBuy
+    longStop := armedLongStop
+    shortStop := na
+    shortTarget := na
+    actualRisk = strategy.position_avg_price - longStop
+    longTarget := actualRisk > 0 ? strategy.position_avg_price + actualRisk * riskReward : na
+
+if newSell
+    shortStop := armedShortStop
+    longStop := na
+    longTarget := na
+    actualRisk = shortStop - strategy.position_avg_price
+    shortTarget := actualRisk > 0 ? strategy.position_avg_price - actualRisk * riskReward : na
+
+if trailSupertrendStop and strategy.position_size > 0 and bullishFilter
+    longStop := na(longStop) ? supertrend : math.max(longStop, supertrend)
+
+if trailSupertrendStop and strategy.position_size < 0 and bearishFilter
+    shortStop := na(shortStop) ? supertrend : math.min(shortStop, supertrend)
+
+if strategy.position_size > 0 and not na(longStop) and not na(longTarget)
+    strategy.exit("Buy SL/TP", "Buy", stop=longStop, limit=longTarget, alert_message="BUY exited by Supertrend SL or 3R TP")
+
+if strategy.position_size < 0 and not na(shortStop) and not na(shortTarget)
+    strategy.exit("Sell SL/TP", "Sell", stop=shortStop, limit=shortTarget, alert_message="SELL exited by Supertrend SL or 3R TP")
+
+if strategy.position_size == 0
+    longStop := na
+    shortStop := na
+    longTarget := na
+    shortTarget := na
+
+//────────────────────────────────────────────────────────────────────
+// EMA 9, anchored VWAP, labels, and alerts
+//────────────────────────────────────────────────────────────────────
+quickEMA = ta.ema(close, 9)
+newAnchor = anchor == "Session" ? timeframe.change("1D") : anchor == "Week" ? timeframe.change("1W") : anchor == "Month" ? timeframe.change("1M") : timeframe.change("12M")
+vwapValue = ta.vwap(hlc3, newAnchor)
+
+plot(quickEMA, "EMA 9", color=color.green, linewidth=1)
+plot(vwapValue, "VWAP", color=color.red, linewidth=3)
+plot(strategy.position_size > 0 ? longStop : strategy.position_size < 0 ? shortStop : na, "Active Supertrend Stop", color=color.yellow, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longTarget : strategy.position_size < 0 ? shortTarget : na, "Active 3R Target", color=color.aqua, linewidth=2, style=plot.style_linebr)
+
+plotshape(showSignalLabels and validBuy, title="BUY", text="BUY", style=shape.labelup, textcolor=color.white, size=size.small, location=location.belowbar, color=color.green)
+plotshape(showSignalLabels and validSell, title="SELL", text="SELL", style=shape.labeldown, textcolor=color.white, size=size.small, location=location.abovebar, color=color.red)
+
+plot(riskCash, "Planned 1% Cash Risk", display=display.data_window)
+plot(validBuyOrder ? buyQuantity : validSellOrder ? sellQuantity : na, "Calculated Quantity", display=display.data_window)
+
+alertcondition(validBuy, "BUY", "Prakash BUY aligned with bullish Supertrend")
+alertcondition(validSell, "SELL", "Prakash SELL aligned with bearish Supertrend")
+alertcondition(strategy.position_size > 0 and prakashSell, "Exit BUY", "Opposite Prakash SELL signal")
+alertcondition(strategy.position_size < 0 and prakashBuy, "Exit SELL", "Opposite Prakash BUY signal")

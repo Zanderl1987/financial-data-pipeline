@@ -1,0 +1,36 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular", page 3
+# (items ranked ~47-69 in popularity order), enumerated 2026-08-12 to extend the
+# catalog after batch 1 (page 1) and batch 2 (page 2) were both exhausted.
+# Same sampling frame priority 1 per pre-registration amendment 2026-08-11 (b).
+# blitz_locked is already at the 2-per-author cap (hezSShJr, xx3enmiW collected
+# in batch 1) so both of its page-3 entries are pre-skipped.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE     = .pine + .meta.json in this directory
+#         SKIP-2PA = author already at the 2-per-author cap
+#         SKIP-LEN = too large to collect (>~300 line guideline)
+#         TODO     = next to collect
+#
+DONE     mZYK8jsg-Gold-Intraday-EMA-BB-VWAP-ATR-SL-TP-Session-Weekday-Filter :: suri14373 :: admitted (deprioritized, 14 params)
+SKIP-OF  IIYnM1eN-Walkerz :: harismunandartwd :: overfit to hardcoded absolute price levels (xau_res=4327.745 etc) + a narrow fixed date window (2026-08-07..2027-01-01), not a general strategy
+DONE     OHe7Umon-POLYMR-Supertrend-MACD-v1 :: prana_juana :: screened OUT (unconfirmed_htf, request.security 1H regime filter without [1] offset or isconfirmed gate)
+SKIP-2PA On7JaUut-Liquidity-Sweep-Tracker-Smart-Money-Stop-Hunts :: blitz_locked :: already at 2-per-author cap (hezSShJr, xx3enmiW)
+SKIP-BLK 8acpMXli-ABUKI-Legend-BUY-SELL-WITH-Supertrend-Filter :: abukiman300 :: 296 lines, near-total content-filter blocking even at 8-10 line chunks -- not worth the char-code-decode cost this close to the length ceiling
+DONE     QP8BueJd-ABUKI-BUY-SELL-Supertrend-Filter :: abukiman300 :: 2nd for this author, still within cap; screened OUT (intrabar_recalc, calc_on_order_fills=true)
+DONE     8iAYXXsS-Hyperliquid-Ready-Webhook-Strategy-Template :: PopsPineDev :: admitted (deprioritized, 13 params)
+SKIP-LEN Tbh1KPxq-EMA-25-68-BIST30-Futures :: newton61 :: 641 lines
+SKIP-LEN 8GIAFRcP-Follow-the-Money-v1-10 :: fju07 :: 460 lines
+DONE     Ras16L2w-bvol-early-entry :: bereg9020 :: admitted, manual override of unconfirmed_htf heuristic (request.security uses timeframe.period == chart TF, not an HTF -- no repaint risk)
+SKIP-LEN U3mcySX9-Technical-Summay-Crowd-Consensus-Lite-Triggon :: Triggon_ :: 516 lines
+SKIP-LEN tCKIm6og-Multi-Mean-Reversion-Strategy :: hamster-bot :: 446 lines
+DONE     xSLyyOwI-Sector-Rotation-Momentum-Framework :: AIScripts :: admitted, manual override of unconfirmed_htf heuristic (request.security uses timeframe.period == chart TF with explicit lookahead_off -- no repaint risk)
+DONE     zy1XmX8s-SSL-Channel-QQE-Strategy :: Pinechord :: admitted, clean (6 params)
+SKIP-LEN Jn7Vfu33-DNSE-VN301-MACD-Cross-Strategy :: DNSE :: 360 lines
+DONE     rliMxcaE-Multi-Engine-Strategy-Green-Optimized-Candlestick-Breakout :: Ron9000 :: screened OUT (intrabar_recalc, calc_on_every_tick=true)
+DONE     jcysZ6nI-MTF-SMA-Crossover-Strategy :: sandeep1223rana :: admitted, manual override of unconfirmed_htf heuristic (weekly request.security uses barmerge.gaps_off + lookahead_off, the standard safe MTF pattern; no [1] offset but no future leakage)
+SKIP-2PA EcEYc8ap-Gravity-Trend-ADX-Strength-Meter-Quality-Scored-DMI-System :: blitz_locked :: already at 2-per-author cap (hezSShJr, xx3enmiW)
+SKIP-LEN 9IoAQC1M-Zone-Flow-S-R-Strategy :: Awab_Hassan :: 1103 lines
+SKIP-BLK 0BcdTWoV-Sector-Rotation-Z-Score-Strategy :: ky_yule1010 :: 278 lines, ~20 params, heavy content-filter blocking past line 130 -- not worth per-line decode cost for a script that would be deprioritized anyway
+DONE     bQC4p98T-Combined-SHA-Strategy-Multi-MA-VWAP-EMA-Band-9-20-MA-Fill :: mayankbhatia979 :: admitted (deprioritized, 36 params); as-published source is incomplete past section 1 (section 3 "9/20 MA Fill" never implemented) but the strategy logic itself is complete
+DONE     RgAMIpig-RSI-30-65-Recovery-Strategy :: simups :: admitted, clean (3 params)
+SKIP-LEN 7nhfJUk1-MNQ-Bot-Backtest-v1 :: mohammedislam705 :: 320 lines
