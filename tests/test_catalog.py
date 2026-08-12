@@ -580,16 +580,18 @@ class TestDocumentedScriptsAreTracked:
             pytest.skip("not a git checkout")
         return {line.strip() for line in out.stdout.splitlines() if line.strip()}
 
-    @pytest.mark.parametrize("doc", DOCS)
-    def test_referenced_scripts_exist_and_are_tracked(self, doc):
-        import re
-
+    def _body(self, doc):
         path = os.path.join(REPO_ROOT, doc)
         if not os.path.exists(path):
             pytest.skip(f"{doc} absent")
         with open(path, encoding="utf-8") as f:
-            body = f.read()
+            return f.read()
 
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_referenced_scripts_exist_and_are_tracked(self, doc):
+        import re
+
+        body = self._body(doc)
         # Match scripts/<name>.py or scripts\<name>.py however it is quoted.
         referenced = {
             m.replace("\\", "/")
@@ -602,6 +604,38 @@ class TestDocumentedScriptsAreTracked:
         assert not broken, (
             f"{doc} points at script(s) git does not track: {broken}. "
             f"Either `git add` them or point the doc at the tracked equivalent."
+        )
+
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_referenced_notes_exist_and_are_tracked(self, doc):
+        """
+        Same defect, one file type over. "see SESSION_NOTES_<date>.md" is a
+        promise that the detail is somewhere retrievable; an untracked notes
+        file keeps that promise only on the machine that wrote it. Caught
+        2026-08-11 with SESSION_NOTES_2026-08-11.md, which four docs pointed at
+        while it existed nowhere but this clone.
+        """
+        import re
+
+        body = self._body(doc)
+        refs = {m.replace("\\", "/") for m in re.findall(r"[A-Za-z0-9_./\\-]+\.md", body)}
+
+        # Only in-repo references are ours to keep. A path whose first segment
+        # is a directory this repo does not have is a pointer at a sibling repo
+        # (e.g. earnings_sentiment_tool/EXPERT_BRIEF.md) and can never be
+        # tracked here -- flagging those would train people to ignore this test.
+        def in_repo(ref):
+            head = ref.split("/")[0]
+            return head == ref or os.path.isdir(os.path.join(REPO_ROOT, head))
+
+        referenced = {r for r in refs if in_repo(r)}
+        assert referenced, f"{doc}: no markdown references found -- regex likely stale"
+
+        tracked = self._tracked_files()
+        broken = sorted(r for r in referenced if r not in tracked)
+        assert not broken, (
+            f"{doc} points at markdown git does not track: {broken}. "
+            f"`git add` them, or the reference is dead for everyone but this clone."
         )
 
 
