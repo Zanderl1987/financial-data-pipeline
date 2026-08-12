@@ -1,4 +1,38 @@
-# TODO — 2026-08-05
+# TODO — 2026-08-11
+
+## Completed 2026-08-11 (see SESSION_NOTES_2026-08-11.md for detail)
+
+- [x] **Schwab OAuth refresh token re-established — DONE**: token had expired 2026-08-08
+      23:36 UTC, so 08-10/08-11 daily accumulator runs failed on all 4 `schwab_*` pipes.
+      Two chat-paste attempts burned the ~30s auth-code window (`invalid_grant`) — the fix
+      was `scripts\schwab_local_reauth.py` (local HTTPS listener on 127.0.0.1:8182,
+      persistent trusted cert under `%LOCALAPPDATA%\schwab_reauth\`, 1800s capture window)
+      launched fully detached under Task Scheduler (the bash tool kills child trees on
+      timeout). Zander logged in normally, the redirect auto-captured in-process. Token
+      stored: issued 2026-08-11 22:46 UTC, valid to 2026-08-18 22:46 UTC, live AAPL quote
+      verified. **Superseded same evening (`0b15a9e`): that script was untracked and has
+      been merged into `scripts\schwab_reauth.py` — use that one. It keeps the persistent
+      cert at the same trusted path and adds the expiry check the prototype lacked, whose
+      7-day cert would have expired 2026-08-18 and brought the TLS warning back.**
+- [x] **Data gap filled + HF re-synced**: `run_all.py --only prices,sector_etfs,
+      schwab_quotes,schwab_options,options_chain,schwab_intraday,schwab_movers` → 8 PASS /
+      0 FAIL (19 min). All tables back through 2026-08-11 (quotes 518 symbols, intraday
+      509, options 503 / 760k rows, movers 90). HF auto-sync: **185 tables, 106,042,710
+      rows, 3003.4 MB, verified remotely** → `ZanderL1337/financial-data-pipeline`.
+- [x] **`schwab_universe_backfill.py --incremental` added — DONE**: the full 27,759-symbol
+      universe pull is a one-shot backfill, NOT incremental — only the DJI-30 gets daily
+      updates. Added `--incremental --days N` (trailing window, date-stamped progress file
+      `schwab_universe_incremental_YYYY-MM-DD.json`) and `--skip-empty-from <progress.json>`
+      (seeds the ~1,616 known-dead OTC symbols so nightly runs skip them). Tested on a
+      5-symbol slice (11 trading days each, correct window) before scheduling.
+- [x] **Nightly full-universe refresh scheduled — `SchwabUniverseIncrementalPrices`** (daily
+      22:00): wrapper `%TEMP%\opencode\schwab_universe_incr.bat` chains backfill →
+      `curated.py --table prices` → `upload_huggingface.py`, logs to
+      `%TEMP%\opencode\schwab_universe_incr.{out,err}.log`. ~4h15m, finishes ~02:15 before
+      the 3 AM stage-1 / 9 AM accumulator. Gotcha: `schtasks` stores `%TEMP%` literally —
+      must pass the full expanded path. Requires valid token (expires 2026-08-18).
+      Documented in AUTOMATION.md. First full run fires tonight 22:00; can be triggered
+      early via `Start-ScheduledTask` if the 08-01→08-11 gap should close now.
 
 ## Completed 2026-08-07 (HF sync verification pass)
 
@@ -244,13 +278,12 @@
       `BLS_API_KEY` from `.env` if present). No further retry will help without it.
 - [ ] **Reddit/Comtrade/Census/USDA/AISStream** — all NO-DATA, all blocked purely on the user
       obtaining/renewing an API key or app registration (no code issue).
-- [ ] **Schwab OAuth re-login — PAUSED (2026-08-09)**: `tokens.db` refresh token expired;
-      every re-auth attempt failed because the ~30-second authorization-code window kept
-      getting blown by chat round-trip latency (user pastes code -> Claude exchanges it).
-      Found the right mechanism (`schwabdev.Client`/`Tokens` accept a `call_on_auth`
-      callback to bypass the blocking `input()` prompt) but the one workflow that's
-      worked before — Claude opens the Schwab login page in a browser tab, user logs in
-      there, pastes the redirect immediately — is blocked because the Claude-in-Chrome
-      extension reports "not connected." Next attempt: either get the extension
-      reconnected first, or have Zander run the OAuth flow directly in his own terminal
-      (no chat round-trip) and paste back within the window.
+- [x] **Schwab OAuth re-login — DONE (2026-08-11)**: `tokens.db` refresh token expired
+      2026-08-08 23:36 UTC. The ~30s authorization-code window was blown twice by chat
+      round-trip latency (paste code -> exchange). Resolved by a local HTTPS listener on the
+      app's callback URL (127.0.0.1:8182) that captures the browser redirect in-process
+      (milliseconds, well inside the window), launched detached under Task Scheduler so the
+      shell-tool tree-kill can't stop it. Token refreshed 2026-08-11 22:46 UTC, valid to
+      2026-08-18. (That listener lived in the untracked `scripts\schwab_local_reauth.py`;
+      **it is now `scripts\schwab_reauth.py`** — see the top of this file.) See SESSION_NOTES_2026-08-11.md for the
+      full flow + next-expiry checklist.
