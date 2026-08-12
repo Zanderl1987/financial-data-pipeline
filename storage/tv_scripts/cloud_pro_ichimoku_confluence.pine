@@ -1,0 +1,253 @@
+//@version=6
+strategy("Ichimoku Confluence Strategy", shorttitle="Ichimoku Confluence",
+     overlay=true, pyramiding=0, calc_on_every_tick=false,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     initial_capital=10000, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+// ============================================================================
+// TRADING MODE
+// ============================================================================
+grpMode = "Trading Mode"
+tradingMode = input.string("Long", "Direction", options=["Long", "Short", "Both"], group=grpMode)
+
+// ============================================================================
+// ICHIMOKU SETTINGS
+// ============================================================================
+grpIchi = "Ichimoku Settings"
+tenkanLen = input.int(9, "Tenkan-sen", group=grpIchi)
+kijunLen = input.int(26, "Kijun-sen", group=grpIchi)
+senkouLen = input.int(52, "Senkou Span B", group=grpIchi)
+displacement = input.int(26, "Displacement", group=grpIchi)
+
+// ============================================================================
+// SIGNAL STRENGTH SELECTORS
+// ============================================================================
+grpSigL = "Long Signals"
+entryLong = input.string("Strong + Neutral", "Entry Tier (Bullish)",
+     options=["Strong Only", "Strong + Neutral", "All (incl. Weak)"], group=grpSigL)
+exitLong = input.string("All (incl. Weak)", "Exit Tier (Bearish)",
+     options=["Strong Only", "Strong + Neutral", "All (incl. Weak)"], group=grpSigL)
+
+grpSigS = "Short Signals"
+entryShort = input.string("Strong + Neutral", "Entry Tier (Bearish)",
+     options=["Strong Only", "Strong + Neutral", "All (incl. Weak)"], group=grpSigS)
+exitShort = input.string("All (incl. Weak)", "Exit Tier (Bullish)",
+     options=["Strong Only", "Strong + Neutral", "All (incl. Weak)"], group=grpSigS)
+
+// ============================================================================
+// MULTI-TIMEFRAME FILTER
+// ============================================================================
+grpMTF = "Multi-Timeframe Filter"
+useMTF = input.bool(true, "Require HTF trend agreement", group=grpMTF)
+htf = input.timeframe("D", "Higher Timeframe", group=grpMTF)
+
+// ============================================================================
+// RISK MANAGEMENT
+// ============================================================================
+grpRisk = "Risk Management"
+stopMode = input.string("ATR", "Stop Mode", options=["Fixed %", "ATR", "None"], group=grpRisk)
+tpPct = input.float(0, "Take Profit % (Fixed mode)", minval=0, step=0.1, group=grpRisk)
+slPct = input.float(0, "Stop Loss % (Fixed mode)", minval=0, step=0.1, group=grpRisk)
+atrLen = input.int(14, "ATR Length", group=grpRisk)
+atrMultSL = input.float(1.5, "ATR Stop Multiplier", group=grpRisk)
+atrMultTP = input.float(3.0, "ATR Target Multiplier", group=grpRisk)
+
+// ============================================================================
+// POSITION SIZING
+// ============================================================================
+grpSize = "Position Sizing"
+sizingMode = input.string("Risk-Based (Stop Distance)", "Sizing Mode",
+     options=["Fixed % of Equity", "Risk-Based (Stop Distance)"], group=grpSize)
+riskPerTradePct = input.float(1.0, "Risk per Trade (% of equity)", minval=0.1, step=0.1,
+     tooltip="Only used in Risk-Based mode. E.g. 1% means a stopped-out trade loses ~1% of equity, regardless of stop width.", group=grpSize)
+equityPct = input.float(10, "Equity Allocation % (Fixed mode)", minval=1, step=1, group=grpSize)
+maxPositionPct = input.float(50, "Max Position Size (% of equity cap)", minval=1,
+     tooltip="Safety ceiling. Prevents oversized positions when the stop distance is very tight.", group=grpSize)
+useCloudScaling = input.bool(false, "Scale size by cloud thickness (confidence)", group=grpSize)
+cloudScaleMin = input.float(0.5, "Min Scale Factor", minval=0.1, step=0.1, group=grpSize)
+cloudScaleMax = input.float(1.5, "Max Scale Factor", minval=0.1, step=0.1, group=grpSize)
+
+// ============================================================================
+// VISUALS
+// ============================================================================
+grpVis = "Visuals"
+showTenkan = input.bool(false, "Show Tenkan Line", group=grpVis)
+showKijun = input.bool(false, "Show Kijun Line", group=grpVis)
+showChikou = input.bool(false, "Show Chikou Line", group=grpVis)
+showCloud = input.bool(true, "Show Cloud", group=grpVis)
+showTwist = input.bool(true, "Mark Kumo Twists", group=grpVis)
+showTable = input.bool(true, "Show Signal Dashboard", group=grpVis)
+showBG = input.bool(true, "Background Tint on Active Signal", group=grpVis)
+
+colorGreen = color.new(#26a65b, 0)
+colorRed = color.new(#d64541, 0)
+colorTenkan = color.new(#8e44ad, 0)
+colorKijun = color.new(#f39c12, 0)
+colorChikou = color.new(#2ecc71, 0)
+
+// ============================================================================
+// ICHIMOKU CALCULATIONS
+// ============================================================================
+donchian(len) => math.avg(ta.highest(len), ta.lowest(len))
+
+tenkan = donchian(tenkanLen)
+kijun = donchian(kijunLen)
+senkouA = math.avg(tenkan, kijun)
+senkouB = donchian(senkouLen)
+
+// Cloud actually sitting under the CURRENT bar (calculated `displacement` bars ago)
+cloudNowA = senkouA[displacement - 1]
+cloudNowB = senkouB[displacement - 1]
+cloudTop = math.max(cloudNowA, cloudNowB)
+cloudBot = math.min(cloudNowA, cloudNowB)
+cloudBullishNow = cloudNowA > cloudNowB
+
+// ============================================================================
+// MTF TREND
+// ============================================================================
+htfTenkan = request.security(syminfo.tickerid, htf, donchian(tenkanLen), lookahead=barmerge.lookahead_off)
+htfKijun = request.security(syminfo.tickerid, htf, donchian(kijunLen), lookahead=barmerge.lookahead_off)
+htfBullish = htfTenkan > htfKijun
+
+// ============================================================================
+// TK CROSS + STRENGTH CLASSIFICATION
+// ============================================================================
+bullCross = ta.crossover(tenkan, kijun)
+bearCross = ta.crossunder(tenkan, kijun)
+
+crossLevel = bullCross or bearCross ? tenkan : na
+
+strongBull = bullCross and crossLevel > cloudTop
+neutralBull = bullCross and crossLevel <= cloudTop and crossLevel >= cloudBot
+weakBull = bullCross and crossLevel < cloudBot
+
+strongBear = bearCross and crossLevel < cloudBot
+neutralBear = bearCross and crossLevel <= cloudTop and crossLevel >= cloudBot
+weakBear = bearCross and crossLevel > cloudTop
+
+tierMatch(tier, strong, neutral, weak) =>
+    tier == "Strong Only" ? strong :
+     tier == "Strong + Neutral" ? (strong or neutral) :
+     (strong or neutral or weak)
+
+longEntrySig = tierMatch(entryLong, strongBull, neutralBull, weakBull)
+longExitSig = tierMatch(exitLong, strongBear, neutralBear, weakBear)
+shortEntrySig = tierMatch(entryShort, strongBear, neutralBear, weakBear)
+shortExitSig = tierMatch(exitShort, strongBull, neutralBull, weakBull)
+
+mtfOkLong = not useMTF or htfBullish
+mtfOkShort = not useMTF or not htfBullish
+
+allowLong = tradingMode == "Long" or tradingMode == "Both"
+allowShort = tradingMode == "Short" or tradingMode == "Both"
+
+// ============================================================================
+// POSITION SIZE CALCULATION
+// ============================================================================
+atrVal = ta.atr(atrLen)
+equity = strategy.equity
+
+// Distance to stop in price terms — drives risk-based sizing regardless of stopMode chosen for the actual exit order
+sizingStopDistance = stopMode == "Fixed %" and slPct > 0 ? close * slPct / 100 : atrVal * atrMultSL
+
+riskAmount = equity * riskPerTradePct / 100
+qtyRiskBased = sizingStopDistance > 0 ? riskAmount / sizingStopDistance : na
+qtyFixedPct = (equity * equityPct / 100) / close
+qtyCap = (equity * maxPositionPct / 100) / close
+
+// Optional confidence scaling from cloud thickness relative to ATR (thick cloud = stronger zone = modestly larger size)
+cloudThicknessATR = atrVal > 0 ? math.abs(cloudNowA - cloudNowB) / atrVal : 1.0
+scaleFactor = useCloudScaling ? math.max(cloudScaleMin, math.min(cloudScaleMax, cloudThicknessATR)) : 1.0
+
+qtyRaw = sizingMode == "Risk-Based (Stop Distance)" ? qtyRiskBased : qtyFixedPct
+qtyFinal = na(qtyRaw) ? na : math.min(qtyRaw * scaleFactor, qtyCap)
+
+// ============================================================================
+// ENTRIES / EXITS
+// ============================================================================
+if allowLong and longEntrySig and mtfOkLong and strategy.position_size <= 0 and not na(qtyFinal) and qtyFinal > 0
+    strategy.entry("Long", strategy.long, qty=qtyFinal)
+
+if allowShort and shortEntrySig and mtfOkShort and strategy.position_size >= 0 and not na(qtyFinal) and qtyFinal > 0
+    strategy.entry("Short", strategy.short, qty=qtyFinal)
+
+if strategy.position_size > 0
+    if stopMode == "ATR"
+        strategy.exit("L Exit", "Long", stop=close - atrVal * atrMultSL, limit=close + atrVal * atrMultTP)
+    else if stopMode == "Fixed %"
+        slLevel = slPct > 0 ? strategy.position_avg_price * (1 - slPct / 100) : na
+        tpLevel = tpPct > 0 ? strategy.position_avg_price * (1 + tpPct / 100) : na
+        strategy.exit("L Exit", "Long", stop=slLevel, limit=tpLevel)
+    if longExitSig
+        strategy.close("Long", comment="Signal Exit")
+
+if strategy.position_size < 0
+    if stopMode == "ATR"
+        strategy.exit("S Exit", "Short", stop=close + atrVal * atrMultSL, limit=close - atrVal * atrMultTP)
+    else if stopMode == "Fixed %"
+        slLevel = slPct > 0 ? strategy.position_avg_price * (1 + slPct / 100) : na
+        tpLevel = tpPct > 0 ? strategy.position_avg_price * (1 - tpPct / 100) : na
+        strategy.exit("S Exit", "Short", stop=slLevel, limit=tpLevel)
+    if shortExitSig
+        strategy.close("Short", comment="Signal Exit")
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+plot(showTenkan ? tenkan : na, "Tenkan-sen", color=colorTenkan, linewidth=1)
+plot(showKijun ? kijun : na, "Kijun-sen", color=colorKijun, linewidth=1)
+plot(showChikou ? close : na, "Chikou Span", color=colorChikou, offset=-displacement, linewidth=1)
+
+pA = plot(showCloud ? senkouA : na, "Senkou A", color=color.new(colorGreen, 60), offset=displacement - 1)
+pB = plot(showCloud ? senkouB : na, "Senkou B", color=color.new(colorRed, 60), offset=displacement - 1)
+fill(pA, pB, color = senkouA > senkouB ? color.new(colorGreen, 88) : color.new(colorRed, 88), title="Kumo")
+
+twistUp = ta.crossover(senkouA, senkouB)
+twistDn = ta.crossunder(senkouA, senkouB)
+plotshape(showTwist and twistUp ? senkouB : na, "Bullish Twist Ahead", style=shape.circle,
+     location=location.absolute, color=colorGreen, size=size.tiny, offset=displacement - 1)
+plotshape(showTwist and twistDn ? senkouA : na, "Bearish Twist Ahead", style=shape.circle,
+     location=location.absolute, color=colorRed, size=size.tiny, offset=displacement - 1)
+
+plotshape(longEntrySig and allowLong, "Long Entry", style=shape.triangleup,
+     location=location.belowbar, color=colorGreen, size=size.small)
+plotshape(shortEntrySig and allowShort, "Short Entry", style=shape.triangledown,
+     location=location.abovebar, color=colorRed, size=size.small)
+
+bgColor = showBG ? (strategy.position_size > 0 ? color.new(colorGreen, 92) :
+     strategy.position_size < 0 ? color.new(colorRed, 92) : na) : na
+bgcolor(bgColor)
+
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+if showTable
+    var table dash = table.new(position.top_right, 2, 7, border_width=1)
+    if barstate.islast
+        table.cell(dash, 0, 0, "Ichimoku Dashboard", bgcolor=color.gray, text_color=color.white)
+        table.cell(dash, 1, 0, "", bgcolor=color.gray)
+
+        table.cell(dash, 0, 1, "Price vs Cloud")
+        table.cell(dash, 1, 1, close > cloudTop ? "Above" : close < cloudBot ? "Below" : "Inside",
+             bgcolor = close > cloudTop ? color.new(colorGreen,70) : close < cloudBot ? color.new(colorRed,70) : color.new(color.gray,70))
+
+        table.cell(dash, 0, 2, "Cloud Color")
+        table.cell(dash, 1, 2, cloudBullishNow ? "Bullish" : "Bearish",
+             bgcolor = cloudBullishNow ? color.new(colorGreen,70) : color.new(colorRed,70))
+
+        table.cell(dash, 0, 3, "TK State")
+        table.cell(dash, 1, 3, tenkan > kijun ? "Bullish" : "Bearish",
+             bgcolor = tenkan > kijun ? color.new(colorGreen,70) : color.new(colorRed,70))
+
+        table.cell(dash, 0, 4, "HTF Trend (" + htf + ")")
+        table.cell(dash, 1, 4, htfBullish ? "Bullish" : "Bearish",
+             bgcolor = htfBullish ? color.new(colorGreen,70) : color.new(colorRed,70))
+
+        table.cell(dash, 0, 5, "Position")
+        table.cell(dash, 1, 5, strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat",
+             bgcolor = color.new(color.blue, 80))
+
+        table.cell(dash, 0, 6, "Next Size (Risk " + str.tostring(riskPerTradePct) + "%)")
+        table.cell(dash, 1, 6, na(qtyFinal) ? "n/a" : str.tostring(qtyFinal, "#.####"),
+             bgcolor = color.new(color.blue, 80))

@@ -40,26 +40,42 @@ Line counts are read directly from the DOM (`monaco-editor` child count / 2) bef
 committing to the two-channel extraction, so the SKIP-LEN calls above cost one JS probe
 each, not a full collection attempt.
 
-## In-progress / left broken: `qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing`
+## Fixed: `qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing`
 
-Started but **not saved** — `reindent()` raised a line/indent mismatch (199 flat lines
-vs 202 JS-reported indent values) and the partial flat-text scratch file was already
-deleted by the follow-up `rm` before the mismatch could be debugged. The tab is still
-open on this script's Source code panel. Next session: re-run both extraction channels
-fresh (don't reuse this session's transcribed flat text — that's the likely error
-source, this is a 202-line script with several multi-line expressions, e.g. the
-`(not requireTwoCloses or ...) and` continuation lines, which are the easiest place to
-accidentally merge or split a line by hand) and diff line counts before calling
-`reindent()`.
+The line/indent mismatch (199 flat lines vs 202 indents) was root-caused: 4 places
+where the source has **two consecutive blank lines** before a `// ==== SECTION N ====`
+comment block collapsed to one blank line in the manually-transcribed flat text. Found
+by computing a per-line **non-whitespace character count** from the DOM (`Array.from
+(line.textContent).filter(ch => ch !== ' ' && ch.codePointAt(0) !== 160).length`) and
+diffing it against the same count per line of the transcribed flat file — this survives
+`get_page_text`'s interior-whitespace collapsing (which is cosmetic and harmless for
+Pine) while catching real dropped/merged lines (which are not). `pg_mcx_silver_long_v6`
+saved at 202 lines, admitted at Stage 1 for structure but **excluded** `unconfirmed_htf`
+— its `request.security` HTF call has `lookahead=barmerge.lookahead_off` (prevents
+future-bar leakage) but no `[1]`/`isconfirmed` guard against the current-forming-bar
+repaint, and it's an always-on entry gate, same pattern as `pdh_pdl_break_0dte`.
 
-## Roster state
+**Adopted going forward**: this non-whitespace-checksum step (indents array + per-line
+non-whitespace count, both pulled from the DOM in one or two JS calls, diffed against
+the transcribed flat file before ever calling `reindent()`) caught the last roster
+collection (`cloud_pro_ichimoku_confluence`, 253 lines) with zero mismatches on the
+first attempt. Worth doing by default for any script over ~150 lines.
 
-`storage/tv_scripts/_roster_strategies_popular_2026-08-12.txt` — 2 TODO remain:
-`qHftEnad` (above, needs a clean recollection) and `xx3enmiW-Cloud-Pro-Ichimoku-
-Confluence` (blitz_locked, 2nd for this author, still within cap). Everything else on
-the 23-entry roster is DONE, SKIP-LEN, or SKIP-2PA — this roster is nearly exhausted
-and Batch 2 will need fresh enumeration (Most popular / Trending, or the next page of
-Most popular) to keep collecting toward the 30-50 target.
+## Roster state: COMPLETE
+
+`storage/tv_scripts/_roster_strategies_popular_2026-08-12.txt` — **0 TODO remain**.
+`qHftEnad` (above) and `xx3enmiW-Cloud-Pro-Ichimoku-Confluence` (blitz_locked, 238
+boosts / 2696 views, 253 lines) were both collected and both **excluded**
+`unconfirmed_htf` — `xx3enmiW`'s HTF Tenkan/Kijun trend filter defaults to **on**
+(`useMTF = input.bool(true, ...)`) and gates every entry, same always-on-repaint
+pattern as the other two exclusions this session.
+
+Every entry on the 23-entry roster is now DONE, SKIP-LEN, or SKIP-2PA. Session total:
+**16 `.pine` files**, 14 admitted to Stage 2 (8 clean/deprioritized-on-params, plus
+`tradleware_hodl`/`tradleware_dca` flagged as barely-testable benchmarks) and 4
+excluded `unconfirmed_htf` (`rabiah6x`, `pdh_pdl_break_0dte`, `pg_mcx_silver_long_v6`,
+`cloud_pro_ichimoku_confluence`). Batch 2 will need fresh enumeration (Most popular /
+Trending, or the next page of Most popular) to keep collecting toward the 30-50 target.
 
 ## Other changes this session
 

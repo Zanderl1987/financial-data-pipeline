@@ -30,8 +30,8 @@ SKIP-LEN fgESdFcb :: zqzmvtonjz2567 :: 886 lines
 SKIP-2PA 6QxmcfIk :: zqzmvtonjz2567 :: 3rd by this author
 DONE     diZ8Oes6-EMA-Fib-Confluence-with-3-Targets-Trailing-v6 :: alanshospitality :: admitted (deprioritized, 11 params)
 SKIP-LEN lfk6Inrw-Cash-Account-Portfolio-Trend-System-v2 :: junseok_bong :: 345 lines
-TODO     qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing :: ipuneet ::
-TODO     xx3enmiW-Cloud-Pro-Ichimoku-Confluence :: blitz_locked :: 2nd for this author, still within cap
+DONE     qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing :: ipuneet :: screened OUT (unconfirmed_htf, always-on entry gate); collection needed 3 rounds to fix a transcription bug that dropped 4 double-blank-line separators, see SESSION_NOTES
+DONE     xx3enmiW-Cloud-Pro-Ichimoku-Confluence :: blitz_locked :: 2nd for this author, still within cap; screened OUT (unconfirmed_htf, HTF filter defaults on and gates every entry)
 
 # Yield note: unlike the Editors' picks frame (2 tradeable candidates out of 23),
 # every entry here carries strategy() entries and exits by construction. The binding

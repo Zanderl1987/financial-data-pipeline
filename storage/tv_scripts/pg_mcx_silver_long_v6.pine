@@ -1,0 +1,202 @@
+//@version=6
+strategy(
+     title = "PG MCX Silver Long V6 - MTF Momentum + Profit Trailing",
+     shorttitle = "MCX Silver",
+     overlay = true,
+     initial_capital = 1000000,
+     currency = currency.INR,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 50,
+     pyramiding = 2,
+     margin_long = 14.2857,
+     margin_short = 100,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.005,
+     slippage = 1,
+     process_orders_on_close = true,
+     calc_on_order_fills = true,
+     explicit_plot_zorder = true
+ )
+
+// ============================================================================
+// SECTION 1: USER INPUTS & CONFIGURATION
+// ============================================================================
+
+// --- Signal & Direction Inputs ---
+GRP_SIGNAL = "Signal / Direction Settings"
+tfSignal = input.timeframe("30", "Signal Timeframe (Blank = Chart Timeframe)", group = GRP_SIGNAL, tooltip = "Allows custom higher or lower timeframe signal generation.")
+vwmaLength = input.int(20, "VWMA Length", minval = 2, group = GRP_SIGNAL)
+rocLength = input.int(8, "ROC Length", minval = 1, group = GRP_SIGNAL)
+sdLength = input.int(20, "Standard Deviation Length", minval = 2, group = GRP_SIGNAL)
+
+// Exact signal condition toggles
+requireTwoCloses = input.bool(false, "Require 2 consecutive closes above VWMA", group = GRP_SIGNAL)
+requireSD1 = input.bool(true, "Require price above SD-1", group = GRP_SIGNAL)
+requireROC = input.bool(true, "Require ROC > 0", group = GRP_SIGNAL)
+
+// --- Risk Management Inputs ---
+GRP_RISK = "Risk Management & Trailing SL"
+emergencySL = input.float(1.5, "Emergency Stop Loss %", minval = 0.1, step = 0.1, group = GRP_RISK)
+useTrailing = input.bool(true, "Enable Profit Trailing Stop", group = GRP_RISK)
+trailActivation = input.float(0.5, "Trail Activation Profit %", minval = 0.05, step = 0.05, group = GRP_RISK)
+trailDistance = input.float(0.5, "Trailing Distance %", minval = 0.05, step = 0.05, group = GRP_RISK)
+
+// --- Cooldown Inputs ---
+GRP_COOLDOWN = "Cooldown Protocol"
+useCooldown = input.bool(true, "Enable 2-Loss Cooldown", group = GRP_COOLDOWN)
+cooldownHours = input.float(2.0, "Cooldown Duration (Hours)", minval = 0.5, step = 0.5, group = GRP_COOLDOWN)
+int maxPyramiding = input.int(1, "Max Pyramiding", minval=0)
+
+// ============================================================================
+// SECTION 2: INDICATOR CALCULATIONS (MTF COMPATIBLE)
+// ============================================================================
+
+f_calc_indicators(srcClose, lenVwma, lenRoc, lenSd) =>
+    _vwma = ta.vwma(srcClose, lenVwma)
+    _roc = ta.roc(srcClose, lenRoc)
+    _sd = ta.stdev(srcClose, lenSd)
+    _sdMinus1 = _vwma - _sd
+    _sdPlus1 = _vwma + _sd
+
+    _twoClosesAboveVWMA = srcClose > _vwma and srcClose[1] > _vwma[1]
+    _priceAboveSD1 = srcClose > _sdMinus1
+    _rocPositive = _roc > 0
+
+    _signal = (not requireTwoCloses or _twoClosesAboveVWMA) and
+              (not requireSD1 or _priceAboveSD1) and
+              (not requireROC or _rocPositive)
+
+    [_vwma, _sdMinus1, _sdPlus1, _signal]
+
+// Evaluate MTF security logic without lookahead bias
+[vwma, sdMinus1, sdPlus1, rawLongSignal] = request.security(
+     syminfo.tickerid,
+     tfSignal == "" ? timeframe.period : tfSignal,
+     f_calc_indicators(close, vwmaLength, rocLength, sdLength),
+     gaps = barmerge.gaps_off,
+     lookahead = barmerge.lookahead_off
+ )
+
+
+// ============================================================================
+// SECTION 3: COOLDOWN MANAGEMENT
+// ============================================================================
+
+var int consecutiveLosses = 0
+var int cooldownStartTime = na
+
+if ta.change(strategy.closedtrades) > 0
+    int lastTradeIndex = strategy.closedtrades - 1
+    float lastTradeProfit = strategy.closedtrades.profit(lastTradeIndex)
+
+    if lastTradeProfit < 0
+        consecutiveLosses += 1
+    else
+        consecutiveLosses := 0
+
+    if useCooldown and consecutiveLosses >= 2
+        cooldownStartTime := time
+
+int cooldownMs = int(cooldownHours * 60.0 * 60.0 * 1000.0)
+bool inCooldown = useCooldown and not na(cooldownStartTime) and (time < cooldownStartTime + cooldownMs)
+
+if useCooldown and not na(cooldownStartTime) and (time >= cooldownStartTime + cooldownMs)
+    cooldownStartTime := na
+    consecutiveLosses := 0
+
+
+// ============================================================================
+// SECTION 4: ENTRY & EXIT EXECUTION LOGIC
+// ============================================================================
+
+bool canEnter = math.abs(strategy.position_size) < maxPyramiding * 50 and rawLongSignal and not inCooldown
+
+if canEnter
+    strategy.entry("LONG", strategy.long)
+
+var float highestSinceEntry = na
+var bool trailingActive = false
+
+if strategy.position_size == 0
+    highestSinceEntry := na
+    trailingActive := false
+else
+    highestSinceEntry := na(highestSinceEntry) ? math.max(strategy.position_avg_price, high) : math.max(highestSinceEntry, high)
+    float activationPrice = strategy.position_avg_price * (1.0 + trailActivation / 100.0)
+
+    if useTrailing and highestSinceEntry >= activationPrice
+        trailingActive := true
+
+if strategy.position_size > 0
+    float emergencyStopPrice = strategy.position_avg_price * (1.0 - emergencySL / 100.0)
+    float trailingStopPrice = trailingActive ? highestSinceEntry * (1.0 - trailDistance / 100.0) : na
+
+    float finalStopPrice = trailingActive ? math.max(emergencyStopPrice, trailingStopPrice) : emergencyStopPrice
+
+    strategy.exit(
+         id = "Risk / Trailing Exit",
+         from_entry = "LONG",
+         stop = finalStopPrice
+     )
+
+
+// ============================================================================
+// SECTION 5: ALERT CONDITIONS
+// ============================================================================
+
+// Entry Alert
+bool alertEntry = canEnter
+alertcondition(alertEntry, title = "Alert: LONG Entry Signal", message = "MCX SILVER LONG ENTRY: Buy signal triggered @ {{close}}")
+
+// Trailing Activation Alert
+bool alertTrailActivated = strategy.position_size > 0 and trailingActive and not trailingActive[1]
+alertcondition(alertTrailActivated, title = "Alert: Trailing Stop Activated", message = "MCX SILVER: Profit Trailing Stop activated @ {{close}}")
+
+// Exit Alert (Emergency SL or Trailing Exit)
+bool alertExit = ta.change(strategy.closedtrades) > 0
+alertcondition(alertExit, title = "Alert: Position Closed (Exit / SL)", message = "MCX SILVER EXIT: Position closed via SL/Trailing Exit @ {{close}}")
+
+// Cooldown Trigger Alert
+bool cdChanged = ta.change(cooldownStartTime) != 0
+bool alertCooldownTriggered = useCooldown and (consecutiveLosses == 2) and cdChanged
+alertcondition(alertCooldownTriggered, title = "Alert: Cooldown Triggered", message = "MCX SILVER: 2 consecutive losses detected. Strategy entering cooldown.")
+
+
+// ============================================================================
+// SECTION 6: CHART VISUALIZATIONS
+// ============================================================================
+
+plot(vwma, title = "20 VWMA", color = color.new(#2196F3, 0), linewidth = 2)
+plot(sdPlus1, title = "SD+1", color = color.new(#009688, 30), linewidth = 1)
+plot(sdMinus1, title = "SD-1", color = color.new(#FF9800, 30), linewidth = 1)
+
+float activeTrailPlot = strategy.position_size > 0 and trailingActive ? (highestSinceEntry * (1.0 - trailDistance / 100.0)) : na
+plot(
+     activeTrailPlot,
+     title = "Trailing Stop",
+     color = color.new(color.red, 0),
+     linewidth = 2,
+     style = plot.style_linebr
+ )
+
+plotshape(
+     canEnter,
+     title = "LONG Entry Signal",
+     style = shape.triangleup,
+     location = location.belowbar,
+     color = color.green,
+     size = size.small,
+     text = "LONG"
+ )
+
+plotshape(
+     alertTrailActivated,
+     title = "Trailing Stop Activated",
+     style = shape.circle,
+     location = location.abovebar,
+     color = color.lime,
+     size = size.tiny,
+     text = "TR ACTIVE"
+ )
+
+bgcolor(rawLongSignal ? color.new(color.green, 76) : na, title = "Long Signal Background")
