@@ -116,7 +116,15 @@ def test_preflight_exits_2_without_prompting(tmp_path, state_setup, capsys):
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "SCHWAB AUTH REQUIRED" in err
-    assert "schwabdev.Client" in err  # the fix command is in the message
+    # The banner must name the SELF-VERIFYING script. It used to name a bare
+    # schwabdev.Client(...) one-liner, which returns normally whether or not a
+    # token was actually stored -- so a lost 30s code window looked exactly like
+    # success. scripts/daily_accumulators.ps1 also scrapes this line into its
+    # flag file, so the name here is what a human ends up reading.
+    assert "scripts\\schwab_reauth.py" in err
+    assert "schwabdev.Client" not in err, (
+        "the banner must not send anyone back to the silent one-liner"
+    )
 
 
 def test_message_is_ascii_only(tmp_path, capsys):

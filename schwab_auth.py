@@ -32,13 +32,16 @@ REFRESH_TOKEN_LIFETIME = datetime.timedelta(days=7)
 # that is about to be the last good one says so while it can still succeed.
 EXPIRY_WARNING_WINDOW = datetime.timedelta(hours=24)
 
+# This banner is the last thing anyone reads before renewing a token, so it has
+# to name the script that verifies its own work. It used to print a bare
+# `schwabdev.Client(...)` one-liner, which returns normally whether or not a
+# token was stored -- on 2026-08-11 a re-auth was believed to have succeeded
+# while tokens.db still held the token issued ten days earlier. Losing the ~30s
+# code window and winning it look identical through that one-liner.
+# scripts/schwab_reauth.py re-reads the store, proves refresh_token_issued
+# advanced, and spends one live quote call before claiming success.
 REAUTH_COMMAND = (
-    'C:\\ProgramData\\anaconda3\\python.exe -c '
-    '"import schwabdev, os; from dotenv import load_dotenv; load_dotenv(); '
-    "schwabdev.Client(app_key=os.environ['SCHWAB_API_KEY'], "
-    "app_secret=os.environ['SCHWAB_APP_SECRET'], "
-    "callback_url=os.environ.get('SCHWAB_CALLBACK_URL','https://127.0.0.1:8182'), "
-    "tokens_db=os.environ.get('SCHWAB_TOKEN_PATH','tokens.db'))\""
+    'C:\\ProgramData\\anaconda3\\python.exe scripts\\schwab_reauth.py'
 )
 
 

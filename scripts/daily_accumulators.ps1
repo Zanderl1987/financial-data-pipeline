@@ -39,7 +39,14 @@ if ($exit -eq 0) {
     $authNeeded = Select-String -Path $report -Pattern "SCHWAB AUTH REQUIRED" -Quiet
     if ($authNeeded) {
         $status = "FAIL (schwab re-auth needed)"
-        $reauth = (Select-String -Path $report -Pattern "schwabdev\.Client" | Select-Object -First 1).Line
+        # Scrape the remediation line out of the report so this stays in step with
+        # schwab_auth.REAUTH_COMMAND instead of duplicating it. Match on the script
+        # name; the previous pattern was "schwabdev\.Client", which silently yielded
+        # an EMPTY command the moment that banner stopped naming schwabdev -- a flag
+        # file whose whole purpose is to tell you what to run, telling you nothing.
+        # The literal fallback means that can never happen again.
+        $reauth = (Select-String -Path $report -Pattern "schwab_reauth\.py" | Select-Object -First 1).Line
+        if (-not $reauth) { $reauth = "`"$py`" scripts\schwab_reauth.py" }
         @(
             "Daily accumulator run FAILED on $stamp (exit=$exit) -- SCHWAB RE-AUTH REQUIRED.",
             "The Schwab refresh token expires every 7 days and renewing it is interactive.",
