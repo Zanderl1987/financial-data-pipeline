@@ -18,6 +18,30 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the layers fit
 together and [docs/PIPELINE_CATALOG.md](docs/PIPELINE_CATALOG.md) for what
 every pipeline pulls and which table it lands in.
 
+## What the signals actually look like
+
+Every evaluated signal lands in an append-only registry
+(`storage/eval_registry/results.parquet`), so results accumulate instead of being
+overwritten by whichever run looked best. Latest 5-day-horizon numbers:
+
+| Signal | Window | Observations | Pooled IC | IC t-stat | Long-short spread |
+|---|---|---:|---:|---:|---:|
+| `factor_composite` | 1990–2026 | 452,101 | 0.028 | 7.6 | +0.29% |
+| `factor_momentum` | 1990–2026 | 450,505 | 0.026 | 7.9 | +0.23% |
+| `factor_low_vol` | 1990–2026 | 452,101 | -0.020 | -3.2 | -0.23% |
+| `factor_value` | 2009–2026 | 148,935 | -0.004 | -2.0 | -0.11% |
+| `tv_rating_all` | 1990–2026 | 453,518 | -0.010 | -2.8 | -0.08% |
+| `factor_sentiment` | 2025–2026 | 6,934 | -0.029 | -2.3 | -0.24% |
+
+Read that table conservatively. An IC of 0.03 is small in absolute terms (normal for
+a cross-sectional equity factor, and nowhere near enough to trade on by itself), the
+spreads are gross of transaction costs, and `factor_sentiment` has about a year of
+history behind it, which is why it carries a low-sample warning in the framework
+rather than a conclusion. The more interesting result is the negative ones: this
+implementation of value and low-volatility points the wrong way over its sample, and
+the framework is built to report that rather than quietly re-specify until the sign
+flips.
+
 ## What's in here
 
 - **130+ curated tables** across equities, options, fundamentals, macro,
