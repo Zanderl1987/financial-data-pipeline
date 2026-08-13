@@ -8,8 +8,12 @@
 - [ ] REMINDER (deferred): revisit deleting the now-superseded `fix/data-integrity-and-secrets` branch once confident the ported fixes are complete.
 
 ## Verify (can't confirm locally)
-- [ ] shipping: confirm `HF_TOKEN` write-token secret is set on the ShippingDataPipeline repo — `collect.yml` HF-sync step (pushed as `6695730`) is gated on `env.HF_TOKEN != ''`, so a missing secret silently skips the sync.
-- [ ] freight-rail: re-run `upload_huggingface.py` — HF dataset (synced 8/9) is one run behind the local store (7 tables refreshed to 4,348,342 records on 8/10) and still lacks the motor-carrier-census table from the PR #1 merge.
+(none open)
+
+## Done (as of 2026-08-13 update pass)
+- [x] shipping: confirmed via `gh secret list` — `HF_TOKEN` IS set on the ShippingDataPipeline repo (alongside `AISSTREAM_API_KEY`, `EIA_API_KEY`), so `collect.yml`'s HF-sync step is not silently skipping.
+- [x] freight-rail: already resolved by other work before this pass — repo HEAD (`e5a00cf`, 2026-08-13) shows a BTS TransBorder backfill + HF re-sync landed same day; `data/hf_export/*.parquet` includes `motor_carrier_census.parquet` (16.0M). No action needed.
+- [x] consumer-goods: pulled 6 commits the local clone was behind on (fast-forward `3188590..4396b96`), committed + pushed the untracked 2026-08-12 verification session notes (`7e4713a`). All three repos (financial, consumer-goods, earnings_sentiment_tool) confirmed clean and synced with origin; hardware-pipeline also clean.
 
 ## Done (as of 2026-08-12 update pass)
 - [x] financial / TV catalog: **campaign committed to git** (`91be7d3`) — `strategies/` (collect.py + screen.py + tests), `storage/tv_scripts/` (6 .pine, 5 meta.json, both sampling rosters), the pre-registration + amendments, and session notes are now tracked. `boosted_moving_average.pine` deliberately left untracked (provenance gap, open decision). Also committed: the long-open "uncommitted local work" item is resolved — the dataset-card refresh (`c2fe2ad`); TODO.md / open_meteo_pipeline.py / hormuz experiments / test_open_meteo.py had already landed in earlier commits.
