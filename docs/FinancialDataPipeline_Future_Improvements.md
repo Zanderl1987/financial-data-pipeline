@@ -606,7 +606,7 @@ low priority now that three working sources exist.
 **Status:** Implemented 2026-07-29
 
 Scheduling half turned out to already exist (`ClaudeAuto-DailyAccumulators`, set up
-2026-07-06 per `AUTOMATION.md` — a full unattended `run_all.py` isn't feasible since
+2026-07-06 per `docs/AUTOMATION.md` — a full unattended `run_all.py` isn't feasible since
 Schwab OAuth is interactive, so the daily task deliberately targets just the
 permanent-gap accumulators: `tradingview`, `short_interest`, `finnhub_events`).
 
@@ -630,7 +630,7 @@ Originally scoped as a chunked year-by-year backfill loop against Finnhub's
 `/calendar/earnings`. Verified live before building: that endpoint accepts arbitrary
 `from`/`to` ranges without erroring, but the free tier only actually returns rows for a
 recent rolling window — 2026-01/04/05 all returned 0 rows, 2026-06 returned 37
-(stragglers), 2015/2020/2022/2023 all 0. This matches `AUTOMATION.md`'s 2026-07-23 note
+(stragglers), 2015/2020/2022/2023 all 0. This matches `docs/AUTOMATION.md`'s 2026-07-23 note
 that Finnhub's free tier "will not return earnings_calendar rows older than ~1 year even
 with `--backfill`" — a genuine dead end, not a code problem.
 
@@ -903,6 +903,6 @@ Scoping this out also surfaced and fixed two real bugs along the way — see ite
 
 **Acceptance run** (momentum + low_vol, full history, `registry.compare(
 allow_universe_mismatch=True)` against the watchlist baseline) — in progress; see
-`SESSION_NOTES.md`'s 2026-07-29 entry for the result once it completes.
+`docs/sessions/SESSION_NOTES.md`'s 2026-07-29 entry for the result once it completes.
 
 ---

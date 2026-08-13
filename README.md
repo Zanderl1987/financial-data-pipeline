@@ -110,6 +110,21 @@ See the wiring checklist in [CLAUDE.md](CLAUDE.md#adding-a-new-pipeline--wiring-
 SCHEMAS, `run_all.py` PipelineSpec, `curated.py` KEYS, and both catalog/
 pipeline test files, or it's invisible to the rest of the stack.
 
+## Testing
+
+```
+python -m pytest tests/ -v
+```
+
+761 tests. Beyond unit coverage, guard tests enforce the wiring checklist above —
+a pipeline that isn't registered in `query.py` CATALOG, `validate.py` SCHEMAS,
+`run_all.py`, and `curated.py` KEYS fails the suite rather than silently going
+missing from the query layer.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Further reading
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the layers fit together,
@@ -118,5 +133,5 @@ pipeline test files, or it's invisible to the rest of the stack.
   grouped by domain, with what it fetches and its required API key (if any).
 - [CLAUDE.md](CLAUDE.md) — operating manual: environment, commands, wiring
   checklist, hard-won gotchas, known-broken sources.
-- [EXPERT_BRIEF.md](EXPERT_BRIEF.md) — the judgment layer: prioritized
+- [docs/EXPERT_BRIEF.md](docs/EXPERT_BRIEF.md) — the judgment layer: prioritized
   roadmap and the reasoning behind it.

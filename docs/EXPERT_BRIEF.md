@@ -30,7 +30,7 @@ places:**
    The transcript-dataset incident (planned daily run silently never ran for a week)
    is the failure mode to design against: automation must *verify output grew*, not just
    execute. As of 2026-07-06 a weekly quality check is automated; the daily accumulator
-   run is specced but awaits Zander's go-ahead — see `AUTOMATION.md` at repo root.
+   run is specced but awaits Zander's go-ahead — see `docs/AUTOMATION.md` at repo root.
 2. **Schwab OAuth (user-interactive, ~5 min of Zander's time).** Blocks 4 built-but-
    unverified pipelines and the full-history depth probe. Highest unblock-per-minute in
    the repo. Trader API endpoints additionally need enabling at developer.schwab.com.

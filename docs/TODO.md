@@ -1,6 +1,6 @@
 # TODO — 2026-08-11
 
-## Completed 2026-08-11 (see SESSION_NOTES_2026-08-11.md for detail)
+## Completed 2026-08-11 (see docs/sessions/SESSION_NOTES_2026-08-11.md for detail)
 
 - [x] **Schwab OAuth refresh token re-established — DONE**: token had expired 2026-08-08
       23:36 UTC, so 08-10/08-11 daily accumulator runs failed on all 4 `schwab_*` pipes.
@@ -31,7 +31,7 @@
       `%TEMP%\opencode\schwab_universe_incr.{out,err}.log`. ~4h15m, finishes ~02:15 before
       the 3 AM stage-1 / 9 AM accumulator. Gotcha: `schtasks` stores `%TEMP%` literally —
       must pass the full expanded path. Requires valid token (expires 2026-08-18).
-      Documented in AUTOMATION.md. First full run fires tonight 22:00; can be triggered
+      Documented in docs/AUTOMATION.md. First full run fires tonight 22:00; can be triggered
       early via `Start-ScheduledTask` if the 08-01→08-11 gap should close now.
 
 ## Completed 2026-08-07 (HF sync verification pass)
@@ -84,7 +84,7 @@
       whether the 10:30/10:45 kill recurs tomorrow — if so it's a real scheduling
       conflict, not a one-off.
 
-## This Session (2026-08-05, see SESSION_NOTES_2026-08-05.md for detail)
+## This Session (2026-08-05, see docs/sessions/SESSION_NOTES_2026-08-05.md for detail)
 
 - [x] **HF `financial-fundamentals` expansion — research + design DONE (2026-08-05)**:
       live EDGAR probes found 2 gaps in `fundamentals_pipeline.py` — taxonomy gate
@@ -134,7 +134,7 @@
       `origin/master` (8 files, +894/-260). `.gitignore` now excludes
       `storage/hf_fundamentals_snapshot/` (regenerable; HF is authoritative).
 
-## Completed 2026-08-04 (see SESSION_NOTES_2026-08-04.md for detail)
+## Completed 2026-08-04 (see docs/sessions/SESSION_NOTES_2026-08-04.md for detail)
 
 - [x] **HuggingFace `financial-fundamentals` dataset refresh — DONE (2026-08-04)**: confirmed
       public via HF API; re-ran `fundamentals_pipeline.py --full-market --no-cache` (needed
@@ -181,7 +181,7 @@
       addressed all of them, re-review confirmed clean. 19 new tests, 0
       regressions (551/551 passing). Merged to `master` (`ae6b013`), worktree/branch
       cleaned up. Two open decisions surfaced to user, RESOLVED (2026-08-04, see
-      AUTOMATION.md "Two design questions resolved"): (1) verification depth stays
+      docs/AUTOMATION.md "Two design questions resolved"): (1) verification depth stays
       existence-check-only (HF's own upload commits are already hash-verified
       server-side); (2) `daily_accumulators.ps1` does NOT need `--no-hf-sync` — its
       3 pipelines produce genuinely new rows every day by design, so daily HF sync
@@ -196,9 +196,9 @@
       Scheduled Task `ClaudeAuto-FundamentalsHFRefresh`, weekly Sunday 8:00 AM
       (user chose weekly over daily/monthly — SEC filings don't change fast enough
       to justify daily ~1.3GB re-downloads; offset from the other two automations'
-      schedules). See AUTOMATION.md for full detail.
+      schedules). See docs/AUTOMATION.md for full detail.
 
-## Completed Prior Sessions (see SESSION_NOTES_2026-08-01.md / SESSION_NOTES_2026-08-03.md for detail)
+## Completed Prior Sessions (see docs/sessions/SESSION_NOTES_2026-08-01.md / docs/sessions/SESSION_NOTES_2026-08-03.md for detail)
 
 - [x] **FRED 9 broken series IDs** — already fixed in a prior session, undocumented; verified live.
 - [x] **OECD MEI pipeline rewrite** — already done 2026-07-29, undocumented; verified live.
@@ -208,7 +208,7 @@
 - [x] **`open_meteo_pipeline.py`** — not a bug; incremental mode works, backfill needs chunking (see Backlog).
 - [x] **Interactive backtest explorer (`backtest_app.py`) — MERGED (2026-08-03)**: new live
       Dash app on top of the existing `evaluation/` framework (see
-      `SESSION_NOTES_2026-08-03.md`, spec at `docs/superpowers/specs/
+      `docs/sessions/SESSION_NOTES_2026-08-03.md`, spec at `docs/superpowers/specs/
       2026-08-03-interactive-backtest-explorer-design.md`, plan at `docs/superpowers/
       plans/2026-08-03-interactive-backtest-explorer.md`). Built via subagent-driven
       development in an isolated worktree; 10/10 plan tasks complete, task review caught
@@ -241,12 +241,12 @@
       usage as unexpired. Fixed by promoting `scripts/av_earnings_pacing.ps1` from a
       one-time task to a real recurring Windows Scheduled Task
       `ClaudeAuto-AVEarningsPacing`, 10:45am (after TranscriptPull, not before). Also
-      fixed a stale cross-repo reference in PROJECT_NOTES.md that misnamed the
+      fixed a stale cross-repo reference in docs/PROJECT_NOTES.md that misnamed the
       AV-quota-sharing repo `custom_index_tool` (unrelated, FRED-only) instead of
       `earnings_sentiment_tool`. Still 9/30 DJI symbols and will keep reporting QUOTA
       most days until earnings_sentiment_tool's transcript cache completes (~08-06,
       per that repo's own ETA) and its daily pull becomes a zero-quota no-op — no
-      further action needed, this is expected and self-resolving. See AUTOMATION.md.
+      further action needed, this is expected and self-resolving. See docs/AUTOMATION.md.
 - [ ] **Patents pipeline rewrite** — blocked: need ODP API key from USPTO.gov account.
 
 ## Backlog
@@ -285,5 +285,5 @@
       (milliseconds, well inside the window), launched detached under Task Scheduler so the
       shell-tool tree-kill can't stop it. Token refreshed 2026-08-11 22:46 UTC, valid to
       2026-08-18. (That listener lived in the untracked `scripts\schwab_local_reauth.py`;
-      **it is now `scripts\schwab_reauth.py`** — see the top of this file.) See SESSION_NOTES_2026-08-11.md for the
+      **it is now `scripts\schwab_reauth.py`** — see the top of this file.) See docs/sessions/SESSION_NOTES_2026-08-11.md for the
       full flow + next-expiry checklist.

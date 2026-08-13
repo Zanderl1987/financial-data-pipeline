@@ -156,7 +156,7 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
 - **2026-08-05 schema change:** dataset converted from two long files to the 5-file
   Option-D snapshot (foreign issuers via `ifrs-full`, forms 20-F/40-F/6-K/10-K/A/10-Q/A/8-K,
   accession-tracked restatements). Old `financials_*_latest.parquet` filenames now hold the
-  WIDE latest-filing-wins tables. See `SESSION_NOTES_2026-08-05.md`.
+  WIDE latest-filing-wins tables. See `docs/sessions/SESSION_NOTES_2026-08-05.md`.
 - **Failure signal:** `FUNDAMENTALS_HF_FAIL.txt` appears at repo root if any of the four
   steps fails (pipeline crash, `curated.py` failure, `build_fundamentals_dataset.py` failure,
   or `verify_hf.py` VERIFY FAIL — stale data, row-count drop, excess duplicate rate, or

@@ -8,7 +8,7 @@ this doc is the narrative version.
 Legend: **Key** = required `.env` variable (blank = no key needed, either a
 fully public API or a scrape). "Snapshot-only" = the source has no history
 endpoint — the table only grows if the pipeline runs regularly (see
-`EXPERT_BRIEF.md` roadmap item 2 on accumulator continuity).
+`docs/EXPERT_BRIEF.md` roadmap item 2 on accumulator continuity).
 
 ## Equity prices & market history
 
@@ -176,7 +176,7 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 ## Known-broken / dead ends
 
 Don't re-attempt these without a genuinely new access path — see
-`CLAUDE.md` and `EXPERT_BRIEF.md` for the full reasoning:
+`CLAUDE.md` and `docs/EXPERT_BRIEF.md` for the full reasoning:
 
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything.
 - `usda_pipeline.py` — `USDA_NASS_API_KEY` returns 401 (needs a fresh key); `CENSUS_API_KEY` not set.

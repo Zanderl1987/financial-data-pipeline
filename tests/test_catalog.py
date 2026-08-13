@@ -568,7 +568,7 @@ class TestDocumentedScriptsAreTracked:
     locally; only git can tell you.
     """
 
-    DOCS = ["CLAUDE.md", "PROJECT_NOTES.md", "AUTOMATION.md"]
+    DOCS = ["CLAUDE.md", "docs/PROJECT_NOTES.md", "docs/AUTOMATION.md"]
 
     def _tracked_files(self):
         import subprocess

@@ -23,7 +23,7 @@ commands below rather than trusting this line if it looks stale.
   origin has moved). Happened 2026-07-30: a session pushed 2 commits (ETF holdings
   pipeline) while this clone was mid-session; the next session's `git status` looked like
   a clean "ahead 1" until `git push` was rejected. Merged fine (no file overlap) once
-  caught — see SESSION_NOTES_2026-07-30.md.
+  caught — see docs/sessions/SESSION_NOTES_2026-07-30.md.
 
 ## Commands
 
@@ -79,7 +79,7 @@ regenerable state, not git-synced**, matching `storage/raw/`.
 **Why**: a table's `location` is baked into its metadata at creation time as an
 absolute path. This machine has two clones of this repo (`PycharmProjects\
 financial-data-pipeline`, canonical, and a stale `C:\Users\zande\financial-data-
-pipeline`, see PROJECT_NOTES.md). `etf_holdings` was first created/populated from
+pipeline`, see docs/PROJECT_NOTES.md). `etf_holdings` was first created/populated from
 the other clone, then its small metadata files got git-committed and merged into
 this one — but the actual parquet data (gitignored, same as any raw table) never
 followed. The result: this clone's catalog *looked* fully populated (readable
@@ -90,7 +90,7 @@ into this clone, recreated the table here, then gitignored metadata everywhere s
 this failure mode can't recur). If you ever see an Iceberg table with real-looking
 snapshot history but `query.py`/`validate.py` reads zero rows, check
 `table.location()` via pyiceberg against the clone you're actually in before
-assuming the data is gone — see `SESSION_NOTES_2026-07-30.md` session 2 for the
+assuming the data is gone — see `docs/sessions/SESSION_NOTES_2026-07-30.md` session 2 for the
 full diagnostic trail.
 
 **Practical implications:**
@@ -167,7 +167,7 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   TLS warning; if the script reports it regenerated the cert (they expire), re-run the
   `certutil -addstore` line it prints or the warning comes back mid-window. Since the bash
   tool kills child trees on timeout, launch via Task Scheduler (`schtasks /create` +
-  `/run`, wrapper .bat captures logs) — see SESSION_NOTES_2026-08-11.md. Fallbacks:
+  `/run`, wrapper .bat captures logs) — see docs/sessions/SESSION_NOTES_2026-08-11.md. Fallbacks:
   `--paste` (prompt) and `--callback-url "<url>"` (non-interactive, for agent sessions
   where a stdin prompt hits EOF). Tests: `tests/test_schwab_reauth.py`.
   App has Market Data API only; Trader API (positions/transactions) 401s until enabled at
@@ -218,15 +218,15 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 
 ## Where deeper knowledge lives
 
-- `EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
+- `docs/EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
   traps, cross-repo synergy. **Read it before planning any substantial work here.**
-- `PROJECT_NOTES.md` — living project-state reference, updated in place (not
+- `docs/PROJECT_NOTES.md` — living project-state reference, updated in place (not
   append-only): active automations, verified hard API constraints/quotas, cross-repo
   dependencies. Check this before assuming a constraint is still true.
-- `CLAUDE_SESSION_NOTES.md` + `SESSION_NOTES_2026-07-03.md` — running session log with
+- `docs/sessions/CLAUDE_SESSION_NOTES.md` + `docs/sessions/SESSION_NOTES_2026-07-03.md` — running session log with
   per-pipeline API quirks (SimFin v3 codes, EDGAR 13F parsing, Pink Sheet URL rotation…).
-- `docs/` — source research notes. `FinancialDataPipeline_Future_Improvements.md` — roadmap.
-- `SHORT_INTEREST_SOURCES.md` — short-interest source comparison.
+- `docs/` — source research notes. `docs/FinancialDataPipeline_Future_Improvements.md` — roadmap.
+- `docs/SHORT_INTEREST_SOURCES.md` — short-interest source comparison.
 
 ## Open work (as of 2026-07-06)
 
@@ -247,7 +247,7 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 - Sentiment evaluation IN PROGRESS (2026-07-06 session 2, uncommitted): `sentiment_eval.py`
   (PIT-safe IC/spread harness) + `finnhub_pipeline.py --news-days N` (deep news backfill,
   5-day chunks). 365-day news pull was running when notes were written — see
-  SESSION_NOTES_2026-07-06.md session 2 for the remaining steps (score → curated → eval
+  docs/sessions/SESSION_NOTES_2026-07-06.md session 2 for the remaining steps (score → curated → eval
   baseline → then decide FinBERT vs lexicon tuning).
 - Deep backfills pending: FDIC financials (1992+), Fed SOMA (~2002+, slow), Schwab full
   price history (deferred until storage sized).
@@ -259,4 +259,4 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   `options_history`; `iv_summary` sources `schwab_options` → `options_chain` with column
   normalizer. Both return empty gracefully when no data. `iv_summary` will return results
   once Schwab OAuth lands chain data with `implied_volatility`. See
-  SESSION_NOTES_2026-07-12.md (design) and SESSION_NOTES_2026-07-16.md (implementation).
+  docs/sessions/SESSION_NOTES_2026-07-12.md (design) and docs/sessions/SESSION_NOTES_2026-07-16.md (implementation).
