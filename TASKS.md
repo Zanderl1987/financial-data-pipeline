@@ -2,7 +2,6 @@
 
 ## Needs action (blocked on user)
 - [ ] consumer-goods: obtain a **Best Buy API key** (`BESTBUY_API_KEY`) — the last genuinely-SKIPping pipeline. developer.bestbuy.com's signup rejects free/.edu email addresses; revisit when a non-free-provider email is available. Code is built + fully wired; activation is one `.env` line in `consumer-goods-price-pipeline`. See consumer-goods TODO.md "Deferred".
-- [ ] financial / TV catalog: decide the fate of `storage/tv_scripts/boosted_moving_average.pine` — it has no `.meta.json`, so no `tv_url`/`tv_author`/`collected_at`, and it's an `indicator()` (`@version=5`) that didn't come from the strategies sampling frame. Either re-collect it with provenance or drop it; it can't enter the catalog undocumented. (Still untracked in git, deliberately excluded from the campaign commit `91be7d3`.)
 - [ ] freight-rail: register `FRED_API_KEY` (fred.stlouisfed.org/docs/api/api_key.html) then run `freight-pipe run --sources fred` — the FRED source was built 8/9 but has never run against a real key. Also open: Freightos FBX signup, EIA/BLS/Census/UN Comtrade keys (see `US_DOMESTIC_FREIGHT_SOURCES.md`).
 - [ ] shipping: obtain `EIA_API_KEY`, `UN_COMTRADE_API_KEY`, `OILPRICEAPI_API_KEY` to finish the key-gated 0-row tables (`oil_inventories`, `trade_flow`, `oil_prices`/`freight_rates`).
 - [ ] REMINDER (deferred): revisit deleting the now-superseded `fix/data-integrity-and-secrets` branch once confident the ported fixes are complete.
@@ -14,6 +13,7 @@
 - [x] shipping: confirmed via `gh secret list` — `HF_TOKEN` IS set on the ShippingDataPipeline repo (alongside `AISSTREAM_API_KEY`, `EIA_API_KEY`), so `collect.yml`'s HF-sync step is not silently skipping.
 - [x] freight-rail: already resolved by other work before this pass — repo HEAD (`e5a00cf`, 2026-08-13) shows a BTS TransBorder backfill + HF re-sync landed same day; `data/hf_export/*.parquet` includes `motor_carrier_census.parquet` (16.0M). No action needed.
 - [x] consumer-goods: pulled 6 commits the local clone was behind on (fast-forward `3188590..4396b96`), committed + pushed the untracked 2026-08-12 verification session notes (`7e4713a`). All three repos (financial, consumer-goods, earnings_sentiment_tool) confirmed clean and synced with origin; hardware-pipeline also clean.
+- [x] financial / TV catalog: `storage/tv_scripts/boosted_moving_average.pine` deleted per Zander's explicit call — it was untracked, had no `.meta.json`, and never came from the strategies sampling frame.
 
 ## Done (as of 2026-08-12 update pass)
 - [x] financial / TV catalog: **campaign committed to git** (`91be7d3`) — `strategies/` (collect.py + screen.py + tests), `storage/tv_scripts/` (6 .pine, 5 meta.json, both sampling rosters), the pre-registration + amendments, and session notes are now tracked. `boosted_moving_average.pine` deliberately left untracked (provenance gap, open decision). Also committed: the long-open "uncommitted local work" item is resolved — the dataset-card refresh (`c2fe2ad`); TODO.md / open_meteo_pipeline.py / hormuz experiments / test_open_meteo.py had already landed in earlier commits.
