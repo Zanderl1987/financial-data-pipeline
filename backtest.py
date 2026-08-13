@@ -134,23 +134,17 @@ def backtest(
     start: "str | None" = None,
     end: "str | None" = None,
     cost_bps: float = 0.0,
+    spread_bps: float = 0.0,
+    borrow_fee_bps: float = 0.0,
+    slippage_model: "str | None" = None,
+    adv_impact_coeff: float = 0.1,
+    vol_target: "float | None" = None,
+    max_weight: "float | None" = None,
+    max_drawdown_stop: "float | None" = None,
 ) -> BacktestResult:
     """
-    Backtest a cross-sectional signal.
-
-    Parameters
-    ----------
-    signal      : DataFrame with columns [symbol, date, <score>]
-                  (e.g. the output of analytics.signal_panel)
-    score       : the score column to rank on (default 'composite')
-    price_table : price source override (default: auto-detect)
-    quantiles   : number of buckets; top bucket goes long (default 5 = quintiles)
-    rebalance   : 'D','W','M','Q' rebalance frequency (default monthly)
-    long_short  : long top / short bottom bucket (True) or long-only (False)
-    start, end  : restrict the backtest window
-    cost_bps    : round-trip transaction cost in basis points applied to turnover
-
-    Returns a BacktestResult.
+    Backtest a cross-sectional signal with advanced execution costs, risk controls,
+    and performance metrics.
     """
     if not {"symbol", "date", score}.issubset(signal.columns):
         raise ValueError(f"signal must have columns symbol, date, '{score}'")
@@ -179,16 +173,58 @@ def backtest(
     rebal_dates = _rebalance_dates(R.index, rebalance)
     target = _target_weights(scores_wide, rebal_dates, quantiles, long_short)
 
+    # Position sizing cap constraint (max_weight)
+    if max_weight is not None and max_weight > 0:
+        target = target.clip(lower=-abs(max_weight), upper=abs(max_weight))
+
     # Daily weights: hold each rebalance's target until the next; lag one day so
     # weights set using info at date t earn returns from t+1.
     weights = (target.reindex(R.index).ffill().fillna(0.0)).shift(1).fillna(0.0)
 
+    # Dynamic Volatility Targeting
+    if vol_target is not None and vol_target > 0:
+        raw_gross = (weights * R).sum(axis=1)
+        # shift(1): today's scale must come from vol estimated through
+        # yesterday's close, not today's own (not-yet-realized) return.
+        rolling_vol = (raw_gross.rolling(window=21, min_periods=5).std() * np.sqrt(_ANN)).shift(1)
+        scale = (vol_target / rolling_vol).replace([np.inf, -np.inf], 1.0).fillna(1.0).clip(upper=2.0)
+        weights = weights.mul(scale, axis=0)
+
+    # Execute daily gross return
     gross = (weights * R).sum(axis=1)
 
-    # Transaction costs: turnover (sum of absolute weight changes) * cost.
+    # Transaction & execution costs: turnover * (cost_bps + half_spread_bps)
     turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
-    costs = turnover * (cost_bps / 1e4)
+    effective_cost_bps = cost_bps + (spread_bps / 2.0)
+    costs = turnover * (effective_cost_bps / 1e4)
+
+    # Short borrow fees (annualized bps -> daily per unit short position)
+    if borrow_fee_bps > 0:
+        short_exposure = weights.clip(upper=0.0).abs().sum(axis=1)
+        costs = costs + short_exposure * (borrow_fee_bps / (1e4 * _ANN))
+
+    # Market impact model (square-root impact based on weight change)
+    if slippage_model == "sqrt_impact" and adv_impact_coeff > 0:
+        impact = turnover.pow(0.5) * (adv_impact_coeff / 1e4)
+        costs = costs + impact
+
     net = gross - costs
+
+    # Portfolio Drawdown Circuit Breaker
+    if max_drawdown_stop is not None and max_drawdown_stop > 0:
+        equity_tmp = (1.0 + net).cumprod()
+        peak_tmp = equity_tmp.cummax()
+        dd_tmp = equity_tmp / peak_tmp - 1.0
+        stopped_out = dd_tmp < -abs(max_drawdown_stop)
+        if stopped_out.any():
+            # The breach is only knowable at the close of the day it happens,
+            # so that day's already-realized return must stand -- flattening
+            # starts the following trading day, not stop_idx itself (zeroing
+            # stop_idx would retroactively erase a loss with foresight).
+            stop_pos = net.index.get_loc(stopped_out.idxmax())
+            if stop_pos + 1 < len(net):
+                net.iloc[stop_pos + 1:] = 0.0
+                weights.iloc[stop_pos + 1:] = 0.0
 
     equity = (1.0 + net).cumprod()
 
@@ -196,11 +232,15 @@ def backtest(
     bench_ret = R.mean(axis=1).fillna(0.0)
     benchmark = (1.0 + bench_ret).cumprod()
 
-    metrics = _compute_metrics(net, equity, benchmark, bench_ret, weights, turnover, long_short)
+    metrics = _compute_metrics(net, equity, benchmark, bench_ret, weights, turnover, long_short, start, end)
 
     params = {
         "price_table": pt, "score": score, "quantiles": quantiles,
         "rebalance": rebalance, "long_short": long_short, "cost_bps": cost_bps,
+        "spread_bps": spread_bps, "borrow_fee_bps": borrow_fee_bps,
+        "slippage_model": slippage_model or "none",
+        "vol_target": vol_target, "max_weight": max_weight,
+        "max_drawdown_stop": max_drawdown_stop,
         "n_symbols": len(symbols), "n_days": len(net),
         "start": str(R.index.min().date()), "end": str(R.index.max().date()),
     }
@@ -224,7 +264,10 @@ def _ann_metrics(ret: pd.Series, equity: pd.Series) -> dict:
             "max_drawdown_pct": round(100 * _max_drawdown(equity), 2)}
 
 
-def _compute_metrics(net, equity, benchmark, bench_ret, weights, turnover, long_short) -> dict:
+def _compute_metrics(net, equity, benchmark, bench_ret, weights, turnover, long_short,
+                     start=None, end=None) -> dict:
+    from evaluation import stats as ev_stats
+
     m = _ann_metrics(net, equity)
     b = _ann_metrics(bench_ret, benchmark)
     m["benchmark_cagr_pct"] = b.get("cagr_pct")
@@ -234,7 +277,32 @@ def _compute_metrics(net, equity, benchmark, bench_ret, weights, turnover, long_
                             else None)
     m["hit_rate_pct"] = round(100 * float((net > 0).mean()), 1) if len(net) else None
     m["avg_turnover"] = round(float(turnover[turnover > 0].mean()), 3) if (turnover > 0).any() else 0.0
+
+    # Risk & Ratio Extensions
+    sortino_res = ev_stats.sortino_ratio(net)
+    m["sortino"] = sortino_res.get("sortino")
+
+    calmar_res = ev_stats.calmar_ratio(m.get("cagr_pct"), m.get("max_drawdown_pct"))
+    m["calmar"] = calmar_res.get("calmar")
+
+    omega_res = ev_stats.omega_ratio(net)
+    m["omega"] = omega_res.get("omega")
+
+    var_res = ev_stats.value_at_risk(net)
+    m["var_95_pct"] = var_res.get("var_95_pct")
+
+    cvar_res = ev_stats.conditional_var(net)
+    m["cvar_95_pct"] = cvar_res.get("cvar_95_pct")
+
+    gtp_res = ev_stats.gain_to_pain_ratio(net)
+    m["gain_to_pain"] = gtp_res.get("gain_to_pain")
+
+    ff_res = ev_stats.fama_french_factor_attribution(net, start=start, end=end)
+    m["ff_alpha_ann"] = ff_res.get("ff_alpha_ann")
+    m["ff_r_squared"] = ff_res.get("ff_r_squared")
+
     active = weights.iloc[-1]
     m["n_long"] = int((active > 0).sum())
     m["n_short"] = int((active < 0).sum())
     return m
+

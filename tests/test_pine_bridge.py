@@ -109,3 +109,15 @@ def test_all_collected_scripts_load_without_error(pine_path):
     assert rule.name
     assert callable(rule.entries)
     assert callable(rule.exits)
+
+
+# ------------------------------------------------------------ evaluation.adapters wiring
+
+def test_from_pine_script_delegates_to_load_pine_script_rule():
+    """evaluation.adapters.from_pine_script() is the evaluate.py-facing entry
+    point onto this module -- previously had zero call sites and zero
+    coverage (see SESSION_NOTES_2026-08-12_tv-catalog.md session 7)."""
+    from evaluation.adapters import from_pine_script
+
+    rule = from_pine_script("rgamipig_rsi_30_65_recovery_strategy")
+    assert rule.name == "pine_rsi_14_30.0_65.0"

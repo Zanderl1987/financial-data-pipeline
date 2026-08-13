@@ -312,6 +312,47 @@ class TestCharts:
         assert list(fig.data[0].y) == [200.0, 150.0]
 
 
+class TestRenderRiskCard:
+    def test_renders_all_metric_labels(self):
+        metrics = {
+            "sortino": 1.2, "calmar": 0.8, "omega": 1.5,
+            "var_95_pct": 3.1, "cvar_95_pct": 4.5, "gain_to_pain": 2.0,
+            "ff_alpha_ann": 1.1, "ff_r_squared": 0.42,
+        }
+        div = ba.render_risk_card(metrics)
+        assert isinstance(div, ba.html.Div)
+        assert len(div.children) == 8   # one card per metric
+
+    def test_missing_metrics_render_as_na_without_raising(self):
+        div = ba.render_risk_card({})
+        assert isinstance(div, ba.html.Div)
+        assert len(div.children) == 8
+
+
+class TestParameterHeatmapFig:
+    def test_builds_heatmap_from_simulate_live(self, monkeypatch):
+        calls = []
+
+        def fake_simulate_live(name, run_id, bull, exit_long, bear, exit_short):
+            calls.append((bull, exit_long))
+            return None, {"total_pnl_dollars": bull * 100}
+
+        monkeypatch.setattr(ba, "simulate_live", fake_simulate_live)
+        fig = ba.parameter_heatmap_fig("tv_threshold", "run1")
+        assert isinstance(fig, go.Figure)
+        assert len(calls) == 25   # 5x5 grid
+        z = fig.data[0].z
+        assert z.shape == (5, 5)
+
+    def test_simulate_live_error_degrades_to_zero_cell(self, monkeypatch):
+        def raising_simulate_live(*a, **k):
+            raise RuntimeError("no trade rule for this signal")
+
+        monkeypatch.setattr(ba, "simulate_live", raising_simulate_live)
+        fig = ba.parameter_heatmap_fig("unknown_signal", "run1")
+        assert (fig.data[0].z == 0.0).all()
+
+
 class TestLayout:
     def test_builds_with_empty_registry(self):
         div = ba.build_layout([])

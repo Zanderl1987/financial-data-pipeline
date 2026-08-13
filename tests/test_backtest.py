@@ -95,3 +95,97 @@ class TestValidation:
         df = pd.DataFrame({"symbol": ["A"], "date": ["2024-01-01"]})
         with pytest.raises(ValueError):
             bt.backtest(df, score="composite")
+
+
+class TestExecutionCostsAndRiskControls:
+    """Covers the added spread/borrow-fee/slippage cost models and the
+    vol-target/max-weight/max-drawdown-stop risk controls -- including
+    regression tests for two look-ahead bugs found and fixed in this module:
+    the drawdown circuit breaker was zeroing the breach day's own
+    already-realized return (foresight), and the vol-target scale for day t
+    was computed from a rolling window that included day t's own return."""
+
+    def _single_symbol_signal(self, dates):
+        """Two symbols, A always outranks B (composite 1.0 vs 0.0) and
+        quantiles=1/long_short=False picks exactly the top-1 bucket -> A's
+        weight is always 1.0, B's is always 0.0, once the daily
+        rebalance/shift settles. (_target_weights requires n>=2 symbols to
+        form any bucket at all, so a true single-symbol universe always
+        yields all-zero weights -- not usable for these tests.)"""
+        n = len(dates)
+        return pd.DataFrame({
+            "symbol": ["A", "B"] * n,
+            "date": np.repeat(dates, 2),
+            "composite": [1.0, 0.0] * n,
+        })
+
+    def test_borrow_fee_bps_does_not_crash_and_increases_cost(self, monkeypatch):
+        """Regression: DataFrame.applymap was removed in pandas 3.0; the
+        original implementation crashed with AttributeError whenever
+        borrow_fee_bps > 0 and any weight was negative (i.e. any short)."""
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        syms = ["A", "B"]
+        R = pd.DataFrame(0.001, index=dates, columns=syms)
+        sig = pd.DataFrame({
+            "symbol": syms * len(dates),
+            "date": np.repeat(dates, 2),
+            "composite": [1.0, -1.0] * len(dates),
+        })
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+
+        baseline = bt.backtest(sig, rebalance="D", quantiles=2, long_short=True)
+        with_fee = bt.backtest(sig, rebalance="D", quantiles=2, long_short=True,
+                               borrow_fee_bps=500.0)
+        assert with_fee.metrics["total_return_pct"] < baseline.metrics["total_return_pct"]
+
+    def test_max_weight_caps_target_before_shift(self, monkeypatch):
+        dates = pd.bdate_range("2024-01-01", periods=10)
+        R = pd.DataFrame(0.0, index=dates, columns=["A", "B"])
+        sig = self._single_symbol_signal(dates)
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        res = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          max_weight=0.3)
+        assert (res.weights["A"].abs() <= 0.3 + 1e-9).all()
+
+    def test_drawdown_circuit_breaker_preserves_breach_day_return(self, monkeypatch):
+        dates = pd.bdate_range("2024-01-01", periods=20)
+        R = pd.DataFrame(0.0, index=dates, columns=["A", "B"])
+        R.iloc[5, 0] = -0.30   # single sharp drop well past a 20% stop
+        sig = self._single_symbol_signal(dates)
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+
+        res = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          max_drawdown_stop=0.20)
+
+        # The breach day's own loss must stand -- it was already realized by
+        # the close of that day, before the breach could be detected.
+        assert res.returns.iloc[5] == pytest.approx(-0.30, abs=1e-6)
+        # Every day AFTER the breach is flattened.
+        assert (res.returns.iloc[6:] == 0.0).all()
+        assert (res.weights.iloc[6:]["A"] == 0.0).all()
+
+    def test_vol_target_scale_excludes_same_day_return(self, monkeypatch):
+        """A single huge one-day move must not change that same day's own
+        position size -- vol targeting can only react to it starting the
+        next day, once the rolling estimate has actually seen it."""
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B"])
+        R.iloc[10, 0] = 0.50   # one huge outlier day
+        sig = self._single_symbol_signal(dates)
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+
+        res = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          vol_target=0.10)
+        w = res.weights["A"]
+
+        # The scale on the outlier day itself is computed from the flat,
+        # low-vol pre-outlier window (same shape as the day before) -- it
+        # must not already reflect the outlier it's coincident with.
+        assert w.iloc[10] == pytest.approx(w.iloc[9], rel=0.05)
+        # The day AFTER, the rolling window has now seen the outlier and the
+        # vol estimate jumps, sharply scaling the position down.
+        assert w.iloc[11] < w.iloc[10] * 0.5

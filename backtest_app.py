@@ -15,6 +15,7 @@ Usage
 
 import dash
 from dash import dcc, html, Input, Output
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -239,6 +240,57 @@ def cumulative_pnl_fig(trades_df: "pd.DataFrame") -> "go.Figure | None":
     return fig
 
 
+def render_risk_card(metrics: dict) -> "html.Div":
+    """Render advanced risk metrics and factor attribution card."""
+    items = [
+        ("Sortino Ratio", metrics.get("sortino")),
+        ("Calmar Ratio", metrics.get("calmar")),
+        ("Omega Ratio", metrics.get("omega")),
+        ("VaR (95%)", f"{metrics.get('var_95_pct')}%" if metrics.get("var_95_pct") is not None else None),
+        ("CVaR (95%)", f"{metrics.get('cvar_95_pct')}%" if metrics.get("cvar_95_pct") is not None else None),
+        ("Gain-to-Pain", metrics.get("gain_to_pain")),
+        ("FF Alpha (ann)", f"{metrics.get('ff_alpha_ann')}%" if metrics.get("ff_alpha_ann") is not None else None),
+        ("FF R²", metrics.get("ff_r_squared")),
+    ]
+    cards = []
+    for label, val in items:
+        display_val = "n/a" if val is None else str(val)
+        cards.append(html.Div([
+            html.Div(label, style={"fontSize": "12px", "color": "#666"}),
+            html.Div(display_val, style={"fontSize": "16px", "fontWeight": "bold", "marginTop": "2px"}),
+        ], style={
+            "border": "1px solid #ddd", "borderRadius": "4px", "padding": "8px 12px",
+            "minWidth": "110px", "textAlign": "center", "backgroundColor": "#f9f9f9"
+        }))
+    return html.Div(cards, style={"display": "flex", "flexWrap": "wrap", "gap": "10px", "marginTop": "15px"})
+
+
+def parameter_heatmap_fig(name: str, run_id: str) -> go.Figure:
+    """2D Parameter Sensitivity Heatmap (Bull Entry vs. Exit Long)."""
+    bull_range = np.linspace(0.2, 0.8, 5)
+    exit_range = np.linspace(-0.2, 0.4, 5)
+    z = np.zeros((len(exit_range), len(bull_range)))
+
+    for j, b in enumerate(bull_range):
+        for i, e in enumerate(exit_range):
+            try:
+                _, summary = simulate_live(name, run_id, float(b), float(e), -0.5, -0.1)
+                z[i, j] = summary.get("total_pnl_dollars", 0.0)
+            except Exception:
+                z[i, j] = 0.0
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z, x=[round(b, 2) for b in bull_range], y=[round(e, 2) for e in exit_range],
+        colorscale="Viridis"
+    ))
+    fig.update_layout(
+        title="Parameter Sensitivity: Bull Entry vs Exit Long P&L ($)",
+        xaxis_title="Bull Entry Threshold", yaxis_title="Exit Long Threshold",
+        height=340
+    )
+    return fig
+
+
 from generate_eval_report import _ic_by_horizon, _spread_with_ci, _regimes, _trades_fig
 
 SLIDER_MIN, SLIDER_MAX, SLIDER_STEP = -1.0, 1.0, 0.05
@@ -248,6 +300,7 @@ def _slider(id_, value):
     return dcc.Slider(id=id_, min=SLIDER_MIN, max=SLIDER_MAX, step=SLIDER_STEP,
                       value=value, updatemode="mouseup",
                       marks={-1: "-1", 0: "0", 1: "1"})
+
 
 
 def build_layout(signals: "list[dict]") -> "html.Div":
@@ -262,6 +315,7 @@ def build_layout(signals: "list[dict]") -> "html.Div":
             html.Button("Refresh", id="refresh-button", n_clicks=0),
             html.Div(id="run-banner"),
         ]),
+        dcc.Loading(html.Div(id="risk-card-container")),
         html.Div([
             dcc.Loading(html.Div(id="ic-panel")),
             html.Div([
@@ -277,6 +331,7 @@ def build_layout(signals: "list[dict]") -> "html.Div":
             dcc.Loading(dcc.Graph(id="symbol-fig")),
         ]),
         dcc.Loading(dcc.Graph(id="pnl-fig")),
+        dcc.Loading(dcc.Graph(id="heatmap-fig")),
         dcc.Store(id="signal-store"),
     ])
 
@@ -295,13 +350,14 @@ def register_callbacks(app: "dash.Dash") -> None:
     @app.callback(
         Output("signal-store", "data"), Output("run-banner", "children"),
         Output("ic-panel", "children"), Output("symbol-dropdown", "options"),
+        Output("risk-card-container", "children"),
         Input("signal-dropdown", "value"), Input("refresh-button", "n_clicks"))
     def _on_signal_change(name, _n_clicks):
         if not name:
-            return None, "no evaluated signals yet", [], []
+            return None, "no evaluated signals yet", [], [], None
         loaded = load_signal(name)
         if "error" in loaded:
-            return None, loaded["error"], [], []
+            return None, loaded["error"], [], [], None
         meta = loaded["meta"]
         banner = (f'{meta.get("run_id")} - {meta.get("date_range")} - '
                  f'loaded {pd.Timestamp.now():%H:%M:%S}')
@@ -315,12 +371,13 @@ def register_callbacks(app: "dash.Dash") -> None:
                 banner += (f' [WARNING: live universe has {len(cache)} symbols, '
                           f'recorded run had {recorded_n} -- live vs baseline '
                           f'numbers may not be directly comparable]')
+        risk_card = render_risk_card(loaded["results"].get("summary", {}))
         return ({"name": name, "run_id": run_id, "results": loaded["results"]}, banner,
-               _render_ic_panel(meta, loaded["results"], loaded["trades"]), symbol_options)
+               _render_ic_panel(meta, loaded["results"], loaded["trades"]), symbol_options, risk_card)
 
     @app.callback(
         Output("trade-summary", "children"), Output("symbol-fig", "figure"),
-        Output("pnl-fig", "figure"),
+        Output("pnl-fig", "figure"), Output("heatmap-fig", "figure"),
         Input("signal-store", "data"), Input("bull-min", "value"),
         Input("exit-long-max", "value"), Input("bear-max", "value"),
         Input("exit-short-min", "value"), Input("symbol-dropdown", "value"))
@@ -328,9 +385,9 @@ def register_callbacks(app: "dash.Dash") -> None:
                           exit_short_min, symbol):
         empty_fig = go.Figure()
         if not store:
-            return "select a signal", empty_fig, empty_fig
+            return "select a signal", empty_fig, empty_fig, empty_fig
         if not has_trade_rule(store["name"]):
-            return "no trade rule defined for this signal", empty_fig, empty_fig
+            return "no trade rule defined for this signal", empty_fig, empty_fig, empty_fig
         trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
                                         exit_long_max, bear_max, exit_short_min)
         baseline = store["results"].get("summary", {})
@@ -348,7 +405,8 @@ def register_callbacks(app: "dash.Dash") -> None:
         sym_fig = (symbol_price_fig(symbol, cache[symbol], trades)
                   if symbol and symbol in cache else empty_fig)
         pnl_fig = cumulative_pnl_fig(trades) or empty_fig
-        return text, sym_fig, pnl_fig
+        h_fig = parameter_heatmap_fig(store["name"], store["run_id"])
+        return text, sym_fig, pnl_fig, h_fig
 
 
 app = dash.Dash(__name__)
@@ -358,3 +416,4 @@ register_callbacks(app)
 
 if __name__ == "__main__":
     app.run(debug=True)
+

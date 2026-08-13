@@ -374,3 +374,124 @@ def registry_percentile(value, population) -> dict:
                 "pct_reason": f"population too small (n={len(pop)})"}
     return {"percentile": round(100.0 * float((pop <= value).mean()), 1),
             "n_population": int(len(pop))}
+
+
+# --------------------------------------------------------------- Risk & Factor Extensions
+
+def sortino_ratio(ret, rf: float = 0.0, ann: float = 252.0) -> dict:
+    """Annualized Sortino ratio (downside deviation risk-adjusted return)."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"sortino": None, "sortino_reason": f"fewer than 5 data points (n={len(s)})"}
+    downside = s[s < rf] - rf
+    if len(downside) == 0:
+        return {"sortino": None, "sortino_reason": "no downside returns below threshold"}
+    down_vol = float(np.sqrt(np.mean(downside ** 2)) * np.sqrt(ann))
+    if down_vol <= 0 or not np.isfinite(down_vol):
+        return {"sortino": None, "sortino_reason": "zero downside volatility"}
+    mean_excess = float((s.mean() - rf) * ann)
+    return {"sortino": round(float(mean_excess / down_vol), 2),
+            "downside_vol_pct": round(100.0 * down_vol, 2)}
+
+
+def calmar_ratio(cagr_pct: "float | None", max_drawdown_pct: "float | None") -> dict:
+    """Calmar ratio: CAGR / |Max Drawdown|."""
+    if cagr_pct is None or max_drawdown_pct is None or not np.isfinite(cagr_pct) or not np.isfinite(max_drawdown_pct):
+        return {"calmar": None, "calmar_reason": "missing CAGR or Max Drawdown"}
+    mdd = abs(float(max_drawdown_pct))
+    if mdd <= 0:
+        return {"calmar": None, "calmar_reason": "zero max drawdown"}
+    return {"calmar": round(float(cagr_pct / mdd), 2)}
+
+
+def omega_ratio(ret, threshold: float = 0.0) -> dict:
+    """Omega ratio: sum of gains above threshold / sum of losses below threshold."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"omega": None, "omega_reason": f"fewer than 5 data points (n={len(s)})"}
+    gains = float((s[s > threshold] - threshold).sum())
+    losses = float((threshold - s[s < threshold]).sum())
+    if losses <= 0:
+        return {"omega": None, "omega_reason": "no losses below threshold"}
+    return {"omega": round(float(gains / losses), 2)}
+
+
+def value_at_risk(ret, alpha: float = 0.05) -> dict:
+    """Value at Risk (VaR) at alpha quantile (e.g. 5% worst loss)."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 10:
+        return {"var_95_pct": None, "var_reason": f"fewer than 10 data points (n={len(s)})"}
+    q = float(np.percentile(s, alpha * 100))
+    return {"var_95_pct": round(100.0 * float(-q), 2)}
+
+
+def conditional_var(ret, alpha: float = 0.05) -> dict:
+    """Conditional Value at Risk (CVaR / Expected Shortfall) beyond alpha quantile."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 10:
+        return {"cvar_95_pct": None, "cvar_reason": f"fewer than 10 data points (n={len(s)})"}
+    q = float(np.percentile(s, alpha * 100))
+    tail = s[s <= q]
+    if len(tail) == 0:
+        return {"cvar_95_pct": None, "cvar_reason": "empty tail"}
+    return {"cvar_95_pct": round(100.0 * float(-tail.mean()), 2)}
+
+
+def gain_to_pain_ratio(ret) -> dict:
+    """Schwager's Gain-to-Pain ratio: sum of all returns / absolute sum of negative returns."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"gain_to_pain": None, "gtp_reason": f"fewer than 5 data points (n={len(s)})"}
+    total_gain = float(s[s > 0].sum())
+    total_loss = float(abs(s[s < 0].sum()))
+    if total_loss <= 0:
+        return {"gain_to_pain": None, "gtp_reason": "zero total loss"}
+    return {"gain_to_pain": round(float((total_gain - total_loss) / total_loss), 2)}
+
+
+def fama_french_factor_attribution(ret_series: pd.Series, start: "str | None" = None,
+                                   end: "str | None" = None) -> dict:
+    """
+    OLS Factor Attribution against Fama-French factors.
+    Returns alpha, beta_mkt, beta_smb, beta_hml, r_squared or ff_reason string.
+    """
+    s = pd.Series(ret_series).dropna()
+    if len(s) < 30:
+        return {"ff_alpha": None, "ff_reason": f"fewer than 30 return observations (n={len(s)})"}
+    try:
+        import query as q
+        df = q.load("ff_factors", start=start, end=end)
+        if df.empty:
+            return {"ff_alpha": None, "ff_reason": "ff_factors dataset empty"}
+        freq_df = df[df["frequency"].isin(["daily", "monthly"])]
+        if freq_df.empty:
+            return {"ff_alpha": None, "ff_reason": "no daily/monthly Fama-French factors available in storage"}
+        piv = (freq_df.drop_duplicates(["date", "factor"])
+               .pivot(index="date", columns="factor", values="value") / 100.0)
+        piv.index = pd.to_datetime(piv.index)
+        s.index = pd.to_datetime(s.index)
+        aligned = pd.concat([s.rename("strategy"), piv], axis=1, join="inner").dropna()
+        if len(aligned) < 30:
+            return {"ff_alpha": None, "ff_reason": f"fewer than 30 overlapping dates (n={len(aligned)})"}
+        factors = [c for c in ["Mkt-RF", "SMB", "HML", "RMW", "CMA"] if c in aligned.columns]
+        if not factors:
+            return {"ff_alpha": None, "ff_reason": "required factor columns missing"}
+        rf = aligned["RF"] if "RF" in aligned.columns else 0.0
+        y = aligned["strategy"] - rf
+        X = aligned[factors].copy()
+        X.insert(0, "Alpha", 1.0)
+        coefs, _, _, _ = np.linalg.lstsq(X.values, y.values, rcond=None)
+        y_pred = X.values @ coefs
+        ss_tot = float(np.sum((y.values - y.values.mean()) ** 2))
+        ss_res = float(np.sum((y.values - y_pred) ** 2))
+        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        res = {
+            "ff_alpha_ann": round(float(coefs[0] * 252.0 * 100), 2),
+            "ff_r_squared": round(float(r2), 4),
+        }
+        for i, f in enumerate(factors, start=1):
+            res[f"beta_{f.lower().replace('-', '_')}"] = round(float(coefs[i]), 3)
+        return res
+    except Exception as e:
+        return {"ff_alpha": None, "ff_reason": f"Fama-French attribution error: {e}"}
+

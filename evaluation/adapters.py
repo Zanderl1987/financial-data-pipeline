@@ -141,3 +141,10 @@ def tv_threshold_rule() -> TradeRule:
         short_entries=lambda d: _crossed_down(d["rating_all"], _tv.BEAR_MAX),
         short_exits=lambda d: d["rating_all"] > _tv.EXIT_SHORT_MIN,
         notional=_tv.NOTIONAL)
+
+
+def from_pine_script(script_slug: str) -> TradeRule:
+    """Load an admitted TradingView Pine Script strategy as a TradeRule."""
+    from strategies.pine_bridge import load_pine_script_rule
+    return load_pine_script_rule(script_slug)
+
