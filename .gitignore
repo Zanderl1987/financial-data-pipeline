@@ -48,3 +48,7 @@ schwab_universe_incremental_*.json
 # Automation failure flags -- created/cleared by scheduled task scripts,
 # not repo state (see AUTOMATION.md)
 *_FAIL.txt
+
+# Third-party TradingView Pine scripts (other authors, MPL-2.0) -- not this
+# project's own code, excluded from the public repo
+storage/tv_scripts/
