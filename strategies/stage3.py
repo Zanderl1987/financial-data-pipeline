@@ -72,7 +72,7 @@ SENSITIVITY_COST_BPS = (5.0, 20.0)
 # strategies.screen.screen_source() directly against each collected file, not
 # by parsing roster slugs. The automated screener's only known false positives
 # are these 3 unconfirmed_htf hand-overrides, confirmed safe and logged in
-# SESSION_NOTES_2026-08-12_tv-catalog.md sessions 3-4 (verified again here by
+# work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-12_tv-catalog.md sessions 3-4 (verified again here by
 # grepping the roster notes verbatim -- each says "manual override... no
 # repaint risk"). Every other screen_source() exclusion matches a roster note
 # that says "screened OUT" for the same reason, so it is not relitigated here.

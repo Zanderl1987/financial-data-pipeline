@@ -57,7 +57,7 @@ registry rows.
   history via `event_backtest.load_close()`'s longest-series rule).
 - **Prices/rating**: recomputed from stored OHLCV via the local `tv_rating()` replica, not
   the live daily snapshot pipeline (`tradingview_pipeline.py` only has ~1 month of real
-  accumulated history as of this writing — see `SESSION_NOTES_2026-07-17.md`).
+  accumulated history as of this writing — see `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-17.md`).
 - **Benchmark**: SPY, subtracted before computing excess returns / CAR.
 
 ## Method

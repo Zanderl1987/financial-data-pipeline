@@ -1763,7 +1763,7 @@ Confirm and note the result of each:
 
 - [ ] **Step 6: Record the outcome**
 
-Add a short entry to a new `SESSION_NOTES_<today's date>.md` (or append to the current
+Add a short entry to a new `work-notes/financial-data-pipeline/SESSION_NOTES_<today's date>.md` (or append to the current
 day's session notes if one already exists) noting: whether the level-IC results showed
 anything above the noise floor for any signal/horizon, how many transition types
 qualified, how many realized trades the simulation produced and its aggregate P&L, and

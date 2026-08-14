@@ -609,10 +609,10 @@ class TestDocumentedScriptsAreTracked:
     @pytest.mark.parametrize("doc", DOCS)
     def test_referenced_notes_exist_and_are_tracked(self, doc):
         """
-        Same defect, one file type over. "see SESSION_NOTES_<date>.md" is a
+        Same defect, one file type over. "see work-notes/financial-data-pipeline/SESSION_NOTES_<date>.md" is a
         promise that the detail is somewhere retrievable; an untracked notes
         file keeps that promise only on the machine that wrote it. Caught
-        2026-08-11 with SESSION_NOTES_2026-08-11.md, which four docs pointed at
+        2026-08-11 with work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md, which four docs pointed at
         while it existed nowhere but this clone.
         """
         import re

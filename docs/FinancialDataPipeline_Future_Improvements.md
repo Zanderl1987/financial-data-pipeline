@@ -903,6 +903,6 @@ Scoping this out also surfaced and fixed two real bugs along the way — see ite
 
 **Acceptance run** (momentum + low_vol, full history, `registry.compare(
 allow_universe_mismatch=True)` against the watchlist baseline) — in progress; see
-`docs/sessions/SESSION_NOTES.md`'s 2026-07-29 entry for the result once it completes.
+`work-notes/financial-data-pipeline/SESSION_NOTES.md`'s 2026-07-29 entry for the result once it completes.
 
 ---

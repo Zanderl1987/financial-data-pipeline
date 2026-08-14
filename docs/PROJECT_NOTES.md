@@ -2,7 +2,7 @@
 
 A living reference of current project state: what's automated, what's hard-blocked
 and why, and what depends on things outside this repo. Unlike the dated
-`docs/sessions/SESSION_NOTES_*.md` files (chronological, append-only) and `docs/EXPERT_BRIEF.md`
+`work-notes/financial-data-pipeline/SESSION_NOTES_*.md` files (chronological, append-only) and `docs/EXPERT_BRIEF.md`
 (prioritized roadmap with reasoning), **this file is updated in place** — stale
 entries get corrected or removed, not appended around. If a fact here looks wrong,
 trust the code/live state over this file and fix the entry.
@@ -27,7 +27,7 @@ remote as independent local clones — not a worktree, not a fork, just two sepa
 full-universe backfill lives here). The other clone's `storage/` is thin; work done there
 (pipeline runs, live verification) doesn't appear here until you `git pull`. Found 2026-07-29
 when both had drifted (this one 8 commits behind, with its own uncommitted edits) — see
-`docs/sessions/SESSION_NOTES.md`'s 2026-07-29 entry for the resolution. Before starting substantial work,
+`work-notes/financial-data-pipeline/SESSION_NOTES.md`'s 2026-07-29 entry for the resolution. Before starting substantial work,
 check `git log -1` / `git status` in whichever clone you're in; don't assume it's current.
 
 ## Known hard constraints (verified live, not assumed)
@@ -42,7 +42,7 @@ check `git log -1` / `git status` in whichever clone you're in; don't assume it'
 | **Comtrade** | ~60 req/hr keyless (recent years only); 500 req/day with key (full history to 1988). | code-level |
 | **Omkar commodity** | 100 req/**month** — the only monthly-capped source in the registry. | code-level |
 | **Tiingo** | ~50 symbols/hour on the free tier (soft, not blocking). | code-level |
-| **Schwab** | OAuth re-auth every 7 days: browser login required (cannot be fully unattended), but `scripts\schwab_reauth.py` captures the redirect locally (127.0.0.1:8182, cert trusted) so no paste is needed — see docs/sessions/SESSION_NOTES_2026-08-11.md. Trader API (positions/transactions) needs separate enablement at developer.schwab.com beyond the base Market Data API. | ongoing (reauth done 2026-08-11, next 2026-08-18) |
+| **Schwab** | OAuth re-auth every 7 days: browser login required (cannot be fully unattended), but `scripts\schwab_reauth.py` captures the redirect locally (127.0.0.1:8182, cert trusted) so no paste is needed — see work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md. Trader API (positions/transactions) needs separate enablement at developer.schwab.com beyond the base Market Data API. | ongoing (reauth done 2026-08-11, next 2026-08-18) |
 | **Finnhub free tier** | `stock/price-target`, `stock/upgrade-downgrade`, and `stock/dividend2` all 403 ("You don't have access to this resource") for every symbol — a permissions gap on the free plan, not a pipeline bug. `stock/insider-transactions` is capped at 100 rows/request regardless of date range (pipeline already logs a truncation NOTE per symbol; some DJI names have 1000+ transactions in the requested window). | 2026-07-23 stage-1 backfill live run |
 | **FRED series IDs** | 9 of the 64 requested series 400 ("series does not exist"): `GOLDPMGBD228NLBM`, `PPALAUSDM`, `PPLATINUMUSDM`, `WPU1019A2S`, `PCU3311103311101`, `PCU3272133272131`, `PCU3272143272141`, `WPU0619`, `PCU3272153272151` — likely discontinued/renamed by FRED; needs replacement IDs found, not a pipeline bug. | 2026-07-23 stage-1 backfill live run |
 | **OECD MEI (`stats.oecd.org/SDMX-JSON`)** | Every one of the 8 requested series 404s. Looks like OECD retired/moved this endpoint (they've been migrating to a new Data Explorer API) — a likely permanent break needing a pipeline rewrite against the new API, not a transient issue. | 2026-07-23 stage-1 backfill live run |
@@ -153,7 +153,7 @@ Working through `docs/EXPERT_BRIEF.md` roadmap items 1-4, then a full stage-1 ba
    (`growth`/`short_pressure` left at 1.0 — borderline / insufficient
    coverage, not clearly null). Composite Sharpe after the change: -0.11
    [-0.45, 0.21] -> 1.01 [0.70, 1.32]. Committed `3b363af`. Full eval table
-   in `docs/sessions/SESSION_NOTES_2026-07-19-eval-framework.md`.
+   in `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-19-eval-framework.md`.
 5. Full `run_all.py --backfill --stage 1` — **done.** 27 PASS, 2 FAIL
    (`fed_soma` timed out at its internal 3600s limit — needs a dedicated
    longer-timeout run, not a re-run inside the sweep; `google_trends` —
