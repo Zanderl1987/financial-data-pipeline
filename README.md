@@ -20,6 +20,11 @@ every pipeline pulls and which table it lands in.
 
 ## What the signals actually look like
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/signal_ic_dark.png">
+  <img alt="Pooled information coefficient by factor at the 5-day horizon. Composite and momentum are positive; sentiment, low volatility, insider flow, value and growth are negative." src="docs/images/signal_ic_light.png">
+</picture>
+
 Every evaluated signal lands in an append-only registry
 (`storage/eval_registry/results.parquet`), so results accumulate instead of being
 overwritten by whichever run looked best. Latest 5-day-horizon numbers:
