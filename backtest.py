@@ -42,6 +42,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import query as q
 from analytics.features import _pick_price_table  # reuse price-source detection
+from evaluation import execution as ev_execution
 
 _ANN = 252  # trading days per year
 
@@ -193,20 +194,17 @@ def backtest(
     # Execute daily gross return
     gross = (weights * R).sum(axis=1)
 
-    # Transaction & execution costs: turnover * (cost_bps + half_spread_bps)
+    # Transaction & execution costs. The arithmetic lives in
+    # evaluation/execution.py so this engine and event_backtest.py share one
+    # definition of a cost rate; see that module's docstring for why the two
+    # meanings of "sqrt_impact" are kept apart rather than merged.
     turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
-    effective_cost_bps = cost_bps + (spread_bps / 2.0)
-    costs = turnover * (effective_cost_bps / 1e4)
-
-    # Short borrow fees (annualized bps -> daily per unit short position)
-    if borrow_fee_bps > 0:
-        short_exposure = weights.clip(upper=0.0).abs().sum(axis=1)
-        costs = costs + short_exposure * (borrow_fee_bps / (1e4 * _ANN))
-
-    # Market impact model (square-root impact based on weight change)
-    if slippage_model == "sqrt_impact" and adv_impact_coeff > 0:
-        impact = turnover.pow(0.5) * (adv_impact_coeff / 1e4)
-        costs = costs + impact
+    short_exposure = weights.clip(upper=0.0).abs().sum(axis=1)
+    cost_model = ev_execution.costs_from_legacy_kwargs(
+        cost_bps=cost_bps, spread_bps=spread_bps, borrow_fee_bps=borrow_fee_bps,
+        slippage_model=slippage_model, impact_coeff=adv_impact_coeff,
+    )
+    costs = ev_execution.daily_cost(cost_model, turnover, short_exposure, ann=_ANN)
 
     net = gross - costs
 

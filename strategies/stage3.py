@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import query as q
 from analytics.technical import _load_ohlcv
+from evaluation import execution as ev_execution
 from evaluation import registry as ev_registry
 from evaluation import stats as ev_stats
 from evaluation import trades as ev_trades
@@ -170,7 +171,14 @@ def dev_cache(price_table: str = PRICE_TABLE) -> dict:
 def cost_adjusted(cost_bps_side: float):
     orig = ev_trades.simulate_symbol
     sig = inspect.signature(orig)
-    round_trip_rate = 2.0 * cost_bps_side / 1e4
+    # Rate now comes from evaluation/execution.py (W1 Step A). Numerically
+    # identical to the previous inline `2.0 * cost_bps_side / 1e4`; the
+    # round-then-deduct-then-round ORDER below is load-bearing and unchanged --
+    # deducting before the engine's own rounding shifts pnl_dollars by a cent
+    # per trade, which moves total_pnl_net and therefore pnl_p.
+    round_trip_rate = ev_execution.round_trip_rate(
+        ev_execution.CostModel(commission_bps=cost_bps_side)
+    )
 
     def patched(*args, **kwargs):
         bound = sig.bind(*args, **kwargs)

@@ -49,6 +49,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import query as q
+from evaluation import execution as ev_execution
 
 HORIZONS = (1, 3, 5, 10, 21, 63)
 
@@ -343,9 +344,17 @@ def scenario(
                       entry_lag=entry_lag, price_table=price_table,
                       min_gap_days=min_gap_days)
     sign = -1.0 if side == "short" else 1.0
-    effective_cost = (cost_bps + (spread_bps / 2.0)) / 1e4
-    if slippage_model == "sqrt_impact":
-        effective_cost += 0.0010  # 10 bps market impact penalty
+    # Cost rate comes from evaluation/execution.py, shared with backtest.py.
+    # NOTE: this engine's "sqrt_impact" is a FLAT 10 bps per side -- no square
+    # root, no coefficient -- unlike backtest.py's turnover**0.5 * coeff under
+    # the same flag name. flat_impact_bps=10.0 preserves that exactly; see
+    # evaluation/execution.py's docstring.
+    effective_cost = ev_execution.per_side_rate(
+        ev_execution.costs_from_legacy_kwargs(
+            cost_bps=cost_bps, spread_bps=spread_bps,
+            slippage_model=slippage_model, flat_impact_bps=10.0,
+        )
+    )
 
     trades = []
     daily_rets: dict[pd.Timestamp, list] = {}
