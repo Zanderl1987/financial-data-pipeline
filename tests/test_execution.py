@@ -177,37 +177,42 @@ class TestConfigContract:
 
 
 class TestStage3CostEquivalence:
-    """The stage3 monkeypatch's arithmetic must be untouched by Step A --
-    including its round-then-deduct-then-round order, which is load-bearing."""
+    """
+    The campaign's realized cost arithmetic, pinned against the ORIGINAL
+    monkeypatch formula written as a literal.
 
-    def test_cost_adjusted_matches_pre_refactor_formula(self, monkeypatch):
+    The monkeypatch itself was deleted in Step B, so there is nothing left to
+    compare against at runtime -- the guarantee now lives here, in the literal
+    `round(round(notional * p, 2) - notional * rate, 2)`. That order is
+    load-bearing: deducting before the engine's own rounding shifts pnl_dollars
+    by a cent per trade, which moves total_pnl_net and therefore pnl_p.
+    """
+
+    def test_engine_cost_matches_pre_refactor_formula(self):
+        import numpy as np
+        import pandas as pd
         from evaluation import trades as ev_trades
         from strategies import stage3
 
-        notional = 10_000.0
-        raw_pcts = [0.0123, -0.0456, 0.10, -0.0001]
+        notional, bps = 10_000.0, 10.0
+        # entry at bar 1 (100.0), rule exit signal at bar 2, fill at bar 3.
+        closes = [100.0, 100.0, 112.30, 112.30]
+        idx = pd.bdate_range("2024-01-01", periods=4)
+        rows = ev_trades.simulate_symbol(
+            idx, pd.Series(closes, index=idx),
+            np.array([True, False, False, False]),
+            np.array([False, False, True, False]),
+            np.zeros(4, bool), np.zeros(4, bool),
+            "TEST", notional, config=stage3.cost_config(bps))
 
-        def fake_simulate_symbol(index, close, le, lx, se, sx, symbol, notional):
-            return [{"symbol": symbol, "side": "long",
-                     "pnl_dollars": round(notional * p, 2),
-                     "pnl_pct": round(100 * p, 3)} for p in raw_pcts]
-
-        monkeypatch.setattr(ev_trades, "simulate_symbol", fake_simulate_symbol)
-
-        bps = 10.0
-        with stage3.cost_adjusted(bps):
-            rows = ev_trades.simulate_symbol(None, None, None, None, None, None,
-                                             "TEST", notional)
-
+        p = closes[3] / closes[1] - 1.0
         rate = 2.0 * bps / 1e4                      # the pre-refactor expression
-        for row, p in zip(rows, raw_pcts):
-            assert row["pnl_dollars"] == round(round(notional * p, 2) - notional * rate, 2)
-            assert row["pnl_pct"] == round(round(100 * p, 3) - 100 * rate, 3)
+        assert len(rows) == 1
+        assert rows[0]["pnl_dollars"] == round(round(notional * p, 2) - notional * rate, 2)
+        assert rows[0]["pnl_pct"] == round(round(100 * p, 3) - 100 * rate, 3)
 
-    def test_patch_is_restored(self, monkeypatch):
-        from evaluation import trades as ev_trades
+    def test_monkeypatch_is_gone(self):
+        """Step B deleted it. If it reappears, someone has reintroduced a
+        silent-failure mode -- see the spec and stage3's module docstring."""
         from strategies import stage3
-        before = ev_trades.simulate_symbol
-        with stage3.cost_adjusted(10.0):
-            assert ev_trades.simulate_symbol is not before
-        assert ev_trades.simulate_symbol is before
+        assert not hasattr(stage3, "cost_adjusted")

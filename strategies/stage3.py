@@ -7,17 +7,22 @@ strategies.pine_bridge.load_pine_script_rule -- "unverified"), runs the TradeRul
 on the DEVELOPMENT split only and computes the primary endpoint pnl_p via
 evaluation.stats.permutation_trades, net of transaction costs.
 
-Costs are not modeled anywhere in evaluation/trades.py or evaluation/stats.py
-(confirmed by inspection: no cost_bps/spread_bps parameter in either module).
-cost_adjusted() below monkeypatches evaluation.trades.simulate_symbol for the
-duration of a call so every realized trade carries a constant round-trip
-deduction on its own notional. Both evaluation.trades.simulate() (calls
-simulate_symbol as a bare module-global name, resolved at call time) and
-evaluation.stats.permutation_trades() (does `from evaluation import trades as tr`
-then `tr.simulate_symbol(...)`, also resolved at call time) see the patched
-version without either module being edited. Signal generation is untouched --
-rule_flags() runs on the unmodified close series, so entries/exits are unaffected;
-only realized P&L is.
+Costs are modeled by the ENGINE as of W1 Step B (2026-08-17): cost_config()
+below builds an evaluation.execution.ExecutionConfig that is passed to
+evaluation.trades.simulate() and evaluation.stats.permutation_trades() via their
+`config=` parameter, so every realized trade carries a constant round-trip
+deduction on its own notional -- and, importantly, the permutation NULL pays the
+same costs as the strategy.
+
+This replaced cost_adjusted(), a context manager that monkeypatched
+evaluation.trades.simulate_symbol. That worked only because both call sites
+resolved the name as a late-bound module global; binding it earlier anywhere
+would have silently stopped the deduction and taken the primary endpoint
+gross-of-cost with no error. The replacement was verified to produce identical
+numbers before the patch was deleted.
+
+Signal generation is untouched either way -- rule_flags() runs on the unmodified
+close series, so entries/exits are unaffected; only realized P&L is.
 
 Results are provisional=True and stage="stage3" for every row: Stage 4 (BH-FDR)
 is computed campaign-wide, once, at campaign close -- never per batch.
@@ -28,13 +33,11 @@ from __future__ import annotations
 import argparse
 import glob
 import hashlib
-import inspect
 import json
 import os
 import re
 import subprocess
 import sys
-from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -167,35 +170,29 @@ def dev_cache(price_table: str = PRICE_TABLE) -> dict:
 
 # --------------------------------------------------------------- cost model
 
-@contextmanager
-def cost_adjusted(cost_bps_side: float):
-    orig = ev_trades.simulate_symbol
-    sig = inspect.signature(orig)
-    # Rate now comes from evaluation/execution.py (W1 Step A). Numerically
-    # identical to the previous inline `2.0 * cost_bps_side / 1e4`; the
-    # round-then-deduct-then-round ORDER below is load-bearing and unchanged --
-    # deducting before the engine's own rounding shifts pnl_dollars by a cent
-    # per trade, which moves total_pnl_net and therefore pnl_p.
-    round_trip_rate = ev_execution.round_trip_rate(
-        ev_execution.CostModel(commission_bps=cost_bps_side)
+def cost_config(cost_bps_side: float) -> "ev_execution.ExecutionConfig":
+    """
+    The campaign's cost model as an ExecutionConfig -- the supported path since
+    W1 Step B. The engine applies the same round-then-deduct-then-round order
+    cost_adjusted() used, so results are unchanged; see evaluation/trades.py.
+    """
+    return ev_execution.ExecutionConfig(
+        name=f"tv_campaign_{cost_bps_side:g}bps",
+        costs=ev_execution.CostModel(commission_bps=cost_bps_side),
     )
 
-    def patched(*args, **kwargs):
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
-        notional = bound.arguments["notional"]
-        rows = orig(*args, **kwargs)
-        cost_dollars = notional * round_trip_rate
-        for r in rows:
-            r["pnl_dollars"] = round(r["pnl_dollars"] - cost_dollars, 2)
-            r["pnl_pct"] = round(r["pnl_pct"] - 100 * round_trip_rate, 3)
-        return rows
 
-    ev_trades.simulate_symbol = patched
-    try:
-        yield
-    finally:
-        ev_trades.simulate_symbol = orig
+# cost_adjusted() -- the context manager that monkeypatched
+# evaluation.trades.simulate_symbol to deduct costs -- was DELETED in W1 Step B
+# (2026-08-17). It only ever worked because both trades.simulate() and
+# stats.permutation_trades() happened to resolve that name as a late-bound
+# module global; refactoring either call site to bind earlier would have made
+# it silently stop applying, taking the campaign's primary endpoint
+# gross-of-cost with no error. cost_config() above is the replacement, and the
+# engine applies the identical round-then-deduct-then-round arithmetic.
+# Equivalence was verified before deletion, both on synthetic data and
+# end-to-end on real prices. See docs/superpowers/specs/2026-08-16-execution-
+# engine-unification-design.md.
 
 
 # --------------------------------------------------------------- descriptive stats
@@ -249,15 +246,16 @@ def run_strategy(slug: str, meta: dict, roster_note: str, cache: dict,
     with open(pine_path, "r", encoding="utf-8") as f:
         screen = screen_source(f.read(), script_name=slug)
 
-    with cost_adjusted(PRIMARY_COST_BPS):
-        trades_df = ev_trades.simulate(rule, cache)
-        summary = ev_trades.trade_summary(trades_df)
-        perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed)
+    primary_cfg = cost_config(PRIMARY_COST_BPS)
+    trades_df = ev_trades.simulate(rule, cache, config=primary_cfg)
+    summary = ev_trades.trade_summary(trades_df)
+    perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed,
+                                       config=primary_cfg)
 
     perm_sens = {}
     for bps in SENSITIVITY_COST_BPS:
-        with cost_adjusted(bps):
-            perm_sens[bps] = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed)
+        perm_sens[bps] = ev_stats.permutation_trades(
+            rule, cache, n_perm=n_perm, seed=seed, config=cost_config(bps))
 
     pnl_p = perm.get("pnl_p")
     pnl_p_5 = perm_sens[5.0].get("pnl_p")
@@ -326,6 +324,9 @@ def registry_rows_for(row: dict, run_id: str, universe_hash: str, date_range: st
             "horizon": -1, "statistic": statistic, "value": value,
             "n": row["n_trades"], "universe_hash": universe_hash,
             "date_range": date_range, "created_at": created_at,
+            # The execution semantics that produced these numbers, so a future
+            # reader can tell a net-of-cost result from a gross one.
+            "execution_hash": ev_execution.config_hash(cost_config(PRIMARY_COST_BPS)),
         })
     return pd.DataFrame(recs, columns=ev_registry.COLUMNS)
 

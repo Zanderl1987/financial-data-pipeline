@@ -104,6 +104,7 @@ class Sizing:
     own) and ambiguous for discrete trades."""
     mode: str = "fixed_notional"
     notional: float = 10_000.0
+    fraction: "float | None" = None
     max_weight: "float | None" = None
 
     def __post_init__(self):
@@ -113,6 +114,11 @@ class Sizing:
             raise ValueError("notional must be > 0")
         if self.max_weight is not None and self.max_weight <= 0:
             raise ValueError("max_weight must be > 0 or None")
+        if self.mode == "fixed_fraction":
+            if self.fraction is None or not (0 < self.fraction <= 1):
+                raise ValueError("mode='fixed_fraction' requires 0 < fraction <= 1")
+        elif self.fraction is not None:
+            raise ValueError("fraction is only meaningful with mode='fixed_fraction'")
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,21 @@ TV_CAMPAIGN = ExecutionConfig(name="tv_campaign",
 def resolve(config: "ExecutionConfig | None") -> ExecutionConfig:
     """None means LEGACY. Centralized so every call site agrees."""
     return LEGACY if config is None else config
+
+
+def config_hash(config: "ExecutionConfig | None") -> str:
+    """
+    Stable 12-hex digest of the execution semantics, for registry rows.
+
+    Deliberately excludes `name`: two configs that price and size trades
+    identically must hash identically regardless of what they are called, or
+    the registry would treat a rename as a different experiment.
+    """
+    import hashlib
+    cfg = resolve(config)
+    payload = {k: v for k, v in cfg.as_dict().items() if k != "config_name"}
+    blob = ";".join(f"{k}={payload[k]!r}" for k in sorted(payload))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
 # ------------------------------------------------------------------ cost math

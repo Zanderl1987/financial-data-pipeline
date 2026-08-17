@@ -173,15 +173,25 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
 
 
 def permutation_trades(rule, cache: dict, n_perm: int = 200,
-                       seed: int = 0) -> dict:
+                       seed: int = 0, *, config=None) -> dict:
     """
     Permutation null for a trade system: within each symbol, relocate the
     same NUMBER of entry signals to uniformly random days (exit rule kept
     as-is), re-simulate through the same engine, and compare total P&L and
     win rate. One-sided empirical p-values with the +1 correction.
+
+    `config` is an ExecutionConfig applied identically to the observed run and
+    to every permutation -- the null must pay the same costs and obey the same
+    stops as the strategy, or the comparison is rigged in the strategy's favor.
+    None means LEGACY.
     """
     from evaluation import trades as tr        # local import (no cycles)
-    obs = tr.simulate(rule, cache)
+    from evaluation import execution as ev_execution
+    _cfg = ev_execution.resolve(config)
+    _perm_needs_portfolio = (_cfg.limits.capital is not None
+                             or _cfg.limits.max_concurrent is not None
+                             or _cfg.sizing.mode != "fixed_notional")
+    obs = tr.simulate(rule, cache, config=config)
     if obs.empty:
         return {"pnl_p": None, "win_rate_p": None,
                 "perm_reason": "no realized trades"}
@@ -208,7 +218,14 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
             if k:
                 pse[rng.choice(n, size=k, replace=False)] = True
             rows.extend(tr.simulate_symbol(index, close, ple, lx, pse, sx,
-                                           sym, rule.notional))
+                                           sym, rule.notional, config=config))
+        if _perm_needs_portfolio and rows:
+            # The null must face the SAME capital budget and concurrency cap as
+            # the observed run. Skipping this would let the null take every
+            # trade while the strategy is rationed -- an unconstrained null is
+            # a harder bar, so the test would be conservative rather than
+            # anti-conservative, but it would no longer be the stated null.
+            rows = tr._portfolio_pass(rows, _cfg)
         perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
         if perm.empty:
             continue

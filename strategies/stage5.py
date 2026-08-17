@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import query as q
 from analytics.technical import _load_ohlcv
+from evaluation import execution as ev_execution
 from evaluation import registry as ev_registry
 from evaluation import stats as ev_stats
 from evaluation import trades as ev_trades
@@ -40,7 +41,7 @@ from strategies.stage3 import (
     PRIMARY_COST_BPS,
     PRICE_TABLE,
     SEED,
-    cost_adjusted,
+    cost_config,
     dev_holdout_symbols,
     load_rule_for,
     with_price_floor,
@@ -111,10 +112,11 @@ def run_holdout_for(slug: str, cache: dict, n_perm: int = N_PERM, seed: int = SE
     rule, translation_verified = load_rule_for(slug)
     rule = with_price_floor(rule)
 
-    with cost_adjusted(PRIMARY_COST_BPS):
-        trades_df = ev_trades.simulate(rule, cache)
-        summary = ev_trades.trade_summary(trades_df)
-        perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed)
+    cfg = cost_config(PRIMARY_COST_BPS)
+    trades_df = ev_trades.simulate(rule, cache, config=cfg)
+    summary = ev_trades.trade_summary(trades_df)
+    perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed,
+                                       config=cfg)
 
     pnl_p = perm.get("pnl_p")
     run_ts = datetime.now(timezone.utc).isoformat()
@@ -143,6 +145,7 @@ def _registry_rows(row: dict, run_id: str, universe_hash: str) -> pd.DataFrame:
             "horizon": -1, "statistic": statistic, "value": value,
             "n": row["holdout_n_trades"], "universe_hash": universe_hash,
             "date_range": f"{HOLDOUT_START}..", "created_at": row["holdout_run_ts"],
+            "execution_hash": ev_execution.config_hash(cost_config(PRIMARY_COST_BPS)),
         })
     return pd.DataFrame(recs, columns=ev_registry.COLUMNS)
 
