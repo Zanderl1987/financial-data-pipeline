@@ -16,7 +16,7 @@ size_categories:
 
 # Financial Data Pipeline — Full Curated Snapshot
 
-A comprehensive financial dataset covering **185 tables** and **106,446,833 rows** across macro, market, and alternative data sources.
+A comprehensive financial dataset covering **185 tables** and **107,375,224 rows** across macro, market, and alternative data sources.
 
 ## Data Sources
 
@@ -59,13 +59,38 @@ Each table is stored as a separate parquet file. Key columns:
 - `fetched_at`: UTC timestamp when data was fetched
 - `year` / `month`: Hive partition columns (where applicable)
 
+## Engineering & data quality
+
+This snapshot is the output of a tested pipeline, not a one-off scrape:
+
+- **761 automated tests**, including guard tests that fail the suite if a pipeline
+  is added but not wired into the query catalog, schema registry, and curated-table
+  dedup step — so a table can't silently go missing from downstream queries.
+- **Schema/null-rate/range validation** (`validate.py`) runs as an operational health
+  check against every table after each pipeline run.
+- **Raw vs. curated separation**: pipelines write Hive-partitioned raw Parquet, which
+  can contain overlapping re-fetches (measured up to ~42% duplicate rows on some raw
+  tables); a dedup step (`curated.py`) produces the deduplicated tables published here.
+- **Point-in-time discipline**: downstream feature joins use filing/publication date
+  with explicit lags rather than observation date, so a backtest can't accidentally
+  see information before it was actually available. `fetched_at` records ingestion
+  time separately from the business dates already present in the source data (e.g.
+  dividend tables carry `declaration_date`/`record_date`/`payment_date`/
+  `ex_dividend_date`, which are four different points in time for the same event).
+- **Iceberg pilot**: a subset of tables (`prices`, `macro`, `fundamentals_annual`,
+  `fundamentals_quarterly`) are additionally mirrored into an Apache Iceberg warehouse
+  with real snapshot-based reads and automated snapshot expiration (30-day retention),
+  as a pilot toward full lakehouse-style versioning of the rest of the store.
+
+Full source, tests, and architecture docs: https://github.com/Zanderl1987/financial-data-pipeline
+
 ## Build Info
 
-- **Generated**: 2026-08-13
+- **Generated**: 2026-08-16
 - **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
 - **Tables**: 185
-- **Total Rows**: 106,446,833
-- **Total Size**: 3011.4 MB
+- **Total Rows**: 107,375,224
+- **Total Size**: 3031.2 MB
 
 ## License
 
