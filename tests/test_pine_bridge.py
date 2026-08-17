@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategies.pine_bridge import (  # noqa: E402
+    UnrecognizedStrategyError,
     _match_input,
     load_pine_script_rule,
     parse_pine_inputs,
@@ -88,24 +89,37 @@ def test_load_ut_bot_scalper_uses_real_script_params():
     assert rule.name == "pine_ut_bot_2.0_10"
 
 
-def test_load_falls_back_to_template_defaults_when_file_missing():
-    rule = load_pine_script_rule("no_such_script_xyz_rsi", tv_scripts_dir=TV_SCRIPTS_DIR)
-    assert rule.name == "pine_rsi_14_30.0_70.0"
+def test_load_raises_when_file_missing():
+    """A missing source file has nothing to classify -- raise, don't guess
+    from the slug name alone."""
+    with pytest.raises(UnrecognizedStrategyError):
+        load_pine_script_rule("no_such_script_xyz_rsi", tv_scripts_dir=TV_SCRIPTS_DIR)
 
 
-def test_load_falls_back_to_ema_cross_default_for_unmatched_slug():
-    rule = load_pine_script_rule("no_such_script_xyz", tv_scripts_dir=TV_SCRIPTS_DIR)
-    assert rule.name == "pine_ema_cross_12_26"
+def test_load_raises_for_multi_indicator_script():
+    """A script mixing several indicator families (here: rsi + atr + sma) must
+    raise rather than silently collapse onto a generic default template --
+    see UnrecognizedStrategyError's docstring for the 2026-08-13 bug this
+    guards against (byte-identical simulated results for unrelated
+    strategies)."""
+    with pytest.raises(UnrecognizedStrategyError):
+        load_pine_script_rule("mrr_mean_reversion_range", tv_scripts_dir=TV_SCRIPTS_DIR)
 
 
 @pytest.mark.parametrize("pine_path", [
     os.path.join(TV_SCRIPTS_DIR, f) for f in os.listdir(TV_SCRIPTS_DIR) if f.endswith(".pine")
 ])
-def test_all_collected_scripts_load_without_error(pine_path):
-    """Every currently-collected .pine file must produce a valid TradeRule --
-    guards against a regex/branch regression silently breaking one script."""
+def test_all_collected_scripts_classify_or_raise_cleanly(pine_path):
+    """Every currently-collected .pine file must either produce a valid
+    TradeRule or raise UnrecognizedStrategyError -- guards against a
+    regex/branch regression raising some OTHER exception (a real bug) or
+    silently mis-classifying (the 2026-08-13 bug this bridge was rewritten
+    to prevent)."""
     slug = os.path.splitext(os.path.basename(pine_path))[0]
-    rule = load_pine_script_rule(slug, tv_scripts_dir=TV_SCRIPTS_DIR)
+    try:
+        rule = load_pine_script_rule(slug, tv_scripts_dir=TV_SCRIPTS_DIR)
+    except UnrecognizedStrategyError:
+        return
     assert rule.name
     assert callable(rule.entries)
     assert callable(rule.exits)
