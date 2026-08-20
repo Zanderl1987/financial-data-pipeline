@@ -26,6 +26,7 @@ from evaluation import execution as ev_execution
 from evaluation import tearsheet as ev_tearsheet
 from evaluation.contracts import TradeRule
 from generate_eval_report import find_latest, load_run
+import generate_tearsheet as gt
 
 # Signals whose TradeRule shape we know how to rebuild live: name -> (cache
 # builder, rule builder). Populated below, after the rule-builder functions
@@ -363,6 +364,30 @@ def render_risk_card(metrics: dict) -> "html.Div":
             "minWidth": "110px", "textAlign": "center", "backgroundColor": "#f9f9f9"
         }))
     return html.Div(cards, style={"display": "flex", "flexWrap": "wrap", "gap": "10px", "marginTop": "15px"})
+
+
+def render_tearsheet(sheet: dict) -> "list":
+    """Dash children for the live tearsheet section. Reuses
+    generate_tearsheet.py's figure/HTML builders directly -- no metric or
+    chart logic duplicated here, matching the W3 compute/render split this
+    was built for. HTML-string builders (_headline_tiles, _drawdown_table)
+    render via dcc.Markdown(dangerously_allow_html=True); Figure builders
+    (_monthly_fig, _rolling_fig) render via dcc.Graph and are skipped (not
+    an empty Graph) when the underlying data is too thin to plot."""
+    if "returns_reason" in sheet:
+        return [html.Div(f"no realized trades to compute tearsheet: "
+                         f"{sheet['returns_reason']}")]
+    children = [dcc.Markdown(gt._headline_tiles(sheet["headline"]),
+                             dangerously_allow_html=True)]
+    monthly_fig = gt._monthly_fig(sheet["monthly"])
+    if monthly_fig is not None:
+        children.append(dcc.Graph(figure=monthly_fig))
+    rolling_fig = gt._rolling_fig(sheet["rolling"])
+    if rolling_fig is not None:
+        children.append(dcc.Graph(figure=rolling_fig))
+    children.append(dcc.Markdown(gt._drawdown_table(sheet["drawdowns"]),
+                                 dangerously_allow_html=True))
+    return children
 
 
 def parameter_heatmap_fig(name: str, run_id: str) -> go.Figure:

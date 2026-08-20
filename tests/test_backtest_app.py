@@ -527,6 +527,26 @@ class TestLiveTearsheet:
                "headline_reason" in out["headline"]
 
 
+class TestRenderTearsheet:
+    def test_returns_reason_renders_single_message_div(self):
+        out = ba.render_tearsheet({"returns_reason": "no realized trades"})
+        assert len(out) == 1
+        assert isinstance(out[0], ba.html.Div)
+        assert "no realized trades" in out[0].children
+
+    def test_full_sheet_renders_markdown_and_graphs(self):
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        trades = pd.DataFrame({
+            "exit_date": dates[::4],
+            "pnl_dollars": [100.0, -50.0, 200.0, 80.0, -20.0, 150.0, 60.0, -10.0,
+                            120.0, 90.0],
+        })
+        sheet = ba.live_tearsheet(trades)
+        out = ba.render_tearsheet(sheet)
+        assert any(isinstance(c, ba.dcc.Markdown) for c in out)
+        assert any(isinstance(c, ba.dcc.Graph) for c in out)
+
+
 class TestRenderIcPanel:
     def test_trade_rule_type_renders_trades_fig(self):
         trades = pd.DataFrame({
