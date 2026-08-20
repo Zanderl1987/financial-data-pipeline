@@ -427,6 +427,71 @@ def _slider(id_, value):
                       marks={-1: "-1", 0: "0", 1: "1"})
 
 
+def _ranged_slider(id_, value, min_, max_, step):
+    return dcc.Slider(id=id_, min=min_, max=max_, step=step, value=value,
+                      updatemode="mouseup")
+
+
+def _execution_config_panel() -> "html.Div":
+    return html.Div([
+        html.H4("Execution config"),
+        html.Div([
+            html.H5("Costs"),
+            html.Div("Commission (bps)"),
+            _ranged_slider("commission-bps", 0.0, 0.0, 50.0, 0.5),
+            html.Div("Spread (bps)"),
+            _ranged_slider("spread-bps", 0.0, 0.0, 50.0, 0.5),
+            html.Div("Borrow fee (bps)"),
+            _ranged_slider("borrow-fee-bps", 0.0, 0.0, 50.0, 0.5),
+            html.Div("Impact model"),
+            dcc.Dropdown(id="impact-model", clearable=False,
+                        options=[{"label": "none", "value": "none"},
+                                 {"label": "sqrt", "value": "sqrt"},
+                                 {"label": "flat", "value": "flat"}],
+                        value="none"),
+            html.Div("Impact coeff"),
+            _ranged_slider("impact-coeff", 0.0, 0.0, 50.0, 0.5),
+        ]),
+        html.Div([
+            html.H5("Risk"),
+            html.Div("Stop loss %"),
+            dcc.Input(id="stop-loss-pct", type="number", value=None),
+            html.Div("Take profit %"),
+            dcc.Input(id="take-profit-pct", type="number", value=None),
+            html.Div("Vol stop mult"),
+            dcc.Input(id="vol-stop-mult", type="number", value=None),
+            dcc.Checklist(id="trailing",
+                         options=[{"label": "Trailing stop", "value": "trailing"}],
+                         value=[]),
+            html.Div("Max holding days"),
+            dcc.Input(id="max-holding-days", type="number", value=None),
+        ]),
+        html.Div([
+            html.H5("Sizing"),
+            html.Div("Mode"),
+            dcc.Dropdown(id="sizing-mode", clearable=False,
+                        options=[{"label": "fixed notional", "value": "fixed_notional"},
+                                 {"label": "fixed fraction", "value": "fixed_fraction"}],
+                        value="fixed_notional"),
+            html.Div("Notional"),
+            dcc.Input(id="sizing-notional", type="number", value=DEFAULT_NOTIONAL),
+            html.Div("Fraction"),
+            dcc.Input(id="sizing-fraction", type="number", value=None),
+            html.Div("Max weight"),
+            dcc.Input(id="sizing-max-weight", type="number", value=None),
+        ]),
+        html.Div([
+            html.H5("Limits"),
+            html.Div("Capital"),
+            dcc.Input(id="limits-capital", type="number", value=None),
+            html.Div("Max concurrent"),
+            dcc.Input(id="limits-max-concurrent", type="number", value=None),
+            html.Div("Max drawdown stop"),
+            dcc.Input(id="limits-max-drawdown-stop", type="number", value=None),
+        ]),
+        html.Div(id="execution-config-error", style={"color": "#d03b3b"}),
+    ])
+
 
 def build_layout(signals: "list[dict]") -> "html.Div":
     options = [{"label": s["name"] + ("" if s["has_local_artifacts"]
@@ -451,12 +516,15 @@ def build_layout(signals: "list[dict]") -> "html.Div":
                 dcc.Loading(html.Div(id="trade-summary")),
             ]),
         ]),
+        _execution_config_panel(),
         html.Div([
             dcc.Dropdown(id="symbol-dropdown", placeholder="select a symbol"),
             dcc.Loading(dcc.Graph(id="symbol-fig")),
         ]),
         dcc.Loading(dcc.Graph(id="pnl-fig")),
         dcc.Loading(dcc.Graph(id="heatmap-fig")),
+        html.H4("Tearsheet"),
+        dcc.Loading(html.Div(id="tearsheet-container")),
         dcc.Store(id="signal-store"),
     ])
 

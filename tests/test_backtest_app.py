@@ -497,6 +497,32 @@ class TestLayout:
         app.layout = ba.build_layout(ba.list_evaluated_signals())
         ba.register_callbacks(app)     # just verifies callback registration succeeds
 
+    def _collect_ids(self, component, found):
+        cid = getattr(component, "id", None)
+        if cid:
+            found.add(cid)
+        children = getattr(component, "children", None)
+        if children is None:
+            return
+        if isinstance(children, (list, tuple)):
+            for c in children:
+                self._collect_ids(c, found)
+        else:
+            self._collect_ids(children, found)
+
+    def test_execution_config_and_tearsheet_ids_present(self):
+        div = ba.build_layout([])
+        found = set()
+        self._collect_ids(div, found)
+        expected = {"commission-bps", "spread-bps", "borrow-fee-bps",
+                   "impact-model", "impact-coeff", "stop-loss-pct",
+                   "take-profit-pct", "vol-stop-mult", "trailing",
+                   "max-holding-days", "sizing-mode", "sizing-notional",
+                   "sizing-fraction", "sizing-max-weight", "limits-capital",
+                   "limits-max-concurrent", "limits-max-drawdown-stop",
+                   "execution-config-error", "tearsheet-container"}
+        assert expected.issubset(found)
+
 
 class TestLiveTearsheet:
     def test_empty_trades_returns_reason(self):
