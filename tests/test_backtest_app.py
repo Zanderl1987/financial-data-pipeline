@@ -315,6 +315,57 @@ class TestBuildExecutionConfig:
             ba.build_execution_config(commission_bps=-1.0)
 
 
+class TestResolveExecutionConfig:
+    DEFAULTS = dict(
+        commission_bps=0.0, spread_bps=0.0, borrow_fee_bps=0.0,
+        impact_model="none", impact_coeff=0.0, stop_loss_pct=None,
+        take_profit_pct=None, vol_stop_mult=None, trailing=[],
+        max_holding_days=None, sizing_mode="fixed_notional",
+        sizing_notional=None, sizing_fraction=None, sizing_max_weight=None,
+        limits_capital=None, limits_max_concurrent=None,
+        limits_max_drawdown_stop=None)
+
+    def test_defaults_resolve_to_legacy_equivalent_config(self):
+        cfg, err = ba.resolve_execution_config(**self.DEFAULTS)
+        assert err == ""
+        assert cfg == ba.ev_execution.ExecutionConfig(
+            name="live", costs=ba.ev_execution.CostModel(),
+            risk=ba.ev_execution.RiskControls(), sizing=ba.ev_execution.Sizing(),
+            limits=ba.ev_execution.PortfolioLimits())
+
+    def test_impact_model_none_sentinel_maps_to_python_none(self):
+        cfg, err = ba.resolve_execution_config(**self.DEFAULTS)
+        assert cfg.costs.impact_model is None
+
+    def test_impact_model_sqrt_passes_through(self):
+        values = dict(self.DEFAULTS, impact_model="sqrt", impact_coeff=0.1)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg.costs.impact_model == "sqrt"
+        assert cfg.costs.impact_coeff == 0.1
+
+    def test_trailing_checklist_value_maps_to_bool(self):
+        values = dict(self.DEFAULTS, trailing=["trailing"])
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg.risk.trailing is True
+
+    def test_blank_notional_falls_back_to_default_notional(self):
+        values = dict(self.DEFAULTS, sizing_notional=None)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg.sizing.notional == ba.DEFAULT_NOTIONAL
+
+    def test_explicit_notional_passes_through(self):
+        values = dict(self.DEFAULTS, sizing_notional=25_000.0)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg.sizing.notional == 25_000.0
+
+    def test_invalid_combination_returns_none_config_and_message(self):
+        values = dict(self.DEFAULTS, sizing_mode="fixed_fraction",
+                     sizing_fraction=None)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg is None
+        assert "fixed_fraction" in err
+
+
 class TestCharts:
     def _price_df(self):
         return pd.DataFrame({"close": [10.0, 11.0, 12.0]},

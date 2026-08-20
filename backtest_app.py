@@ -111,6 +111,43 @@ def build_execution_config(*, commission_bps: float = 0.0, spread_bps: float = 0
             max_drawdown_stop=max_drawdown_stop))
 
 
+def resolve_execution_config(*, commission_bps, spread_bps, borrow_fee_bps,
+                             impact_model, impact_coeff, stop_loss_pct,
+                             take_profit_pct, vol_stop_mult, trailing,
+                             max_holding_days, sizing_mode, sizing_notional,
+                             sizing_fraction, sizing_max_weight, limits_capital,
+                             limits_max_concurrent, limits_max_drawdown_stop
+                             ) -> "tuple[ev_execution.ExecutionConfig | None, str]":
+    """Adapt raw Dash control values into build_execution_config()'s typed
+    kwargs and catch the ValueError an invalid combination raises, so the
+    caller can show it inline instead of the callback crashing.
+
+    trailing: dcc.Checklist value, a list ("trailing" in it, or empty).
+    impact_model: dropdown value; "none" is the not-clearable sentinel for
+    Python None (dcc.Dropdown can't hold None as a real option value).
+    sizing_notional: blank (None) falls back to DEFAULT_NOTIONAL rather than
+    reaching Sizing's `notional must be > 0` check with None, which would
+    raise TypeError instead of the intended ValueError.
+    """
+    try:
+        cfg = build_execution_config(
+            commission_bps=commission_bps, spread_bps=spread_bps,
+            borrow_fee_bps=borrow_fee_bps,
+            impact_model=None if impact_model == "none" else impact_model,
+            impact_coeff=impact_coeff, stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct, vol_stop_mult=vol_stop_mult,
+            trailing=bool(trailing), max_holding_days=max_holding_days,
+            sizing_mode=sizing_mode,
+            notional=(sizing_notional if sizing_notional is not None
+                      else DEFAULT_NOTIONAL),
+            fraction=sizing_fraction, max_weight=sizing_max_weight,
+            capital=limits_capital, max_concurrent=limits_max_concurrent,
+            max_drawdown_stop=limits_max_drawdown_stop)
+        return cfg, ""
+    except ValueError as exc:
+        return None, f"Execution config error: {exc}"
+
+
 def _crossed_up(series, level):
     return (series >= level) & (series.shift(1) < level)
 
