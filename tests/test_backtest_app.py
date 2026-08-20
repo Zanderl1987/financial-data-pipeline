@@ -275,6 +275,46 @@ class TestBaselineVsLive:
         assert out["win_rate_pct"] == {"baseline": None, "live": None}
 
 
+class TestBuildExecutionConfig:
+    def test_defaults_match_legacy_field_values(self):
+        cfg = ba.build_execution_config()
+        assert cfg.costs == ba.ev_execution.CostModel()
+        assert cfg.risk == ba.ev_execution.RiskControls()
+        assert cfg.sizing == ba.ev_execution.Sizing()
+        assert cfg.limits == ba.ev_execution.PortfolioLimits()
+
+    def test_custom_cost_values_populate_cost_model(self):
+        cfg = ba.build_execution_config(commission_bps=10.0, spread_bps=5.0,
+                                        borrow_fee_bps=2.0, impact_model="sqrt",
+                                        impact_coeff=0.1)
+        assert cfg.costs == ba.ev_execution.CostModel(
+            commission_bps=10.0, spread_bps=5.0, borrow_fee_bps=2.0,
+            impact_model="sqrt", impact_coeff=0.1)
+
+    def test_custom_risk_and_sizing_and_limits_values(self):
+        cfg = ba.build_execution_config(
+            stop_loss_pct=0.05, take_profit_pct=0.10, vol_stop_mult=2.0,
+            trailing=True, max_holding_days=20,
+            sizing_mode="fixed_fraction", fraction=0.1, max_weight=0.2,
+            capital=100_000.0, max_concurrent=5, max_drawdown_stop=0.25)
+        assert cfg.risk == ba.ev_execution.RiskControls(
+            stop_loss_pct=0.05, take_profit_pct=0.10, vol_stop_mult=2.0,
+            trailing=True, max_holding_days=20)
+        assert cfg.sizing.mode == "fixed_fraction"
+        assert cfg.sizing.fraction == 0.1
+        assert cfg.sizing.max_weight == 0.2
+        assert cfg.limits == ba.ev_execution.PortfolioLimits(
+            capital=100_000.0, max_concurrent=5, max_drawdown_stop=0.25)
+
+    def test_invalid_fixed_fraction_without_fraction_raises_value_error(self):
+        with pytest.raises(ValueError, match="fixed_fraction"):
+            ba.build_execution_config(sizing_mode="fixed_fraction")
+
+    def test_invalid_negative_commission_raises_value_error(self):
+        with pytest.raises(ValueError, match="commission_bps"):
+            ba.build_execution_config(commission_bps=-1.0)
+
+
 class TestCharts:
     def _price_df(self):
         return pd.DataFrame({"close": [10.0, 11.0, 12.0]},

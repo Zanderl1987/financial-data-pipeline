@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 from evaluation import registry as ev_registry
 from evaluation import trades as ev_trades
 from evaluation import adapters as ev_adapters
+from evaluation import execution as ev_execution
 from evaluation.contracts import TradeRule
 from generate_eval_report import find_latest, load_run
 
@@ -68,6 +69,46 @@ def load_signal(name: str) -> dict:
 
 
 DEFAULT_NOTIONAL = 10_000.0
+
+
+def build_execution_config(*, commission_bps: float = 0.0, spread_bps: float = 0.0,
+                           borrow_fee_bps: float = 0.0,
+                           impact_model: "str | None" = None,
+                           impact_coeff: float = 0.0,
+                           stop_loss_pct: "float | None" = None,
+                           take_profit_pct: "float | None" = None,
+                           vol_stop_mult: "float | None" = None,
+                           trailing: bool = False,
+                           max_holding_days: "int | None" = None,
+                           sizing_mode: str = "fixed_notional",
+                           notional: float = DEFAULT_NOTIONAL,
+                           fraction: "float | None" = None,
+                           max_weight: "float | None" = None,
+                           capital: "float | None" = None,
+                           max_concurrent: "int | None" = None,
+                           max_drawdown_stop: "float | None" = None
+                           ) -> "ev_execution.ExecutionConfig":
+    """Assemble a live ExecutionConfig from typed values -- one dataclass
+    group per evaluation/execution.py group, no new grouping invented.
+    Raises ValueError (via the dataclasses' own __post_init__) on an
+    invalid combination; callers catch it and show the message inline
+    rather than letting it crash the app."""
+    return ev_execution.ExecutionConfig(
+        name="live",
+        costs=ev_execution.CostModel(
+            commission_bps=commission_bps, spread_bps=spread_bps,
+            borrow_fee_bps=borrow_fee_bps, impact_model=impact_model,
+            impact_coeff=impact_coeff),
+        risk=ev_execution.RiskControls(
+            stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+            vol_stop_mult=vol_stop_mult, trailing=trailing,
+            max_holding_days=max_holding_days),
+        sizing=ev_execution.Sizing(
+            mode=sizing_mode, notional=notional, fraction=fraction,
+            max_weight=max_weight),
+        limits=ev_execution.PortfolioLimits(
+            capital=capital, max_concurrent=max_concurrent,
+            max_drawdown_stop=max_drawdown_stop))
 
 
 def _crossed_up(series, level):
