@@ -130,7 +130,18 @@ def resolve_execution_config(*, commission_bps, spread_bps, borrow_fee_bps,
     sizing_notional: blank (None) falls back to DEFAULT_NOTIONAL rather than
     reaching Sizing's `notional must be > 0` check with None, which would
     raise TypeError instead of the intended ValueError.
+
+    sizing_mode="fixed_fraction" with limits_capital=None constructs a VALID
+    ExecutionConfig -- Sizing.__post_init__ only requires `fraction` to be
+    set for that mode, and PortfolioLimits.__post_init__ has no cross-field
+    check against sizing.mode. That combination only fails later, inside
+    evaluation/trades.py's _portfolio_pass() when simulate_live() actually
+    runs the simulation. Caught here explicitly so it's rejected early and
+    cheaply, before any simulation is attempted.
     """
+    if sizing_mode == "fixed_fraction" and limits_capital is None:
+        return None, ("Execution config error: sizing.mode='fixed_fraction' "
+                      "requires limits.capital")
     try:
         cfg = build_execution_config(
             commission_bps=commission_bps, spread_bps=spread_bps,
@@ -237,7 +248,7 @@ def get_cache(name: str, run_id: str) -> dict:
     return _CACHE[name]
 
 
-_SIM_CACHE: dict = {}   # (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min) -> (trades, summary)
+_SIM_CACHE: dict = {}   # (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min, config_hash) -> (trades, summary)
 
 
 def simulate_live(name: str, run_id: str, bull_min: float, exit_long_max: float,
@@ -409,7 +420,8 @@ def parameter_heatmap_fig(name: str, run_id: str) -> go.Figure:
         colorscale="Viridis"
     ))
     fig.update_layout(
-        title="Parameter Sensitivity: Bull Entry vs Exit Long P&L ($)",
+        title="Parameter Sensitivity: Bull Entry vs Exit Long P&L ($) "
+              "(legacy costs -- ignores Execution Config panel)",
         xaxis_title="Bull Entry Threshold", yaxis_title="Exit Long Threshold",
         height=340
     )
@@ -441,15 +453,19 @@ def _execution_config_panel() -> "html.Div":
             _ranged_slider("commission-bps", 0.0, 0.0, 50.0, 0.5),
             html.Div("Spread (bps)"),
             _ranged_slider("spread-bps", 0.0, 0.0, 50.0, 0.5),
-            html.Div("Borrow fee (bps)"),
+            html.Div("Borrow fee (bps) (no effect on this engine)"),
             _ranged_slider("borrow-fee-bps", 0.0, 0.0, 50.0, 0.5),
+            # "sqrt" impact is turnover-based and only used by the (unused
+            # here) weight-matrix engine's daily cost function -- inert on
+            # the discrete-trade engine this live app actually simulates
+            # against. "flat" DOES apply here via round_trip_rate().
             html.Div("Impact model"),
             dcc.Dropdown(id="impact-model", clearable=False,
                         options=[{"label": "none", "value": "none"},
-                                 {"label": "sqrt", "value": "sqrt"},
+                                 {"label": "sqrt (no effect here)", "value": "sqrt"},
                                  {"label": "flat", "value": "flat"}],
                         value="none"),
-            html.Div("Impact coeff"),
+            html.Div("Impact coeff (no effect when impact model = sqrt)"),
             _ranged_slider("impact-coeff", 0.0, 0.0, 50.0, 0.5),
         ]),
         html.Div([
@@ -486,7 +502,7 @@ def _execution_config_panel() -> "html.Div":
             dcc.Input(id="limits-capital", type="number", value=None),
             html.Div("Max concurrent"),
             dcc.Input(id="limits-max-concurrent", type="number", value=None),
-            html.Div("Max drawdown stop"),
+            html.Div("Max drawdown stop (no effect on this engine)"),
             dcc.Input(id="limits-max-drawdown-stop", type="number", value=None),
         ]),
         html.Div(id="execution-config-error", style={"color": "#d03b3b"}),
@@ -612,12 +628,18 @@ def register_callbacks(app: "dash.Dash") -> None:
             limits_max_concurrent=limits_max_concurrent,
             limits_max_drawdown_stop=limits_max_drawdown_stop)
         if cfg is None:
-            return ("invalid execution config -- see message below", empty_fig,
-                    empty_fig, empty_fig, cfg_error, [])
+            return ("invalid execution config -- see message below",
+                    dash.no_update, dash.no_update, dash.no_update, cfg_error,
+                    dash.no_update)
 
-        trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
-                                        exit_long_max, bear_max, exit_short_min,
-                                        config=cfg)
+        try:
+            trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
+                                            exit_long_max, bear_max, exit_short_min,
+                                            config=cfg)
+        except ValueError as exc:
+            return ("invalid execution config -- see message below", dash.no_update,
+                    dash.no_update, dash.no_update, f"Execution config error: {exc}",
+                    dash.no_update)
         baseline = store["results"].get("summary", {})
         diff = baseline_vs_live(baseline, summary)
         if summary.get("n_trades", 0) == 0:

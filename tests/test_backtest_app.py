@@ -403,6 +403,25 @@ class TestResolveExecutionConfig:
         assert cfg is None
         assert "fixed_fraction" in err
 
+    def test_fixed_fraction_without_capital_returns_none_and_message(self):
+        """Regression for the final-review Critical finding: fixed_fraction
+        sizing with fraction set but limits.capital blank constructs a
+        VALID ExecutionConfig at __post_init__ time (Sizing only requires
+        `fraction`, PortfolioLimits has no cross-field check) -- the
+        failure used to surface only later, inside evaluation/trades.py's
+        _portfolio_pass(), as an uncaught ValueError out of simulate_live().
+        resolve_execution_config() now catches this combination directly,
+        before any simulation is attempted -- verified at this level since
+        that's exactly where the fix (part 1a) lives; the callback-level
+        fix (part 1b, the try/except ValueError around simulate_live) is a
+        belt-and-suspenders guard for any FUTURE point-of-use check added to
+        trades.py, and isn't reachable by this specific case anymore."""
+        values = dict(self.DEFAULTS, sizing_mode="fixed_fraction",
+                     sizing_fraction=0.1, limits_capital=None)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg is None
+        assert "fixed_fraction" in err
+
 
 class TestCharts:
     def _price_df(self):
@@ -585,6 +604,44 @@ class TestRenderTearsheet:
         out = ba.render_tearsheet(sheet)
         assert any(isinstance(c, ba.dcc.Markdown) for c in out)
         assert any(isinstance(c, ba.dcc.Graph) for c in out)
+
+
+class TestFullChainIntegration:
+    """Covers the seam the final-review Critical finding slipped through:
+    no prior test drove resolve_execution_config -> simulate_live(config=)
+    -> live_tearsheet -> render_tearsheet as one chain with valid raw
+    Dash-shaped inputs. Only get_cache (external data load) is mocked --
+    the rule engine, execution config resolution, and tearsheet rendering
+    all run for real."""
+
+    def test_resolve_to_render_tearsheet_end_to_end(self, monkeypatch):
+        n_cycles = 15
+        pattern = [0.0, 0.6, 0.05, -0.6, -0.05]
+        rating_all = pattern * n_cycles
+        n = len(rating_all)
+        close = [100.0 + 0.3 * i for i in range(n)]
+        cache = {"AAPL": pd.DataFrame(
+            {"close": close, "rating_all": rating_all},
+            index=pd.bdate_range("2024-01-01", periods=n))}
+        monkeypatch.setattr(ba, "get_cache", lambda name, run_id: cache)
+        ba._SIM_CACHE.clear()
+
+        values = dict(TestResolveExecutionConfig.DEFAULTS,
+                     commission_bps=1.0, spread_bps=1.0)
+        cfg, err = ba.resolve_execution_config(**values)
+        assert cfg is not None
+        assert err == ""
+
+        trades, summary = ba.simulate_live(
+            "tv_threshold", "run_001", bull_min=0.5, exit_long_max=0.1,
+            bear_max=-0.5, exit_short_min=-0.1, config=cfg)
+        assert summary.get("n_trades", 0) > 0
+
+        sheet = ba.live_tearsheet(trades)
+        children = ba.render_tearsheet(sheet)
+        assert isinstance(children, list)
+        assert len(children) > 0
+        assert any(isinstance(c, ba.dcc.Markdown) for c in children)
 
 
 class TestRenderIcPanel:
