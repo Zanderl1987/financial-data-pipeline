@@ -497,6 +497,20 @@ class TestLayout:
         app.layout = ba.build_layout(ba.list_evaluated_signals())
         ba.register_callbacks(app)     # just verifies callback registration succeeds
 
+    def test_register_callbacks_wires_new_outputs_without_raising(self):
+        # register_callbacks() would raise if it referenced an Output id
+        # missing from the layout -- this documents that the new IDs
+        # (execution-config-error, tearsheet-container) are both present
+        # and wired without needing a browser to prove it.
+        app = dash.Dash(__name__)
+        app.layout = ba.build_layout([
+            {"name": "tv_threshold", "has_local_artifacts": True}])
+        ba.register_callbacks(app)
+        found = set()
+        self._collect_ids(app.layout, found)
+        assert "execution-config-error" in found
+        assert "tearsheet-container" in found
+
     def _collect_ids(self, component, found):
         cid = getattr(component, "id", None)
         if cid:

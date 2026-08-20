@@ -571,18 +571,53 @@ def register_callbacks(app: "dash.Dash") -> None:
     @app.callback(
         Output("trade-summary", "children"), Output("symbol-fig", "figure"),
         Output("pnl-fig", "figure"), Output("heatmap-fig", "figure"),
+        Output("execution-config-error", "children"),
+        Output("tearsheet-container", "children"),
         Input("signal-store", "data"), Input("bull-min", "value"),
         Input("exit-long-max", "value"), Input("bear-max", "value"),
-        Input("exit-short-min", "value"), Input("symbol-dropdown", "value"))
+        Input("exit-short-min", "value"), Input("symbol-dropdown", "value"),
+        Input("commission-bps", "value"), Input("spread-bps", "value"),
+        Input("borrow-fee-bps", "value"), Input("impact-model", "value"),
+        Input("impact-coeff", "value"), Input("stop-loss-pct", "value"),
+        Input("take-profit-pct", "value"), Input("vol-stop-mult", "value"),
+        Input("trailing", "value"), Input("max-holding-days", "value"),
+        Input("sizing-mode", "value"), Input("sizing-notional", "value"),
+        Input("sizing-fraction", "value"), Input("sizing-max-weight", "value"),
+        Input("limits-capital", "value"), Input("limits-max-concurrent", "value"),
+        Input("limits-max-drawdown-stop", "value"))
     def _on_sliders_change(store, bull_min, exit_long_max, bear_max,
-                          exit_short_min, symbol):
+                          exit_short_min, symbol, commission_bps, spread_bps,
+                          borrow_fee_bps, impact_model, impact_coeff,
+                          stop_loss_pct, take_profit_pct, vol_stop_mult,
+                          trailing, max_holding_days, sizing_mode,
+                          sizing_notional, sizing_fraction, sizing_max_weight,
+                          limits_capital, limits_max_concurrent,
+                          limits_max_drawdown_stop):
         empty_fig = go.Figure()
         if not store:
-            return "select a signal", empty_fig, empty_fig, empty_fig
+            return "select a signal", empty_fig, empty_fig, empty_fig, "", []
         if not has_trade_rule(store["name"]):
-            return "no trade rule defined for this signal", empty_fig, empty_fig, empty_fig
+            return ("no trade rule defined for this signal", empty_fig,
+                    empty_fig, empty_fig, "", [])
+
+        cfg, cfg_error = resolve_execution_config(
+            commission_bps=commission_bps, spread_bps=spread_bps,
+            borrow_fee_bps=borrow_fee_bps, impact_model=impact_model,
+            impact_coeff=impact_coeff, stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct, vol_stop_mult=vol_stop_mult,
+            trailing=trailing, max_holding_days=max_holding_days,
+            sizing_mode=sizing_mode, sizing_notional=sizing_notional,
+            sizing_fraction=sizing_fraction, sizing_max_weight=sizing_max_weight,
+            limits_capital=limits_capital,
+            limits_max_concurrent=limits_max_concurrent,
+            limits_max_drawdown_stop=limits_max_drawdown_stop)
+        if cfg is None:
+            return ("invalid execution config -- see message below", empty_fig,
+                    empty_fig, empty_fig, cfg_error, [])
+
         trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
-                                        exit_long_max, bear_max, exit_short_min)
+                                        exit_long_max, bear_max, exit_short_min,
+                                        config=cfg)
         baseline = store["results"].get("summary", {})
         diff = baseline_vs_live(baseline, summary)
         if summary.get("n_trades", 0) == 0:
@@ -599,7 +634,8 @@ def register_callbacks(app: "dash.Dash") -> None:
                   if symbol and symbol in cache else empty_fig)
         pnl_fig = cumulative_pnl_fig(trades) or empty_fig
         h_fig = parameter_heatmap_fig(store["name"], store["run_id"])
-        return text, sym_fig, pnl_fig, h_fig
+        tearsheet_children = render_tearsheet(live_tearsheet(trades))
+        return text, sym_fig, pnl_fig, h_fig, "", tearsheet_children
 
 
 app = dash.Dash(__name__)
