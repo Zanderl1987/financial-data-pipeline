@@ -240,20 +240,26 @@ _SIM_CACHE: dict = {}   # (name, run_id, bull_min, exit_long_max, bear_max, exit
 
 def simulate_live(name: str, run_id: str, bull_min: float, exit_long_max: float,
                   bear_max: float, exit_short_min: float,
-                  notional: "float | None" = None):
+                  notional: "float | None" = None, *,
+                  config: "ev_execution.ExecutionConfig | None" = None):
     """Re-run the trade simulation in-process against the cached panel --
-    no disk I/O, cost bounded by in-memory panel size. Memoized by its
-    full input key so switching the symbol dropdown (which doesn't change
-    any of these inputs) reuses the already-computed trades instead of
-    re-simulating the whole universe."""
-    key = (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min)
+    no disk I/O, cost bounded by in-memory panel size. Memoized by its full
+    input key, INCLUDING the execution config's hash, so switching the
+    symbol dropdown (which doesn't change any of these inputs) reuses the
+    already-computed trades, and two different execution configs against
+    identical thresholds never collide in the memo. config=None means
+    ExecutionConfig LEGACY (today's behavior: no costs, no stops,
+    unlimited concurrency) -- unchanged from before this config parameter
+    existed."""
+    key = (name, run_id, bull_min, exit_long_max, bear_max, exit_short_min,
+           ev_execution.config_hash(config))
     if key in _SIM_CACHE:
         return _SIM_CACHE[key]
     cache = get_cache(name, run_id)
     _, rule_builder = KNOWN_TRADE_RULE_SIGNALS[name]
     rule = rule_builder(bull_min, exit_long_max, bear_max, exit_short_min,
                         notional or DEFAULT_NOTIONAL)
-    trades = ev_trades.simulate(rule, cache)
+    trades = ev_trades.simulate(rule, cache, config=config)
     summary = ev_trades.trade_summary(trades)
     _SIM_CACHE[key] = (trades, summary)
     return trades, summary

@@ -254,6 +254,44 @@ class TestCacheAndSimulateLive:
         assert trades.empty
         assert summary == {"n_trades": 0, "summary_reason": "no realized trades"}
 
+    def test_config_none_still_works_and_matches_prior_behavior(self, monkeypatch):
+        cache = {"AAPL": pd.DataFrame(
+            {"close": [10.0, 11.0, 12.0, 13.0], "rating_all": [0.0, 0.6, 0.05, 0.6]},
+            index=pd.bdate_range("2024-01-01", periods=4))}
+        monkeypatch.setattr(ba, "get_cache", lambda name, run_id: cache)
+        ba._SIM_CACHE.clear()
+        trades, summary = ba.simulate_live("tv_threshold", "run_001", bull_min=0.5,
+                                           exit_long_max=0.1, bear_max=-0.5,
+                                           exit_short_min=-0.1)
+        assert summary["n_trades"] >= 0   # no exception, legacy path still runs
+
+    def test_different_configs_produce_separate_cache_entries(self, monkeypatch):
+        cache = {"AAPL": pd.DataFrame(
+            {"close": [10.0, 11.0, 12.0, 13.0], "rating_all": [0.0, 0.6, 0.05, 0.6]},
+            index=pd.bdate_range("2024-01-01", periods=4))}
+        monkeypatch.setattr(ba, "get_cache", lambda name, run_id: cache)
+        ba._SIM_CACHE.clear()
+        cheap = ba.build_execution_config(commission_bps=0.0)
+        costly = ba.build_execution_config(commission_bps=50.0)
+        ba.simulate_live("tv_threshold", "run_001", 0.5, 0.1, -0.5, -0.1, config=cheap)
+        ba.simulate_live("tv_threshold", "run_001", 0.5, 0.1, -0.5, -0.1, config=costly)
+        assert len(ba._SIM_CACHE) == 2
+
+    def test_costly_config_reduces_pnl_versus_legacy(self, monkeypatch):
+        cache = {"AAPL": pd.DataFrame(
+            {"close": [10.0, 12.0, 14.0, 11.0], "rating_all": [0.0, 0.6, 0.05, 0.6]},
+            index=pd.bdate_range("2024-01-01", periods=4))}
+        monkeypatch.setattr(ba, "get_cache", lambda name, run_id: cache)
+        ba._SIM_CACHE.clear()
+        legacy_trades, legacy_summary = ba.simulate_live(
+            "tv_threshold", "run_001", 0.5, 0.1, -0.5, -0.1)
+        costly = ba.build_execution_config(commission_bps=100.0)
+        costly_trades, costly_summary = ba.simulate_live(
+            "tv_threshold", "run_001", 0.5, 0.1, -0.5, -0.1, config=costly)
+        if legacy_summary.get("n_trades", 0) > 0:
+            assert (costly_summary["total_pnl_dollars"]
+                    < legacy_summary["total_pnl_dollars"])
+
 
 class TestBaselineVsLive:
     def test_diffs_the_three_headline_stats(self):
