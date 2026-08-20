@@ -498,6 +498,35 @@ class TestLayout:
         ba.register_callbacks(app)     # just verifies callback registration succeeds
 
 
+class TestLiveTearsheet:
+    def test_empty_trades_returns_reason(self):
+        out = ba.live_tearsheet(pd.DataFrame(columns=ba.ev_trades.TRADE_COLS))
+        assert out == {"returns_reason": "no realized trades"}
+
+    def test_none_trades_returns_reason(self):
+        assert ba.live_tearsheet(None) == {"returns_reason": "no realized trades"}
+
+    def test_trades_with_no_exit_date_column_propagates_bridge_reason(self):
+        trades = pd.DataFrame({"symbol": ["AAPL"], "pnl_dollars": [100.0]})
+        out = ba.live_tearsheet(trades)
+        assert "returns_reason" in out
+        assert "exit_date" in out["returns_reason"] or "columns" in out["returns_reason"]
+
+    def test_enough_realized_trades_returns_full_tearsheet_dict(self):
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        trades = pd.DataFrame({
+            "exit_date": dates[::4],
+            "pnl_dollars": [100.0, -50.0, 200.0, 80.0, -20.0, 150.0, 60.0, -10.0,
+                            120.0, 90.0],
+        })
+        out = ba.live_tearsheet(trades)
+        assert "returns_reason" not in out
+        assert set(out.keys()) == {"headline", "monthly", "rolling",
+                                   "drawdowns", "underwater", "benchmark"}
+        assert out["headline"]["sharpe"] is not None or \
+               "headline_reason" in out["headline"]
+
+
 class TestRenderIcPanel:
     def test_trade_rule_type_renders_trades_fig(self):
         trades = pd.DataFrame({

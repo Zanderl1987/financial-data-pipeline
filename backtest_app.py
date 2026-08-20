@@ -23,6 +23,7 @@ from evaluation import registry as ev_registry
 from evaluation import trades as ev_trades
 from evaluation import adapters as ev_adapters
 from evaluation import execution as ev_execution
+from evaluation import tearsheet as ev_tearsheet
 from evaluation.contracts import TradeRule
 from generate_eval_report import find_latest, load_run
 
@@ -263,6 +264,21 @@ def simulate_live(name: str, run_id: str, bull_min: float, exit_long_max: float,
     summary = ev_trades.trade_summary(trades)
     _SIM_CACHE[key] = (trades, summary)
     return trades, summary
+
+
+def live_tearsheet(trades: "pd.DataFrame | None") -> dict:
+    """Bridge realized trades -> the same tearsheet dict generate_tearsheet.py
+    computes for the static HTML report -- daily_returns_from_trades() then
+    tearsheet(), both unchanged from W3. Returns {"returns_reason": ...}
+    when there aren't enough realized trades to build a return series, the
+    same shape daily_returns_from_trades() itself uses for its empty
+    states, so callers check one key regardless of where the gap occurred."""
+    if trades is None or trades.empty:
+        return {"returns_reason": "no realized trades"}
+    bridged = ev_tearsheet.daily_returns_from_trades(trades)
+    if bridged["returns"] is None:
+        return {"returns_reason": bridged["returns_reason"]}
+    return ev_tearsheet.tearsheet(bridged["returns"])
 
 
 BASELINE_DIFF_KEYS = ("n_trades", "win_rate_pct", "total_pnl_dollars")
