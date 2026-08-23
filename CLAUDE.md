@@ -176,9 +176,15 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   callback URL (127.0.0.1:8182), captures the browser redirect in-process well inside the
   ~30s code window, so Zander just logs in (no paste), then proves the stored refresh
   token actually advanced and spends one live quote call confirming it works. Persistent
-  cert under `%LOCALAPPDATA%\schwab_reauth\` is already trusted in CurrentUser\Root, so no
-  TLS warning; if the script reports it regenerated the cert (they expire), re-run the
-  `certutil -addstore` line it prints or the warning comes back mid-window. Since the bash
+   cert under `%LOCALAPPDATA%\schwab_reauth\` is already trusted in CurrentUser\Root, so no
+   TLS warning; if the script reports it regenerated the cert (they expire), re-run the
+   `certutil -addstore` line it prints or the warning comes back mid-window. CAVEAT
+   (cost two failed attempts on 2026-08-20): default browser is FIREFOX, which ignores
+   CurrentUser\Root entirely — its "Potential Security Risk Ahead" page must be clicked
+   through (Advanced -> Accept the Risk) or the redirect never reaches the listener and
+   the pasted code dies in the ~30s window. Also: kill any waiting reauth process before
+   a `--callback-url` exchange — schwabdev holds tokens.db locked while awaiting the
+   redirect, and a second process just hits `database is locked`. Since the bash
   tool kills child trees on timeout, launch via Task Scheduler (`schtasks /create` +
   `/run`, wrapper .bat captures logs) — see work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md. Fallbacks:
   `--paste` (prompt) and `--callback-url "<url>"` (non-interactive, for agent sessions

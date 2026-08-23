@@ -192,6 +192,53 @@ def fetch_finnhub_profiles(symbols: list[str]) -> pd.DataFrame:
     return df
 
 
+def load_existing_enrichment() -> pd.DataFrame:
+    """Read the current constituents.securities table and return its Finnhub
+    profile fields as a {symbol: profile} frame, so a --skip-finnhub run keeps
+    previously-fetched market_cap/industry/... instead of nulling them out on
+    the full overwrite below. Returns empty on a first build or catalog errors."""
+    cols = {
+        "symbol": "symbol",
+        "company_name": "name",
+        "exchange": "exchange",
+        "country": "country",
+        "ipo_date": "ipo",
+        "market_cap": "marketCapitalization",
+        "shares_outstanding": "shareOutstanding",
+        "industry": "finnhubIndustry",
+        "currency": "currency",
+    }
+    try:
+        from pyiceberg.catalog import load_catalog
+        catalog = load_catalog(
+            "constituents",
+            type="sql",
+            uri=f"sqlite:///{CATALOG_DB.as_posix()}",
+            warehouse=f"file://{ICEBERG_WAREHOUSE.as_posix()}",
+        )
+        table = catalog.load_table("constituents.securities")
+        df = table.scan().to_pandas()
+    except Exception as exc:
+        log.warning("[EXISTING] Could not read existing securities table: %s", exc)
+        return pd.DataFrame()
+    if df.empty:
+        return df
+
+    have = {k: v for k, v in cols.items() if k in df.columns}
+    out = df[list(have)].rename(columns=have)
+    enrich_cols = [c for c in ("marketCapitalization", "shareOutstanding",
+                               "finnhubIndustry", "ipo") if c in out.columns]
+    if enrich_cols:
+        mask = pd.Series(False, index=out.index)
+        for c in enrich_cols:
+            mask |= out[c].notna() & (out[c].astype(str).str.strip() != "")
+        out = out[mask]
+    out = out.dropna(subset=["symbol"])
+    log.info("[EXISTING] Carrying forward enrichment for %d symbols",
+             out["symbol"].nunique())
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 4. Merge all sources into unified securities table
 # ---------------------------------------------------------------------------
@@ -399,7 +446,11 @@ def main(skip_finnhub: bool = False, finnhub_symbols: list[str] | None = None):
 
     # 3. Finnhub enrichment (optional)
     finnhub = pd.DataFrame()
-    if not skip_finnhub:
+    if skip_finnhub:
+        # Preserve enrichment already present in the table -- a full overwrite
+        # below would otherwise null out Finnhub fields on a --skip-finnhub run.
+        finnhub = load_existing_enrichment()
+    else:
         # Determine which symbols to enrich
         if finnhub_symbols:
             symbols = finnhub_symbols

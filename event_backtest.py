@@ -43,6 +43,7 @@ import math
 import os
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -67,6 +68,7 @@ def _table_has(table: str, symbol: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=None)
 def load_close(symbol: str, start: "str | None" = None,
                end: "str | None" = None,
                price_table: "str | None" = None) -> pd.Series:
@@ -308,6 +310,7 @@ class ScenarioResult:
     equity: pd.Series            # daily equity of an equal-weight overlay
     metrics: dict = field(default_factory=dict)
     params: dict = field(default_factory=dict)
+    event_study: "EventStudyResult | None" = None  # internal study (day0 = entry)
 
     def summary(self) -> pd.DataFrame:
         return pd.DataFrame.from_dict({**self.params, **self.metrics},
@@ -445,7 +448,8 @@ def scenario(
               "stop_loss_pct": stop_loss_pct, "take_profit_pct": take_profit_pct,
               "cost_bps": cost_bps, "spread_bps": spread_bps,
               "slippage_model": slippage_model or "none", "atr_stop_mult": atr_stop_mult}
-    return ScenarioResult(trades=tdf, equity=equity, metrics=metrics, params=params)
+    return ScenarioResult(trades=tdf, equity=equity, metrics=metrics,
+                          params=params, event_study=res)
 
 
 
@@ -645,6 +649,7 @@ def technical_events(
     signal="golden_cross",
     price_table: "str | None" = None,
     start: "str | None" = None,
+    frames: "dict[str, pd.DataFrame] | None" = None,
 ) -> pd.DataFrame:
     """
     Dates when a technical signal fires for each symbol.
@@ -652,6 +657,9 @@ def technical_events(
     signal: one of {names} or any callable(indicator_frame) -> boolean Series.
     The frame passed to callables has every analytics.technical indicator plus
     rating_all/rating_ma/rating_osc, so custom conditions can combine them.
+    frames: optional precomputed dict mapping each symbol to its rating_history
+    frame, so several signals can be evaluated against one set of indicators
+    instead of re-deriving them per signal (signal_monitor builds it once).
     Columns: symbol, date, signal.
     """
     from analytics.technical import rating_history
@@ -660,19 +668,23 @@ def technical_events(
     fn = _TECH_SIGNALS[signal] if isinstance(signal, str) else signal
     name = signal if isinstance(signal, str) else getattr(signal, "__name__", "custom")
 
-    frames = []
-    for sym in symbols:
-        d = rating_history(sym, price_table=price_table, start=start)
-        if d.empty:
+    if frames is None:
+        frames = {sym: rating_history(sym, price_table=price_table, start=start)
+                  for sym in dict.fromkeys(symbols)}
+
+    out = []
+    for sym in dict.fromkeys(symbols):
+        d = frames.get(sym)
+        if d is None or d.empty:
             continue
         fired = fn(d).fillna(False)
         if fired.any():
-            frames.append(pd.DataFrame({"symbol": sym,
-                                        "date": d.index[fired],
-                                        "signal": name}))
-    return (pd.concat(frames, ignore_index=True).sort_values("date")
+            out.append(pd.DataFrame({"symbol": sym,
+                                    "date": d.index[fired],
+                                    "signal": name}))
+    return (pd.concat(out, ignore_index=True).sort_values("date")
               .reset_index(drop=True)
-            if frames else pd.DataFrame(columns=["symbol", "date", "signal"]))
+            if out else pd.DataFrame(columns=["symbol", "date", "signal"]))
 
 
 technical_events.__doc__ = technical_events.__doc__.format(
