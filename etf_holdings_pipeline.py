@@ -258,6 +258,30 @@ DEFAULT_ETF_UNIVERSE = {
     "AOK":  "iShares Core Conservative Allocation ETF",
 }
 
+# SecuritiesDB's free /etfs/{ticker}/holdings endpoint only covers standard
+# equity ETFs -- confirmed live 2026-08-22 that every ticker below 404s
+# persistently (bond funds, commodity trusts, leveraged/inverse, crypto,
+# covered-call, allocation, broad-market/factor, thematic). Not a parsing
+# bug or transient outage: SPY/QQQ/XLK return 200 the same moment these
+# 404. Skipped by default so nightly runs don't burn a request + log line
+# on 61 known-dead lookups every night; still fetchable explicitly via
+# --symbols if SecuritiesDB ever adds coverage.
+NOT_ON_SECURITIESDB = frozenset({
+    "IWV", "SCHM", "ACWX", "IUSV", "IUSG", "IDV", "SCHY", "DIV",
+    "BND", "IEI", "BIV", "BLV", "BSV", "VTEB", "SHV", "SGOV",
+    "VCIT", "VCSH", "VCLT", "BNDX", "REET", "USRT",
+    "GLD", "SLV", "IAU", "SGOL", "USO", "DBC", "GSG", "PDBC",
+    "COPX", "MOO", "TAN", "ICLN", "FAN", "ROBO", "AIQ",
+    "IBIT", "ETHA",
+    "XYLD", "QYLD", "RYLD", "DIVO",
+    "LABU", "SVXY",
+    "PBJ", "PEJ", "OIH",
+    "SH", "DOG", "PSQ",
+    "PCY",
+    "ESGU", "ESGD", "ESGE", "SUSA", "DSI",
+    "AOR", "AOM", "AOA", "AOK",
+})
+
 
 def fetch_etf_holdings(ticker: str, fund_name: str) -> pd.DataFrame | None:
     """Fetch full ETF holdings from SecuritiesDB free API."""
@@ -332,6 +356,10 @@ def fetch_all_etf_holdings(only_tickers: list[str] | None = None, limit: int | N
 
         if not fund_name and not only_tickers:
             log.warning("[%s] Not in ETF universe — skipping", ticker)
+            skipped.append(ticker)
+            continue
+
+        if ticker in NOT_ON_SECURITIESDB and not only_tickers:
             skipped.append(ticker)
             continue
 

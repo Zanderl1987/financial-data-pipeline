@@ -405,20 +405,24 @@ def run_groups() -> None:
     """
     Sector, industry, country performance + valuation by group.
 
-    View codes:
-      v=130 — Performance (week/month/quarter/half/year/YTD returns)
-      v=140 — Valuation   (P/E, Fwd P/E, PEG, P/S, P/B, P/FCF, div yield, analyst rec)
+    View codes (Finviz migrated /groups.ashx -> /groups and reshuffled the view
+    codes -- confirmed live 2026-08-22 via browser network inspection, the old
+    v=130/v=140 pair now silently returns an empty page shell):
+      v=140 — Performance (week/month/quarter/half/year/YTD returns)
+      v=120 — Valuation   (P/E, Fwd P/E, PEG, P/S, P/B, P/FCF, div yield, analyst rec)
+    Also requires an explicit sort (o=name&st=d1) -- without it the new endpoint
+    returns the same empty shell as the stale view codes did.
     """
     today_str  = datetime.datetime.utcnow().strftime("%Y%m%d")
     fetched_at = datetime.datetime.utcnow().isoformat()
 
     # (g_param, v_param, out_dir, group_type, filename_prefix or None=valuation)
     configs = [
-        ("sector",   "130", DIR_SECTOR,    "sector",   "finviz_sector_perf"),
-        ("industry", "130", DIR_INDUSTRY,  "industry", "finviz_industry_perf"),
-        ("country",  "130", DIR_COUNTRY,   "country",  "finviz_country_perf"),
-        ("sector",   "140", DIR_VALUATION, "sector",   None),
-        ("industry", "140", DIR_VALUATION, "industry", None),
+        ("sector",   "140", DIR_SECTOR,    "sector",   "finviz_sector_perf"),
+        ("industry", "140", DIR_INDUSTRY,  "industry", "finviz_industry_perf"),
+        ("country",  "140", DIR_COUNTRY,   "country",  "finviz_country_perf"),
+        ("sector",   "120", DIR_VALUATION, "sector",   None),
+        ("industry", "120", DIR_VALUATION, "industry", None),
     ]
 
     valuation_frames: list[pd.DataFrame] = []
@@ -428,7 +432,7 @@ def run_groups() -> None:
         label = f"{group_type} (v={v_param})"
         print(f"  [{label}]", end=" ", flush=True)
 
-        resp = _get(f"{BASE_URL}/groups.ashx", params={"g": g_param, "v": v_param})
+        resp = _get(f"{BASE_URL}/groups", params={"g": g_param, "v": v_param, "o": "name", "st": "d1"})
         if resp is None:
             print("FAILED")
             continue

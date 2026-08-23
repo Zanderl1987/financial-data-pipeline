@@ -721,6 +721,7 @@ PIPELINES: list[PipelineSpec] = [
         tables=['securities'],
         requires_env=['FINNHUB_API_KEY'],
         backfill_args=['--skip-finnhub'],
+        incremental_args=['--skip-finnhub'],
         timeout=600,
     ),
     PipelineSpec(
@@ -729,7 +730,16 @@ PIPELINES: list[PipelineSpec] = [
         desc="Fund holdings -- iShares ETFs (BlackRock API) + mutual funds (EdgarTools N-PORT) (Iceberg table)",
         stage=1,
         tables=['fund_holdings'],
-        timeout=1200,
+        # EdgarTools N-PORT fetches run ~55s/fund (network+XML parse, not our
+        # rate limiting) x 53 mutual funds = ~49min alone; 1200s was timing out
+        # every night before the ETF/bond legs even started. First fix (3600s)
+        # STILL wasn't enough -- measured live 2026-08-22: fetch phase (52 ETF
+        # + 4 bond + 53 MF) took ~54min end to end, then the batched per-fund
+        # Iceberg write phase (~8s/fund x ~105 funds) needs another ~14min on
+        # top -- real total ~68min. 5400s (90min) leaves real headroom this
+        # time. See daily_pipelines_2026-08-21/-22 and
+        # storage/logs/failures/fund_holdings_20260822_204418.log.
+        timeout=5400,
     ),
     PipelineSpec(
         name="etf_holdings",
@@ -938,7 +948,7 @@ PIPELINES: list[PipelineSpec] = [
         desc="TA-rating signal health tracker — win rate/PF/CAR by window, flags decline",
         stage=3,
         tables=["signal_health"],
-        timeout=900,
+        timeout=1800,
     ),
 ]
 

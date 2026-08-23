@@ -1208,14 +1208,17 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "fetched_at",
     },
     "finnhub_lobbying": {
-        "required":    ['symbol', 'start_date', 'lobbying_firm', 'fetched_at'],
-        "critical_nn": ['symbol', 'start_date', 'lobbying_firm'],
-        "date_col":    "start_date",
+        # Finnhub's /stock/lobbying never populates a real per-filing date
+        # (its own "date" field is blank on every row, verified 2026-08-22);
+        # only year/period are reliable, so fetched_at is the date_col here.
+        "required":    ['symbol', 'client_name', 'year', 'period', 'fetched_at'],
+        "critical_nn": ['symbol', 'client_name'],
+        "date_col":    "fetched_at",
     },
     "finnhub_usa_spending": {
-        "required":    ['symbol', 'start_date', 'awarding_agency', 'fetched_at'],
-        "critical_nn": ['symbol', 'start_date', 'awarding_agency'],
-        "date_col":    "start_date",
+        "required":    ['symbol', 'action_date', 'awarding_agency', 'fetched_at'],
+        "critical_nn": ['symbol', 'action_date', 'awarding_agency'],
+        "date_col":    "action_date",
     },
     "finnhub_uspto_patents": {
         "required":    ['symbol', 'fetched_at'],

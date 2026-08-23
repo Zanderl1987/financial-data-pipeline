@@ -31,7 +31,7 @@ DATA_URL = "http://www.econ.yale.edu/~shiller/data/ie_data.xls"
 def _parse_date(val) -> str | None:
     """
     Convert Shiller date float (e.g. 1871.01, 2024.1) to YYYY-MM-DD.
-    Month fraction: 1871.01 → Jan 1871, 2024.1 → Oct 2024.
+    Month fraction: 1871.01 -> Jan 1871, 2024.1 -> Oct 2024.
     """
     try:
         f = float(val)
@@ -89,7 +89,7 @@ def fetch() -> pd.DataFrame:
             "real_price":    _f(7),
             "real_dividend": _f(8),
             "real_earnings": _f(10),  # col 9 is total return price
-            "cape":          _f(11),
+            "cape":          _f(12),  # col 11 is "Earnings.1" (scaled TR earnings), not CAPE
         })
 
     df = pd.DataFrame(rows)
@@ -126,7 +126,7 @@ def main() -> None:
         return
 
     df["fetched_at"] = fetched_at
-    print(f"  {len(df):,} rows  ({df['date'].min()} → {df['date'].max()})")
+    print(f"  {len(df):,} rows  ({df['date'].min()} -> {df['date'].max()})")
     path = write_partitioned(df, BASE_DIR, f"shiller_cape_{mode}_{today_str}.parquet")
     print(f"  -> {path}")
 
