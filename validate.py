@@ -785,11 +785,6 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
     },
-    "shipping_gscpi": {
-        "required":    ["date", "gscpi", "fetched_at"],
-        "critical_nn": ["date", "gscpi"],
-        "date_col":    "date",
-    },
     # ── Piracy incidents ─────────────────────────────────────────────────────
     # incident_year is nullable (~2% of IMB pins carry no parseable year);
     # day-level dating lives in somali_hijackings.incident_date.
