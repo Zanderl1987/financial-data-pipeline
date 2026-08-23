@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import query as q
 from analytics.features import _pick_price_table  # reuse price-source detection
 from evaluation import execution as ev_execution
+from evaluation.stats import _degenerate_sd
 
 _ANN = 252  # trading days per year
 
@@ -254,7 +255,7 @@ def _ann_metrics(ret: pd.Series, equity: pd.Series) -> dict:
     cagr = float(equity.iloc[-1] ** (_ANN / n) - 1.0) if equity.iloc[-1] > 0 else float("nan")
     vol = float(ret.std(ddof=0) * np.sqrt(_ANN))
     mean_ann = float(ret.mean() * _ANN)
-    sharpe = mean_ann / vol if vol > 0 else float("nan")
+    sharpe = mean_ann / vol if not _degenerate_sd(vol) else float("nan")
     return {"total_return_pct": round(100 * total, 2),
             "cagr_pct": round(100 * cagr, 2),
             "ann_vol_pct": round(100 * vol, 2),

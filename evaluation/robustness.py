@@ -23,6 +23,8 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
+from evaluation.stats import _degenerate_sd
+
 OHLC = ("open", "high", "low", "close")
 
 
@@ -43,16 +45,18 @@ def _sharpe(x: np.ndarray) -> float:
     """
     Annualization-free Sharpe used for ranking only.
 
-    Returns 0.0 rather than +/-inf when the sd is zero: a constant column
-    carries no information to rank on, and letting it become +inf would make a
-    degenerate column win every in-sample split in pbo().
+    Returns 0.0 rather than +/-inf when the sd is zero OR float-noise around
+    zero (a constant column's sd lands near 6e-19 in float64 -- see
+    evaluation.stats.SD_FLOOR): a constant column carries no information to
+    rank on, and letting it become +inf would make a degenerate column win
+    every in-sample split in pbo().
     """
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
     if len(x) < 2:
         return 0.0
     sd = x.std(ddof=1)
-    if not sd > 0:
+    if _degenerate_sd(sd):
         return 0.0
     return float(x.mean() / sd)
 

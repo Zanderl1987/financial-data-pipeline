@@ -21,24 +21,11 @@ import math
 import numpy as np
 import pandas as pd
 
+from evaluation.stats import SD_FLOOR, _degenerate_sd  # noqa: F401  (re-export)
+
 TRADING_DAYS = 252
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-#: Relative floor below which a standard deviation is treated as zero.
-#:
-#: `sd > 0` is NOT a sufficient guard, which is the trap this constant exists
-#: for. A constant series of 0.001 has an arithmetically-zero sd, but in float64
-#: it comes out around 6e-19 rather than exactly 0.0 -- positive, finite, and
-#: enough to produce a Sharpe of 2.4e16. That passes every `> 0` check in the
-#: repo and would render as a plausible-looking huge number rather than as the
-#: degenerate input it is. Caught by tests/test_tearsheet.py.
-SD_FLOOR = 1e-12
-
-
-def _degenerate_sd(sd: float, scale: float = 1.0) -> bool:
-    """True when `sd` is zero, non-finite, or float-noise around zero."""
-    return not (np.isfinite(sd) and sd > SD_FLOOR * max(1.0, abs(scale)))
 
 
 # --------------------------------------------------------------- helpers

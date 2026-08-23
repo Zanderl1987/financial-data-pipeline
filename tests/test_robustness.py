@@ -252,6 +252,16 @@ class TestPBO:
         M = np.random.default_rng(0).normal(0, 0.01, (600, 20))
         assert rb.pbo(M, n_splits=8)["n_combinations"] == 70     # C(8, 4)
 
+    def test_ranking_sharpe_float_noise_column_scores_zero(self):
+        """A constant 0.001 column has sd ~6e-19 in float64 -- the old bare
+        `sd > 0` guard let it through and scored it like a monster instead of
+        the information-free column it is (which pbo() would then always
+        pick in-sample)."""
+        assert rb._sharpe(np.full(50, 0.001)) == 0.0
+        assert rb._sharpe(np.zeros(50)) == 0.0
+        real = np.random.default_rng(0).normal(0.001, 0.01, 50)
+        assert rb._sharpe(real) != 0.0
+
     def test_noise_pbo_is_high_but_realization_dependent(self):
         """Pins the caveat in pbo()'s docstring rather than the textbook claim.
 

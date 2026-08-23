@@ -24,6 +24,14 @@ class TestPureHelpers:
         eq = pd.Series([1.0, 1.2, 0.9, 1.1])  # peak 1.2 -> trough 0.9
         assert bt._max_drawdown(eq) == pytest.approx(0.9 / 1.2 - 1.0)
 
+    def test_ann_metrics_constant_returns_no_noise_sharpe(self):
+        """A constant-return series has sd ~6e-19 in float64 -- the old bare
+        `vol > 0` gate reported a Sharpe near 2.4e16 instead of NaN."""
+        ret = pd.Series([0.001] * 300)
+        equity = (1.0 + ret).cumprod()
+        m = bt._ann_metrics(ret, equity)
+        assert not (isinstance(m["sharpe"], float) and abs(m["sharpe"]) > 1e12)
+
     def test_rebalance_dates_monthly(self):
         idx = pd.bdate_range("2024-01-01", "2024-03-31")
         reb = bt._rebalance_dates(idx, "M")

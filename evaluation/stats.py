@@ -16,6 +16,24 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sps
 
+#: Relative floor below which a standard deviation is treated as zero.
+#:
+#: `sd > 0` is NOT a sufficient guard, which is the trap this constant exists
+#: for. A constant series of 0.001 has an arithmetically-zero sd, but in float64
+#: it comes out around 6e-19 rather than exactly 0.0 -- positive, finite, and
+#: enough to produce a Sharpe of 2.4e16. That passes every `> 0` check in the
+#: repo and would render as a plausible-looking huge number rather than as the
+#: degenerate input it is. First caught by tests/test_tearsheet.py in the
+#: tearsheet implementation; canonical home moved here (2026-08-23) so the
+#: rest of the battery guards the same way.
+SD_FLOOR = 1e-12
+
+
+def _degenerate_sd(sd: float, scale: float = 1.0) -> bool:
+    """True when `sd` is zero, non-finite, or float-noise around zero."""
+    return not (np.isfinite(sd) and sd > SD_FLOOR * max(1.0, abs(scale)))
+
+
 # --------------------------------------------------------------- Tier 1
 
 
@@ -56,7 +74,7 @@ def daily_ic(panel: pd.DataFrame, value_col: str, fwd_col: str,
     sd = a.std(ddof=1)
     out = {"mean_daily_ic": round(float(a.mean()), 4), "ic_days": int(len(a)),
            "ic_pct_positive": round(100 * float((a > 0).mean()), 1)}
-    if sd > 0:
+    if not _degenerate_sd(sd):
         se = sd / math.sqrt(len(a))
         out["ic_se"] = round(float(se), 5)
         out["ic_t_stat"] = round(float(a.mean() / se), 2)
@@ -94,7 +112,9 @@ def quantile_spread(panel: pd.DataFrame, value_col: str, fwd_col: str,
            "top_mean_pct": round(100 * float(top.mean()), 3),
            "bottom_mean_pct": round(100 * float(bot.mean()), 3),
            "spread_pct": round(100 * float(top.mean() - bot.mean()), 3)}
-    if (sd_t > 0 or sd_b > 0) and np.isfinite(sd_t) and np.isfinite(sd_b):
+    # Welch still runs when exactly ONE bucket is flat (its variance term is
+    # just 0); both buckets float-noise-flat is the degenerate case.
+    if not (_degenerate_sd(sd_t) and _degenerate_sd(sd_b)):
         t, p = sps.ttest_ind(top, bot, equal_var=False)
         out["spread_t"] = round(float(t), 2)
         out["spread_p"] = round(float(p), 4)
@@ -149,7 +169,7 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
         return {"sharpe": None, "sharpe_ci_lo": None, "sharpe_ci_hi": None,
                 "sharpe_reason": f"only {n} days (< {3 * block_len})"}
     sd = r.std(ddof=0)
-    if not sd > 0:
+    if _degenerate_sd(sd):
         return {"sharpe": None, "sharpe_ci_lo": None, "sharpe_ci_hi": None,
                 "sharpe_reason": "zero return variance"}
     ann = math.sqrt(252.0)
@@ -161,7 +181,7 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
         starts = rng.integers(0, n - block_len + 1, size=n_blocks)
         sample = np.concatenate([r[s:s + block_len] for s in starts])[:n]
         ssd = sample.std(ddof=0)
-        sharpes[i] = sample.mean() / ssd * ann if ssd > 0 else np.nan
+        sharpes[i] = sample.mean() / ssd * ann if not _degenerate_sd(ssd) else np.nan
     sharpes = sharpes[np.isfinite(sharpes)]
     if len(sharpes) < n_boot // 2:
         return {"sharpe": round(obs, 2), "sharpe_ci_lo": None,
