@@ -179,6 +179,9 @@ EXPECTED_TABLES = [
     # Shipping / logistics (NY Fed GSCPI + FRED freight PPI)
     "shipping_gscpi",
     "shipping_freight_ppi",
+    # Piracy incidents (ICC IMB live-map archive + Wikipedia Somali hijacking log)
+    "piracy_incidents",
+    "somali_hijackings",
     # Signal health monitor (maintained backtest performance tracking)
     "signal_health",
     # EIA refinery + crude trade (oil/transportation depth batch)

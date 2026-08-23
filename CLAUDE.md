@@ -234,6 +234,13 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 - Congressional trades (`congressional_trades_pipeline.py`) — both House and Senate
   disclosure aggregator endpoints 403 (confirmed again 2026-08-01, same as 07-23);
   looks like anti-bot hardening on the source site, not a URL/param bug.
+- **UKMTO incident reports** (`www.ukmto.org/recent-incidents`) — Next.js SPA whose
+  `/_next/data/...` route returns only an empty Sitecore layout shell; real incidents
+  load from a deeper internal API. Would need a headless browser — ruled out
+  2026-08-23 during piracy-pipeline vetting. Somali incident dating instead comes
+  from Wikipedia (backfill) + ICC IMB markers (`piracy_pipeline.py`); EU NAVFOR
+  news pages are server-rendered and remain the upgrade path for dated current
+  narratives.
 
 ## Where deeper knowledge lives
 

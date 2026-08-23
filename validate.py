@@ -790,6 +790,21 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["date", "gscpi"],
         "date_col":    "date",
     },
+    # ── Piracy incidents ─────────────────────────────────────────────────────
+    # incident_year is nullable (~2% of IMB pins carry no parseable year);
+    # day-level dating lives in somali_hijackings.incident_date.
+    "piracy_incidents": {
+        "required":    ["incident_id", "lat", "lng", "region", "source", "fetched_at"],
+        "critical_nn": ["incident_id", "lat", "lng", "region"],
+        "date_col":    None,
+        "value_ranges": {"lat": (-90, 90), "lng": (-180, 180)},
+    },
+    "somali_hijackings": {
+        "required":    ["vessel_name", "section_year", "hijack_status", "source", "fetched_at"],
+        "critical_nn": ["vessel_name", "section_year"],
+        "date_col":    None,
+        "value_ranges": {"section_year": (1990, 2030)},
+    },
     # ── TSA checkpoint travel volumes ─────────────────────────────────────────
     "tsa_checkpoint": {
         "required":    ["date", "travelers", "fetched_at"],

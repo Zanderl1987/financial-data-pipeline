@@ -109,6 +109,7 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `tsa_pipeline.py` | `tsa_checkpoint` | Daily TSA checkpoint traveler counts — leading indicator of travel demand | — |
 | `real_estate_pipeline.py` | `fhfa_hpi`, `zillow_zhvi`, `zillow_zori` | FHFA House Price Index (national/state/MSA) + Zillow home value/rent indices | — |
 | `shipping_pipeline.py` | `shipping_gscpi`, `shipping_freight_ppi` | NY Fed Global Supply Chain Pressure Index + FRED freight PPI series | `FRED_API_KEY` |
+| `piracy_pipeline.py` | `piracy_incidents`, `somali_hijackings` | ICC IMB live-piracy-map archive (global incident geo, 2012+, year-level) + Wikipedia Somali hijacking log (2005-2024, day-level dates, ransom/status) — event-study input vs `shipping.*` costs. UKMTO ruled out (Next.js SPA + Sitecore internal API, see CLAUDE.md dead ends); EU NAVFOR news scrape is the future upgrade path for dated current narratives | — |
 
 ## Macro — global
 

@@ -163,6 +163,13 @@ KEYS: dict[str, list[str]] = {
     # rather than doing a snapshot-aware Iceberg read; needs dedup like everything else)
     "shipping_gscpi":         ["date"],
     "shipping_freight_ppi":   ["date", "series_id"],
+    # Piracy incidents. IMB markers reappear on multiple year-maps; incident_id
+    # ("004-24" or "marker_<id>") collapses cross-map duplicates within a
+    # snapshot. Wikipedia rows are keyed positionally within their year section:
+    # same-ship repeat attacks in one year stay distinct, and any mid-list edit
+    # by editors simply re-dedupes to the newest snapshot.
+    "piracy_incidents":        ["incident_id"],
+    "somali_hijackings":       ["section_year", "row_num"],
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],

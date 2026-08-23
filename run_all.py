@@ -560,6 +560,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="piracy",
+        file="piracy_pipeline.py",
+        desc="Piracy incidents - ICC IMB live-map archive (global, 2012+, geo) + Wikipedia Somali hijacking log (2005+, dated)",
+        stage=1,
+        tables=["piracy_incidents", "somali_hijackings"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="yfinance",
         file="yfinance_pipeline.py",
         desc="Yahoo Finance deep daily history — indices, commodity futures, FX, rates ETFs (keyless)",

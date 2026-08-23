@@ -265,6 +265,9 @@ CATALOG: dict[str, str] = {
     # ── Shipping / logistics (Iceberg) ──────────────────────────────────────
     "shipping_gscpi":         _iceberg_glob("shipping/gscpi/**/*.parquet"),
     "shipping_freight_ppi":   _iceberg_glob("shipping/freight_ppi/**/*.parquet"),
+    # ── Piracy incidents (ICC IMB live-map archive + Wikipedia Somali log) ────
+    "piracy_incidents":        _glob("piracy/imb/**/*.parquet"),
+    "somali_hijackings":       _glob("piracy/wiki/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────
