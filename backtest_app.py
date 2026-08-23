@@ -6,6 +6,11 @@ user drags threshold sliders -- no new backtest math, everything here
 delegates to evaluation/ and generate_eval_report's existing loaders.
 
 See docs/superpowers/specs/2026-08-03-interactive-backtest-explorer-design.md.
+W4 extension (2026-08-23): trade-rule REGISTRATION API, cost-sensitivity
+sweep, trade-level drill-down table, walk-forward split inspector, live
+robustness diagnostics, and a 2D/3D parameter-surface toggle. Standing
+constraint unchanged: DIAGNOSIS ONLY -- nothing here writes to the registry
+or feeds the pre-registered campaign endpoints.
 
 Usage
 -----
@@ -13,13 +18,16 @@ Usage
   (opens http://127.0.0.1:8050)
 """
 
+import dataclasses
+
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, State, dash_table
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from evaluation import registry as ev_registry
+from evaluation import robustness as ev_robustness
 from evaluation import trades as ev_trades
 from evaluation import adapters as ev_adapters
 from evaluation import execution as ev_execution
@@ -222,11 +230,27 @@ def build_tv_fade_long_rule(bull_min: float, exit_long_max: float,
         notional=notional)
 
 
-KNOWN_TRADE_RULE_SIGNALS.update({
-    "tv_threshold": (ev_adapters.rating_cache, build_tv_threshold_rule),
-    "tv_fade": (ev_adapters.rating_cache, build_tv_fade_rule),
-    "tv_fade_long": (ev_adapters.rating_cache, build_tv_fade_long_rule),
-})
+def register_trade_rule_signal(name: str, cache_builder, rule_builder) -> None:
+    """Register a live-tradeable signal: name -> (cache builder, rule builder).
+
+    This is the extension point that replaced the hardcoded allowlist. CAUTION
+    before registering: the cache builder must rebuild the EXACT universe the
+    signal's recorded run was evaluated on. The built-in entries share the
+    default full-universe adapters.rating_cache() because tv_fade/tv_fade_long
+    were evaluated on the same universe as tv_threshold; a basket-scoped or
+    Russell-3000-scoped run registered against this default cache would
+    silently show the wrong live data under a misleadingly-scoped dropdown
+    label -- give such signals their own scoped cache builder first.
+    """
+    KNOWN_TRADE_RULE_SIGNALS[name] = (cache_builder, rule_builder)
+
+
+register_trade_rule_signal("tv_threshold",
+                           ev_adapters.rating_cache, build_tv_threshold_rule)
+register_trade_rule_signal("tv_fade",
+                           ev_adapters.rating_cache, build_tv_fade_rule)
+register_trade_rule_signal("tv_fade_long",
+                           ev_adapters.rating_cache, build_tv_fade_long_rule)
 
 
 def has_trade_rule(name: str) -> bool:
@@ -401,8 +425,11 @@ def render_tearsheet(sheet: dict) -> "list":
     return children
 
 
-def parameter_heatmap_fig(name: str, run_id: str) -> go.Figure:
-    """2D Parameter Sensitivity Heatmap (Bull Entry vs. Exit Long)."""
+def _parameter_grid(name: str, run_id: str) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+    """Shared sweep for the 2D heatmap and 3D surface: net P&L over a fixed
+    (bull entry x exit long) grid at fixed defaults for the other two
+    thresholds and LEGACY costs -- deliberately independent of the current
+    sliders so the map is a stable landscape view, not an echo of them."""
     bull_range = np.linspace(0.2, 0.8, 5)
     exit_range = np.linspace(-0.2, 0.4, 5)
     z = np.zeros((len(exit_range), len(bull_range)))
@@ -414,18 +441,200 @@ def parameter_heatmap_fig(name: str, run_id: str) -> go.Figure:
                 z[i, j] = summary.get("total_pnl_dollars", 0.0)
             except Exception:
                 z[i, j] = 0.0
+    return bull_range, exit_range, z
 
-    fig = go.Figure(data=go.Heatmap(
-        z=z, x=[round(b, 2) for b in bull_range], y=[round(e, 2) for e in exit_range],
-        colorscale="Viridis"
-    ))
-    fig.update_layout(
-        title="Parameter Sensitivity: Bull Entry vs Exit Long P&L ($) "
-              "(legacy costs -- ignores Execution Config panel)",
-        xaxis_title="Bull Entry Threshold", yaxis_title="Exit Long Threshold",
-        height=340
-    )
+
+def parameter_heatmap_fig(name: str, run_id: str, mode: str = "heatmap") -> go.Figure:
+    """Parameter sensitivity over the shared grid, as 2D Heatmap or 3D Surface."""
+    bull_range, exit_range, z = _parameter_grid(name, run_id)
+    x = [round(float(b), 2) for b in bull_range]
+    y = [round(float(e), 2) for e in exit_range]
+    title = ("Parameter Sensitivity: Bull Entry vs Exit Long P&L ($) "
+             "(legacy costs -- ignores Execution Config panel)")
+    if mode == "surface":
+        fig = go.Figure(data=go.Surface(z=z, x=x, y=y, colorscale="Viridis"))
+        fig.update_layout(title=title + " -- 3D", height=420,
+                          scene=dict(xaxis_title="Bull Entry",
+                                     yaxis_title="Exit Long",
+                                     zaxis_title="Net P&L ($)"))
+        return fig
+    fig = go.Figure(data=go.Heatmap(z=z, x=x, y=y, colorscale="Viridis"))
+    fig.update_layout(title=title, xaxis_title="Bull Entry Threshold",
+                      yaxis_title="Exit Long Threshold", height=340)
     return fig
+
+
+#: Commission levels (bps) swept by cost_sensitivity_fig. Small on purpose:
+#: each point re-simulates the full universe.
+COST_SWEEP_BPS = (0, 5, 10, 20, 30, 40, 50)
+
+
+def cost_sensitivity_fig(name: str, run_id: str, bull_min: float,
+                         exit_long_max: float, bear_max: float,
+                         exit_short_min: float,
+                         config: "ev_execution.ExecutionConfig") -> "go.Figure | None":
+    """Net P&L and trade count vs commission level, holding the CURRENT
+    thresholds and every other config field fixed. Diagnosis only: shows how
+    much of the edge survives hypothetical cost levels; it never writes to
+    the registry or feeds any campaign endpoint."""
+    pnls, counts = [], []
+    for bps in COST_SWEEP_BPS:
+        swept = dataclasses.replace(
+            config, costs=dataclasses.replace(config.costs, commission_bps=float(bps)))
+        try:
+            _, summary = simulate_live(name, run_id, bull_min, exit_long_max,
+                                       bear_max, exit_short_min, config=swept)
+        except ValueError:
+            return None
+        pnls.append(summary.get("total_pnl_dollars"))
+        counts.append(summary.get("n_trades", 0))
+    if all(p is None for p in pnls):
+        return None
+    fig = go.Figure()
+    fig.add_scatter(x=list(COST_SWEEP_BPS), y=pnls, mode="lines+markers",
+                    name="net P&L ($)", line=dict(color=SLOT0),
+                    yaxis="y")
+    fig.add_scatter(x=list(COST_SWEEP_BPS), y=counts, mode="lines+markers",
+                    name="n trades", line=dict(color="#888888", dash="dot"),
+                    yaxis="y2")
+    fig.update_layout(
+        title="Cost sensitivity at current thresholds (diagnostic)",
+        xaxis_title="Commission (bps)", height=320,
+        yaxis=dict(title="Net P&L ($)"),
+        yaxis2=dict(title="N trades", overlaying="y", side="right"),
+        legend=dict(orientation="h"))
+    return fig
+
+
+_TRADE_TABLE_COLUMNS = [
+    ("symbol", "symbol"), ("side", "side"), ("entry_date", "entry"),
+    ("exit_date", "exit"), ("entry_price", "entry px"),
+    ("exit_price", "exit px"), ("pnl_dollars", "P&L $"),
+    ("pnl_pct", "P&L %"), ("exit_reason", "exit reason"),
+]
+
+
+def trades_table(trades_df: "pd.DataFrame | None") -> "html.Div":
+    """Trade-level drill-down: sortable/filterable table of the live trades
+    under the current thresholds + execution config."""
+    cols = [c for c, _ in _TRADE_TABLE_COLUMNS if trades_df is not None
+            and c in trades_df.columns]
+    if trades_df is None or trades_df.empty or not cols:
+        return html.Div("no realized trades at this threshold",
+                        style={"color": "#666"})
+    shown = trades_df[cols].copy()
+    table = dash_table.DataTable(
+        columns=[{"name": label, "id": c} for c, label in _TRADE_TABLE_COLUMNS
+                 if c in cols],
+        data=shown.to_dict("records"),
+        sort_action="native", filter_action="native",
+        page_size=15, page_action="native",
+        style_table={"overflowX": "auto", "maxHeight": "420px",
+                     "overflowY": "auto"},
+        style_cell={"fontSize": 12, "padding": "4px",
+                    "whiteSpace": "nowrap"},
+        style_data_conditional=[
+            {"if": {"filter_query": "{pnl_dollars} > 0",
+                    "column_id": "pnl_dollars"},
+             "color": COLOR_GOOD},
+            {"if": {"filter_query": "{pnl_dollars} <= 0",
+                    "column_id": "pnl_dollars"},
+             "color": COLOR_CRITICAL},
+        ])
+    return html.Div(table)
+
+
+def walk_forward_children(results: dict) -> "list":
+    """Walk-forward split inspector: per-fold OOS IC from the run's tier3
+    artifacts. Only non-trade-rule runs carry these -- trade-rule-only runs
+    have no IC panel to split."""
+    wf = ((results.get("tier3") or {}).get("walk_forward") or {})
+    folds = wf.get("folds") or []
+    if not folds:
+        return [html.Div("no walk-forward artifacts for this signal "
+                         "(tier3.walk_forward absent -- trade-rule-only "
+                         "runs do not carry it)", style={"color": "#666"})]
+    oos = wf.get("oos") or {}
+    header = html.Div(
+        f'OOS mean daily IC {oos.get("mean_daily_ic")} '
+        f'(t={oos.get("ic_t_stat")}) over {len(folds)} folds '
+        f'(train days min {wf.get("n_train_days")})')
+    fig = go.Figure(go.Bar(
+        x=[f"f{f['fold']}" for f in folds],
+        y=[f.get("mean_daily_ic") for f in folds],
+        text=[f.get("date_range") for f in folds],
+        hovertemplate="%{text}<br>IC %{y}<extra></extra>"))
+    fig.add_hline(y=0, line_width=1)
+    fig.update_layout(title="Walk-forward OOS daily IC by fold", height=280,
+                      showlegend=False)
+    return [header, dcc.Graph(figure=fig)]
+
+
+#: Trial counts for the live robustness panel -- deliberately below the
+#: campaign defaults (100/200/1000): this is an interactive diagnostic, not a
+#: pre-registered endpoint, and the panel must answer inside a coffee sip.
+ROBUSTNESS_TRIALS = {"noise": 50, "mcpt": 100, "order": 500}
+
+
+def robustness_children(name: str, run_id: str, bull_min: float,
+                        exit_long_max: float, bear_max: float,
+                        exit_short_min: float,
+                        config: "ev_execution.ExecutionConfig",
+                        trades: "pd.DataFrame | None") -> "list":
+    """Live W2 diagnostics for the CURRENT rule + config: price-level noise
+    test, price-path MCPT p-value, and trade-order drawdown MC."""
+    rule_builder = KNOWN_TRADE_RULE_SIGNALS[name][1]
+    rule = rule_builder(bull_min, exit_long_max, bear_max, exit_short_min,
+                        DEFAULT_NOTIONAL)
+    cache = get_cache(name, run_id)
+    cards = []
+
+    noise = ev_robustness.noise_test(rule, cache, n_trials=ROBUSTNESS_TRIALS["noise"],
+                                     config=config)
+    if noise.get("noise_pct_profitable") is not None:
+        cards += [
+            (f"noise: observed ${noise['observed_pnl_dollars']:,.0f}",
+             f"{noise['noise_pct_profitable']}% of perturbed trials profitable "
+             f"(median ${noise['noise_median_pnl_dollars']:,.0f}, "
+             f"p95 ${noise['noise_p95_pnl_dollars']:,.0f})")]
+    else:
+        cards.append(("noise: n/a", noise.get("noise_reason", "unavailable")))
+
+    mcpt = ev_robustness.price_mcpt(rule, cache, n_perm=ROBUSTNESS_TRIALS["mcpt"],
+                                    config=config)
+    if mcpt.get("price_mcpt_p") is not None:
+        cards.append((f"price MCPT p = {mcpt['price_mcpt_p']}",
+                      f"observed ${mcpt['observed_pnl_dollars']:,.0f} vs "
+                      f"{mcpt['n_perm']} shuffled-return permutations"))
+    else:
+        cards.append(("price MCPT: n/a", "not enough usable symbols"))
+
+    order = ev_robustness.trade_order_mc(trades, n_trials=ROBUSTNESS_TRIALS["order"]) \
+        if trades is not None and not trades.empty else {}
+    if order:
+        cards.append((
+            f"trade-order MDD: observed {order['observed_mdd_pct']}% "
+            f"({order['observed_mdd_percentile']}th pct)",
+            f"shuffled-order median {order['mdd_median_pct']}%, "
+            f"worst {order['mdd_worst_pct']}% over "
+            f"{order['n_trials']} trials"))
+    else:
+        cards.append(("trade-order MC: n/a", "no realized trades"))
+
+    children = [html.Div([
+        html.Div([
+            html.Div(head, style={"fontWeight": "bold"}),
+            html.Div(sub, style={"fontSize": "12px", "color": "#666"}),
+        ], style={"border": "1px solid #ddd", "borderRadius": "4px",
+                  "padding": "8px 12px", "minWidth": "260px",
+                  "backgroundColor": "#f9f9f9"})
+        for head, sub in cards
+    ], style={"display": "flex", "flexWrap": "wrap", "gap": "10px"})]
+    children.append(html.Div(
+        "Diagnosis only -- trial counts are reduced for interactivity; "
+        "these numbers never feed the registry or campaign endpoints.",
+        style={"fontSize": "11px", "color": "#999", "marginTop": "4px"}))
+    return children
 
 
 from generate_eval_report import _ic_by_horizon, _spread_with_ci, _regimes, _trades_fig
@@ -533,12 +742,27 @@ def build_layout(signals: "list[dict]") -> "html.Div":
             ]),
         ]),
         _execution_config_panel(),
+        html.H4("Cost sensitivity"),
+        dcc.Loading(dcc.Graph(id="cost-fig")),
+        html.H4("Trades"),
+        dcc.Loading(html.Div(id="trades-table-container")),
         html.Div([
             dcc.Dropdown(id="symbol-dropdown", placeholder="select a symbol"),
             dcc.Loading(dcc.Graph(id="symbol-fig")),
         ]),
         dcc.Loading(dcc.Graph(id="pnl-fig")),
-        dcc.Loading(dcc.Graph(id="heatmap-fig")),
+        html.H4("Parameter surface"),
+        dcc.RadioItems(id="param-mode",
+                       options=[{"label": "2D heatmap", "value": "heatmap"},
+                                {"label": "3D surface", "value": "surface"}],
+                       value="heatmap", inline=True),
+        dcc.Loading(dcc.Graph(id="param-fig")),
+        html.H4("Walk-forward splits"),
+        dcc.Loading(html.Div(id="wf-panel")),
+        html.H4("Robustness (diagnostic)"),
+        html.Button("Run robustness on current rule", id="robustness-button",
+                    n_clicks=0),
+        dcc.Loading(html.Div(id="robustness-panel")),
         html.H4("Tearsheet"),
         dcc.Loading(html.Div(id="tearsheet-container")),
         dcc.Store(id="signal-store"),
@@ -585,10 +809,88 @@ def register_callbacks(app: "dash.Dash") -> None:
                _render_ic_panel(meta, loaded["results"], loaded["trades"]), symbol_options, risk_card)
 
     @app.callback(
+        Output("wf-panel", "children"),
+        Input("signal-store", "data"))
+    def _on_walk_forward(store):
+        if not store:
+            return []
+        return walk_forward_children(store.get("results") or {})
+
+    @app.callback(
+        Output("param-fig", "figure"),
+        Input("signal-store", "data"), Input("param-mode", "value"))
+    def _on_param_mode(store, mode):
+        empty_fig = go.Figure()
+        if not store:
+            return empty_fig
+        if not has_trade_rule(store["name"]):
+            return empty_fig
+        try:
+            return parameter_heatmap_fig(store["name"], store["run_id"],
+                                         mode=mode or "heatmap")
+        except Exception:
+            return empty_fig
+
+    @app.callback(
+        Output("robustness-panel", "children"),
+        Input("robustness-button", "n_clicks"),
+        State("signal-store", "data"),
+        State("bull-min", "value"), State("exit-long-max", "value"),
+        State("bear-max", "value"), State("exit-short-min", "value"),
+        State("commission-bps", "value"), State("spread-bps", "value"),
+        State("borrow-fee-bps", "value"), State("impact-model", "value"),
+        State("impact-coeff", "value"), State("stop-loss-pct", "value"),
+        State("take-profit-pct", "value"), State("vol-stop-mult", "value"),
+        State("trailing", "value"), State("max-holding-days", "value"),
+        State("sizing-mode", "value"), State("sizing-notional", "value"),
+        State("sizing-fraction", "value"), State("sizing-max-weight", "value"),
+        State("limits-capital", "value"),
+        State("limits-max-concurrent", "value"),
+        State("limits-max-drawdown-stop", "value"),
+        prevent_initial_call=True)
+    def _on_robustness(n_clicks, store, bull_min, exit_long_max, bear_max,
+                       exit_short_min, commission_bps, spread_bps,
+                       borrow_fee_bps, impact_model, impact_coeff,
+                       stop_loss_pct, take_profit_pct, vol_stop_mult,
+                       trailing, max_holding_days, sizing_mode,
+                       sizing_notional, sizing_fraction, sizing_max_weight,
+                       limits_capital, limits_max_concurrent,
+                       limits_max_drawdown_stop):
+        if not n_clicks or not store:
+            return []
+        if not has_trade_rule(store["name"]):
+            return [html.Div("no trade rule defined for this signal",
+                             style={"color": "#666"})]
+        cfg, cfg_error = resolve_execution_config(
+            commission_bps=commission_bps, spread_bps=spread_bps,
+            borrow_fee_bps=borrow_fee_bps, impact_model=impact_model,
+            impact_coeff=impact_coeff, stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct, vol_stop_mult=vol_stop_mult,
+            trailing=trailing, max_holding_days=max_holding_days,
+            sizing_mode=sizing_mode, sizing_notional=sizing_notional,
+            sizing_fraction=sizing_fraction, sizing_max_weight=sizing_max_weight,
+            limits_capital=limits_capital,
+            limits_max_concurrent=limits_max_concurrent,
+            limits_max_drawdown_stop=limits_max_drawdown_stop)
+        if cfg is None:
+            return [html.Div(cfg_error, style={"color": COLOR_CRITICAL})]
+        try:
+            trades, _ = simulate_live(store["name"], store["run_id"], bull_min,
+                                      exit_long_max, bear_max, exit_short_min,
+                                      config=cfg)
+        except ValueError as exc:
+            return [html.Div(f"Execution config error: {exc}",
+                             style={"color": COLOR_CRITICAL})]
+        return robustness_children(store["name"], store["run_id"], bull_min,
+                                   exit_long_max, bear_max, exit_short_min,
+                                   cfg, trades)
+
+    @app.callback(
         Output("trade-summary", "children"), Output("symbol-fig", "figure"),
-        Output("pnl-fig", "figure"), Output("heatmap-fig", "figure"),
+        Output("pnl-fig", "figure"), Output("cost-fig", "figure"),
         Output("execution-config-error", "children"),
         Output("tearsheet-container", "children"),
+        Output("trades-table-container", "children"),
         Input("signal-store", "data"), Input("bull-min", "value"),
         Input("exit-long-max", "value"), Input("bear-max", "value"),
         Input("exit-short-min", "value"), Input("symbol-dropdown", "value"),
@@ -611,10 +913,11 @@ def register_callbacks(app: "dash.Dash") -> None:
                           limits_max_drawdown_stop):
         empty_fig = go.Figure()
         if not store:
-            return "select a signal", empty_fig, empty_fig, empty_fig, "", []
+            return ("select a signal", empty_fig, empty_fig, empty_fig, "",
+                    [], html.Div(""))
         if not has_trade_rule(store["name"]):
             return ("no trade rule defined for this signal", empty_fig,
-                    empty_fig, empty_fig, "", [])
+                    empty_fig, empty_fig, "", [], html.Div(""))
 
         cfg, cfg_error = resolve_execution_config(
             commission_bps=commission_bps, spread_bps=spread_bps,
@@ -628,18 +931,17 @@ def register_callbacks(app: "dash.Dash") -> None:
             limits_max_concurrent=limits_max_concurrent,
             limits_max_drawdown_stop=limits_max_drawdown_stop)
         if cfg is None:
-            return ("invalid execution config -- see message below",
-                    dash.no_update, dash.no_update, dash.no_update, cfg_error,
-                    dash.no_update)
+            return (dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, cfg_error, dash.no_update, dash.no_update)
 
         try:
             trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
                                             exit_long_max, bear_max, exit_short_min,
                                             config=cfg)
         except ValueError as exc:
-            return ("invalid execution config -- see message below", dash.no_update,
-                    dash.no_update, dash.no_update, f"Execution config error: {exc}",
-                    dash.no_update)
+            return (dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, f"Execution config error: {exc}",
+                    dash.no_update, dash.no_update)
         baseline = store["results"].get("summary", {})
         diff = baseline_vs_live(baseline, summary)
         if summary.get("n_trades", 0) == 0:
@@ -655,9 +957,13 @@ def register_callbacks(app: "dash.Dash") -> None:
         sym_fig = (symbol_price_fig(symbol, cache[symbol], trades)
                   if symbol and symbol in cache else empty_fig)
         pnl_fig = cumulative_pnl_fig(trades) or empty_fig
-        h_fig = parameter_heatmap_fig(store["name"], store["run_id"])
+        cost_fig = (cost_sensitivity_fig(store["name"], store["run_id"],
+                                         bull_min, exit_long_max, bear_max,
+                                         exit_short_min, cfg) or empty_fig)
         tearsheet_children = render_tearsheet(live_tearsheet(trades))
-        return text, sym_fig, pnl_fig, h_fig, "", tearsheet_children
+        table_children = trades_table(trades)
+        return (text, sym_fig, pnl_fig, cost_fig, "", tearsheet_children,
+                table_children)
 
 
 app = dash.Dash(__name__)

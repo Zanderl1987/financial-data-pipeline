@@ -660,3 +660,152 @@ class TestRenderIcPanel:
         results = {"ic": {"5": {"pooled_ic": 0.03, "mean_daily_ic": 0.02}}}
         out = ba._render_ic_panel({"input_type": "signal"}, results, None)
         assert len(out) >= 1
+
+
+class TestRegisterTradeRuleSignal:
+    def test_register_restores_known_signal(self, monkeypatch):
+        # deleting through monkeypatch restores the built-in after the test
+        monkeypatch.delitem(ba.KNOWN_TRADE_RULE_SIGNALS, "tv_threshold")
+        assert ba.has_trade_rule("tv_threshold") is False
+        ba.register_trade_rule_signal("tv_threshold", dict,
+                                      ba.build_tv_threshold_rule)
+        assert ba.has_trade_rule("tv_threshold") is True
+        assert ba.KNOWN_TRADE_RULE_SIGNALS["tv_threshold"] == (dict,
+                                                               ba.build_tv_threshold_rule)
+
+    def test_register_new_signal_is_cleaned_up(self, monkeypatch):
+        # guard key so monkeypatch removes it again on teardown
+        monkeypatch.setitem(ba.KNOWN_TRADE_RULE_SIGNALS, "unit_test_sig", None)
+        ba.register_trade_rule_signal("unit_test_sig", dict, lambda *a: None)
+        assert ba.has_trade_rule("unit_test_sig") is True
+
+
+class TestCostSensitivityFig:
+    def _cfg(self):
+        return ba.build_execution_config(commission_bps=7.5)
+
+    def test_sweeps_commission_keeping_other_fields_fixed(self, monkeypatch):
+        seen = []
+
+        def fake_simulate_live(name, run_id, b, el, be, es, notional=None, *,
+                               config=None):
+            seen.append(config.costs.commission_bps)
+            return (pd.DataFrame(),
+                    {"total_pnl_dollars": 1000.0 - config.costs.commission_bps * 10,
+                     "n_trades": 12})
+
+        monkeypatch.setattr(ba, "simulate_live", fake_simulate_live)
+        fig = ba.cost_sensitivity_fig("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, self._cfg())
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 2                      # P&L + trade count
+        assert list(fig.data[0].x) == list(ba.COST_SWEEP_BPS)
+        assert seen == list(ba.COST_SWEEP_BPS)         # one sim per level
+        assert fig.data[0].y[0] > fig.data[0].y[-1]    # more bps -> less net
+
+    def test_simulate_valueerror_returns_none(self, monkeypatch):
+        def raising(*a, **k):
+            raise ValueError("bad sizing combo")
+
+        monkeypatch.setattr(ba, "simulate_live", raising)
+        out = ba.cost_sensitivity_fig("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, self._cfg())
+        assert out is None
+
+
+class TestTradesTable:
+    def test_empty_trades_render_message(self):
+        out = ba.trades_table(pd.DataFrame())
+        assert isinstance(out, ba.html.Div)
+        assert "no realized trades" in out.children
+
+    def test_none_trades_render_message(self):
+        assert "no realized trades" in ba.trades_table(None).children
+
+    def test_populated_trades_render_datatable(self):
+        trades = pd.DataFrame({
+            "symbol": ["AAPL", "MSFT"], "side": ["long", "short"],
+            "entry_date": ["2024-01-02", "2024-01-05"],
+            "exit_date": ["2024-01-10", "2024-01-11"],
+            "entry_price": [100.0, 200.0], "exit_price": [101.0, 198.0],
+            "pnl_dollars": [10.0, -10.0], "pnl_pct": [1.0, -1.0],
+            "exit_reason": ["signal", "stop_loss"],
+            "extra_col_not_shown": [1, 2],
+        })
+        out = ba.trades_table(trades)
+        table = out.children
+        assert table.columns[0]["id"] == "symbol"
+        assert len(table.data) == 2
+        assert all(c["id"] != "extra_col_not_shown" for c in table.columns)
+
+
+class TestWalkForwardChildren:
+    def test_absent_artifacts_render_note(self):
+        out = ba.walk_forward_children({})
+        assert len(out) == 1
+        assert "no walk-forward artifacts" in out[0].children
+
+    def test_folds_render_header_and_bar_chart(self):
+        results = {"tier3": {"walk_forward": {
+            "oos": {"mean_daily_ic": 0.03, "ic_t_stat": 2.2},
+            "n_train_days": 126,
+            "folds": [
+                {"fold": 1, "date_range": "2023-01..2023-06",
+                 "mean_daily_ic": 0.04, "ic_t_stat": 1.5, "ic_days": 120},
+                {"fold": 2, "date_range": "2023-07..2023-12",
+                 "mean_daily_ic": 0.02, "ic_t_stat": 1.1, "ic_days": 122},
+            ]}}}
+        out = ba.walk_forward_children(results)
+        assert "OOS mean daily IC 0.03" in out[0].children
+        assert any(isinstance(c, ba.dcc.Graph) for c in out)
+
+
+class TestRobustnessChildren:
+    def _run(self, monkeypatch, trades=None):
+        monkeypatch.setattr(ba.ev_robustness, "noise_test",
+                            lambda rule, cache, **k: {
+                                "observed_pnl_dollars": 500.0,
+                                "noise_pct_profitable": 80.0,
+                                "noise_median_pnl_dollars": 100.0,
+                                "noise_p95_pnl_dollars": 900.0})
+        monkeypatch.setattr(ba.ev_robustness, "price_mcpt",
+                            lambda rule, cache, **k: {
+                                "price_mcpt_p": 0.12,
+                                "observed_pnl_dollars": 500.0, "n_perm": 100})
+        monkeypatch.setattr(ba.ev_robustness, "trade_order_mc",
+                            lambda t, **k: {
+                                "n_trades": 74, "final_return_pct": 3.4,
+                                "observed_mdd_pct": 30.0,
+                                "mdd_median_pct": 35.3, "mdd_p5_pct": 20.0,
+                                "mdd_p95_pct": 50.0, "mdd_worst_pct": 59.5,
+                                "observed_mdd_percentile": 23.0,
+                                "n_trials": 500})
+        return ba.robustness_children("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, ba.build_execution_config(),
+                                      trades)
+
+    def test_full_results_render_three_cards_plus_disclaimer(self, monkeypatch):
+        out = self._run(monkeypatch, trades=pd.DataFrame({"x": [1]}))
+        text = str(out[0])
+        assert "80.0% of perturbed trials profitable" in text
+        assert "price MCPT p = 0.12" in text
+        assert "23.0th pct" in text         # observed drawdown percentile
+        assert "Diagnosis only" in str(out[-1])
+
+    def test_no_trades_degrades_order_card(self, monkeypatch):
+        out = self._run(monkeypatch, trades=None)
+        assert "trade-order MC: n/a" in str(out[0])
+
+
+class TestParameterSurfaceMode:
+    def test_heatmap_mode_returns_heatmap_trace(self, monkeypatch):
+        monkeypatch.setattr(ba, "simulate_live",
+                            lambda *a, **k: (None, {"total_pnl_dollars": 1.0}))
+        fig = ba.parameter_heatmap_fig("tv_threshold", "run1", mode="heatmap")
+        assert isinstance(fig.data[0], go.Heatmap)
+
+    def test_surface_mode_returns_surface_trace(self, monkeypatch):
+        monkeypatch.setattr(ba, "simulate_live",
+                            lambda *a, **k: (None, {"total_pnl_dollars": 1.0}))
+        fig = ba.parameter_heatmap_fig("tv_threshold", "run1", mode="surface")
+        assert isinstance(fig.data[0], go.Surface)
