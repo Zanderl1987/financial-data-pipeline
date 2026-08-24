@@ -117,6 +117,10 @@ def _backfill_snapshot_date(table: str, df: pd.DataFrame) -> pd.DataFrame:
 KEYS: dict[str, list[str]] = {
     # Fed SOMA holdings — one row per security per weekly report
     "fed_soma":               ["as_of_date", "cusip"],
+    # USDA NASS — one value per commodity/series/date/period, some series
+    # further split by sub-domain (e.g. corn-for-fuel-alcohol dry vs wet mill)
+    "usda_crops":             ["commodity", "description", "date", "period", "domaincat_desc"],
+    "usda_fertilizers":       ["commodity", "description", "date", "period", "domaincat_desc"],
     # Equity / ETF prices — one bar per symbol per day
     "prices":                 ["symbol", "date"],
     "tiingo_prices":          ["symbol", "date"],
