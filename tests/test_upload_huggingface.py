@@ -83,6 +83,7 @@ def test_main_returns_stats_dict(tmp_path, monkeypatch):
     monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
     monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
     monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
     monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
 
     result = upload_huggingface.main(repo_name="test-repo", private=True)
@@ -110,6 +111,7 @@ def test_private_is_enforced_on_an_already_public_repo(tmp_path, monkeypatch):
         _fake_api(existing_private=False, settings_calls=calls),
     )
     monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
     monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
 
     upload_huggingface.main(repo_name="test-repo", private=True)
@@ -130,6 +132,7 @@ def test_matching_visibility_is_left_alone(tmp_path, monkeypatch):
         _fake_api(existing_private=True, settings_calls=calls),
     )
     monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
     monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
 
     upload_huggingface.main(repo_name="test-repo", private=True)
@@ -162,3 +165,70 @@ def test_main_returns_none_when_curated_folder_has_no_parquet_files(tmp_path, mo
     result = upload_huggingface.main(repo_name="test-repo", private=True)
 
     assert result is None
+
+
+def test_publish_blocked_when_a_table_would_regress(tmp_path, monkeypatch):
+    """
+    The 2026-08-10 vessels incident: a stale local snapshot published over
+    fresher remote data, dropping one table's row count 56% while the rising
+    aggregate total masked it. main() must compare per-table and refuse to
+    publish (no upload_folder call) unless --force is passed.
+    """
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    class _FailIfUploaded(_fake_api(existing_private=True)):
+        def upload_folder(self, *args, **kwargs):
+            raise AssertionError("upload_folder should not be called when a table regressed")
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _FailIfUploaded)
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 100},  # remote has 100 rows, local only has 1
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert result is None
+
+
+def test_publish_proceeds_with_force_despite_regression(tmp_path, monkeypatch):
+    """--force overrides the regression guard for an expected shrink."""
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 100},
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True, force=True)
+
+    assert result is not None
+    assert result["rows"] == 1
+
+
+def test_publish_proceeds_when_no_table_regresses(tmp_path, monkeypatch):
+    """A table missing from the remote (brand new) or growing is not a regression."""
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({
+        "symbol": ["AAPL", "MSFT"], "close": [1.0, 2.0],
+    }))
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 1},  # local grew from 1 -> 2, not a regression
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert result is not None
+    assert result["rows"] == 2
