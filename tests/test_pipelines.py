@@ -89,6 +89,7 @@ PIPELINE_MODULES = [
     "usda_pipeline",
     "fao_pipeline",
     "plastics_pipeline",
+    "cfpb_complaints_pipeline",
 ]
 
 

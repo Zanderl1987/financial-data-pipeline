@@ -214,6 +214,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=120,
     ),
     PipelineSpec(
+        name="cfpb_complaints",
+        file="cfpb_complaints_pipeline.py",
+        desc="CFPB consumer complaint database -- full bulk CSV snapshot re-downloaded each run (~17M rows, ~1.4GB compressed)",
+        stage=1,
+        tables=["cfpb_complaints"],
+        backfill_args=["--backfill"],
+        timeout=1800,
+    ),
+    PipelineSpec(
         name="yahoo_options",
         file="yahoo_options_pipeline.py",
         desc="Yahoo per-contract options OHLCV history (NVDA/PLTR/MSFT/AAPL) — feeds put_call_ratio",

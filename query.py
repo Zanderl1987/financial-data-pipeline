@@ -152,6 +152,7 @@ CATALOG: dict[str, str] = {
     "fao_production":          _glob("fao/production/**/*.parquet"),
     "fao_prices":              _glob("fao/prices/**/*.parquet"),
     "plastics_production":     _glob("plastics/production/**/*.parquet"),
+    "cfpb_complaints":         _glob("cfpb/complaints/**/*.parquet"),
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities":          _glob("worldbank_pink/**/*.parquet"),
     # ── NOAA climate ─────────────────────────────────────────────────────────

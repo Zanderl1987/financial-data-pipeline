@@ -109,6 +109,8 @@ EXPECTED_TABLES = [
     "fao_prices",
     # Plastics production (OWID)
     "plastics_production",
+    # CFPB consumer complaints
+    "cfpb_complaints",
     # World Bank Pink Sheet
     "wb_commodities",
     # NOAA climate

@@ -322,6 +322,13 @@ KEYS: dict[str, list[str]] = {
     # ~23M/year. Keyed now, while it is small enough that the transition is free.
     "schwab_options":                  ['symbol', 'expiration_date', 'strike',
                                         'put_call', 'snapshot_date'],
+    # Every run re-downloads CFPB's full current snapshot (~17M rows), so
+    # complaint_id alone is the natural key -- _sort_recency keeps the
+    # newest fetched_at version of a complaint if its status/response fields
+    # changed between runs. In _LARGE_TABLES from the start (unlike
+    # schwab_options above): this is already far past the ~23M/year
+    # threshold that forced that table's transition.
+    "cfpb_complaints":                 ['complaint_id'],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
@@ -342,7 +349,7 @@ def _curated_path(table: str) -> str:
 # materializing + drop_duplicates-ing the whole thing in memory every run --
 # minutes of dead time on every `curated.py` invocation, not just the rare
 # full-backfill case `prices` was added for.
-_LARGE_TABLES = {"prices", "fed_soma"}
+_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints"}
 
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":

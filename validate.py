@@ -360,6 +360,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["country", "obs_year", "value"],
         "date_col":    None,
     },
+    # ── CFPB consumer complaints ────────────────────────────────────────────────
+    "cfpb_complaints": {
+        "required":    ["complaint_id", "date_received", "product", "company"],
+        "critical_nn": ["complaint_id", "date_received"],
+        "date_col":    "date_received",
+    },
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities": {
         "required":    ["commodity", "value", "fetched_at"],
