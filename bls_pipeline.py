@@ -114,6 +114,31 @@ AVG_PRICE_SERIES = {
     # BLS Average Price Data (APU series) — actual US city average retail
     # prices, not an index. This is the classic "price of eggs" series.
     "APU0000708111": ("Eggs, Grade A Large, US City Average", "USD per Dozen"),
+    # Meat, poultry, fish — item codes from https://download.bls.gov/pub/time.series/ap/ap.item
+    "APU0000703112": ("Ground Beef, 100% Beef",              "USD per Lb"),
+    "APU0000703211": ("Chuck Roast, USDA Choice, Bone-In",   "USD per Lb"),
+    "APU0000703613": ("Steak, Sirloin, USDA Choice, Boneless", "USD per Lb"),
+    "APU0000703425": ("Steak, Rib Eye, USDA Choice, Boneless", "USD per Lb"),
+    "APU0000704111": ("Bacon, Sliced",                       "USD per Lb"),
+    "APU0000704211": ("Pork Chops, Center Cut, Bone-In",     "USD per Lb"),
+    "APU0000704312": ("Ham, Boneless, Excluding Canned",     "USD per Lb"),
+    "APU0000706111": ("Chicken, Fresh, Whole",                "USD per Lb"),
+    "APU0000706211": ("Chicken Breast, Bone-In",              "USD per Lb"),
+    "APU0000FF1101": ("Chicken Breast, Boneless",             "USD per Lb"),
+    "APU0000706311": ("Turkey, Frozen, Whole",                "USD per Lb"),
+    "APU0000707111": ("Tuna, Light, Chunk",                   "USD per Lb"),
+    "APU0000705142": ("Lamb and Mutton, Bone-In",             "USD per Lb"),
+    # Vegetables
+    "APU0000712112": ("Potatoes, White",                      "USD per Lb"),
+    "APU0000712211": ("Lettuce, Iceberg",                     "USD per Lb"),
+    "APU0000FL2101": ("Lettuce, Romaine",                     "USD per Lb"),
+    "APU0000712311": ("Tomatoes, Field Grown",                "USD per Lb"),
+    "APU0000712401": ("Cabbage",                               "USD per Lb"),
+    "APU0000712403": ("Carrots, Short Trimmed and Topped",    "USD per Lb"),
+    "APU0000712404": ("Onions, Dry Yellow",                    "USD per Lb"),
+    "APU0000712406": ("Peppers, Sweet",                        "USD per Lb"),
+    "APU0000712409": ("Cucumbers",                             "USD per Lb"),
+    "APU0000712412": ("Broccoli",                              "USD per Lb"),
 }
 
 EMPLOYMENT_SERIES = {
