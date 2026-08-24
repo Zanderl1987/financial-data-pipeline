@@ -354,6 +354,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["country", "commodity", "value"],
         "date_col":    None,
     },
+    # ── Plastics production (OWID) ─────────────────────────────────────────────
+    "plastics_production": {
+        "required":    ["country", "obs_year", "value", "unit"],
+        "critical_nn": ["country", "obs_year", "value"],
+        "date_col":    None,
+    },
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities": {
         "required":    ["commodity", "value", "fetched_at"],

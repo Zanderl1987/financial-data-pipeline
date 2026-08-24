@@ -107,6 +107,8 @@ EXPECTED_TABLES = [
     # FAO global food & agriculture
     "fao_production",
     "fao_prices",
+    # Plastics production (OWID)
+    "plastics_production",
     # World Bank Pink Sheet
     "wb_commodities",
     # NOAA climate
@@ -422,6 +424,8 @@ class TestPilotIcebergViews:
     def test_pilot_tables_defined(self):
         assert q.PILOT_ICEBERG_TABLES == {
             "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+            "fao_prices", "fao_production", "plastics_production",
+            "usda_crops", "usda_fertilizers", "bls_avg_price",
         }
 
     def test_iceberg_metadata_wins_over_curated(self, monkeypatch, tmp_path):

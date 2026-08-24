@@ -205,6 +205,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=900,
     ),
     PipelineSpec(
+        name="plastics",
+        file="plastics_pipeline.py",
+        desc="OWID global plastics production (keyless static historical series, 1950-2019)",
+        stage=1,
+        tables=["plastics_production"],
+        backfill_args=["--backfill"],
+        timeout=120,
+    ),
+    PipelineSpec(
         name="yahoo_options",
         file="yahoo_options_pipeline.py",
         desc="Yahoo per-contract options OHLCV history (NVDA/PLTR/MSFT/AAPL) — feeds put_call_ratio",

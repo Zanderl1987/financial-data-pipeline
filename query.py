@@ -69,7 +69,11 @@ def _curated_file(table: str) -> str:
 # Pilot tables mirrored into the local Iceberg warehouse by migrate_pilot.py.
 # query.py reads these via real `iceberg_scan` calls (preferred over the curated
 # parquet snapshot when the Iceberg table exists). See iceberg_pilot.py.
-PILOT_ICEBERG_TABLES = {"prices", "macro", "fundamentals_annual", "fundamentals_quarterly"}
+PILOT_ICEBERG_TABLES = {
+    "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+    "fao_prices", "fao_production", "plastics_production",
+    "usda_crops", "usda_fertilizers", "bls_avg_price",
+}
 
 
 def _pilot_iceberg_metadata(table: str) -> str | None:
@@ -147,6 +151,7 @@ CATALOG: dict[str, str] = {
     # ── FAO global food & agriculture statistics ──────────────────────────────
     "fao_production":          _glob("fao/production/**/*.parquet"),
     "fao_prices":              _glob("fao/prices/**/*.parquet"),
+    "plastics_production":     _glob("plastics/production/**/*.parquet"),
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities":          _glob("worldbank_pink/**/*.parquet"),
     # ── NOAA climate ─────────────────────────────────────────────────────────
