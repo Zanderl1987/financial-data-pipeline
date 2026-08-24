@@ -94,6 +94,13 @@ COMMODITIES: dict[str, dict] = {
         "notes":      "Iron ore + steel; 95% of global metal production by tonnage",
         "myb_pattern": r"myb1-\d{4}-(iron-steel|feste)",
     },
+    "helium": {
+        "page_url": "https://www.usgs.gov/centers/national-minerals-information-center/helium-statistics-and-information",
+        "mis_abbrev": None,
+        "category":   "industrial",
+        "notes":      "US production, sales/shipments, and price; MRI/semiconductor/aerospace/welding uses",
+        "myb_pattern": r"myb1-\d{4}-helium",
+    },
 }
 
 
