@@ -142,7 +142,7 @@ PIPELINES: list[PipelineSpec] = [
         file="bls_pipeline.py",
         desc="BLS CPI, PPI, employment (nonfarm payrolls by sector), JOLTS, unemployment",
         stage=1,
-        tables=["bls_cpi", "bls_ppi", "bls_employment", "bls_jolts", "bls_unemployment"],
+        tables=["bls_cpi", "bls_ppi", "bls_avg_price", "bls_employment", "bls_jolts", "bls_unemployment"],
         backfill_args=["--backfill"],
         timeout=600,
     ),

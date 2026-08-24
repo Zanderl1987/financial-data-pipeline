@@ -104,6 +104,7 @@ CATALOG: dict[str, str] = {
     # ── BLS labor market ─────────────────────────────────────────────────────
     "bls_cpi":                 _glob("bls/cpi/**/*.parquet"),
     "bls_ppi":                 _glob("bls/ppi/**/*.parquet"),
+    "bls_avg_price":           _glob("bls/avg_price/**/*.parquet"),
     "bls_employment":          _glob("bls/employment/**/*.parquet"),
     "bls_jolts":               _glob("bls/jolts/**/*.parquet"),
     "bls_unemployment":        _glob("bls/unemployment/**/*.parquet"),

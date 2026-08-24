@@ -243,6 +243,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
     },
+    "bls_avg_price": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
     "bls_employment": {
         "required":    ["series_id", "date", "value"],
         "critical_nn": ["series_id", "date", "value"],

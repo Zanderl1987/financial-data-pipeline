@@ -44,6 +44,7 @@ EXPECTED_TABLES = [
     # BLS labor market
     "bls_cpi",
     "bls_ppi",
+    "bls_avg_price",
     "bls_employment",
     "bls_jolts",
     "bls_unemployment",

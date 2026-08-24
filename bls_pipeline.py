@@ -5,6 +5,7 @@ BLS (Bureau of Labor Statistics) Pipeline.
 Fetches comprehensive labor market data from the BLS Public Data API:
   - CPI — all items, core, shelter, energy, food and sub-components
   - PPI — finished goods, intermediate, crude, services, farm products
+  - Average Price — actual US city average retail prices (e.g. eggs), not an index
   - Employment — nonfarm payrolls by sector, avg hourly earnings, avg weekly hours
   - JOLTS — job openings, hires, quits, layoffs, total separations (levels + rates)
   - Unemployment — U-3 rate, U-6 broader measure, participation, long-term unemployed
@@ -19,6 +20,7 @@ CLI:
 Outputs:
   storage/raw/bls/cpi/bls_cpi_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/ppi/bls_ppi_{mode}_{YYYYMMDD}.parquet
+  storage/raw/bls/avg_price/bls_avg_price_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/employment/bls_employment_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/jolts/bls_jolts_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/unemployment/bls_unemployment_{mode}_{YYYYMMDD}.parquet
@@ -108,6 +110,12 @@ PPI_SERIES = {
     "PCU334413334413":  ("PPI Semiconductor Device Mfg",          "Index 2012=100"),
 }
 
+AVG_PRICE_SERIES = {
+    # BLS Average Price Data (APU series) — actual US city average retail
+    # prices, not an index. This is the classic "price of eggs" series.
+    "APU0000708111": ("Eggs, Grade A Large, US City Average", "USD per Dozen"),
+}
+
 EMPLOYMENT_SERIES = {
     # Nonfarm payrolls by sector (CES — Current Employment Statistics)
     "CES0000000001": ("Total Nonfarm Employment",            "Thousands of Persons"),
@@ -194,6 +202,7 @@ UNEMPLOYMENT_SERIES = {
 TABLE_CONFIGS = {
     "bls_cpi":          (CPI_SERIES,          os.path.join(BASE_DIR, "cpi")),
     "bls_ppi":          (PPI_SERIES,          os.path.join(BASE_DIR, "ppi")),
+    "bls_avg_price":    (AVG_PRICE_SERIES,    os.path.join(BASE_DIR, "avg_price")),
     "bls_employment":   (EMPLOYMENT_SERIES,   os.path.join(BASE_DIR, "employment")),
     "bls_jolts":        (JOLTS_SERIES,        os.path.join(BASE_DIR, "jolts")),
     "bls_unemployment": (UNEMPLOYMENT_SERIES, os.path.join(BASE_DIR, "unemployment")),
