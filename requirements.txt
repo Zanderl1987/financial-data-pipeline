@@ -21,6 +21,7 @@ yfinance==1.5.1              # price_history_pipeline, yfinance_pipeline, future
 schwabdev==3.0.5              # schwab_*_pipeline.py (Stage 2, interactive OAuth)
 beautifulsoup4==4.15.0        # fed_sentiment_pipeline, fund_holdings_pipeline (HTML/XML scraping)
 lxml==6.1.1                   # bs4 parser backend
+openpyxl==3.1.5               # usgs_minerals_pipeline, usgs_ds140_pipeline (Excel parsing)
 pyiceberg==0.11.1             # index_constituents_pipeline, fund_holdings_pipeline, openfigi_pipeline, securities_reference_pipeline, create_securities_table
 edgartools==5.35.0            # fund_holdings_pipeline (N-PORT mutual fund holdings)
 vaderSentiment==3.3.2         # news_sentiment_pipeline

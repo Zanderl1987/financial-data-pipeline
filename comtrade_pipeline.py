@@ -20,8 +20,9 @@ HS codes tracked:
   850760 — Lithium-ion batteries      (EV and grid storage)
   854231 — Processor/controller ICs   (semiconductors)
   854232 — Memory ICs                 (semiconductors)
-  720829 — Steel flat-rolled HRC      (automotive body/frame)
-  760110 — Aluminum unwrought         (EV body, battery enclosures)
+   720829 — Steel flat-rolled HRC      (automotive body/frame)
+   760110 — Aluminum unwrought         (EV body, battery enclosures)
+   280429 — Helium                     (MRI, semiconductors, lifting/aerospace)
 
 CLI:
   python comtrade_pipeline.py             # last 3 years, annual
@@ -68,6 +69,7 @@ HS_CODES: dict[str, tuple[str, str]] = {
     "854232": ("Memory ICs",                    "semiconductors"),
     "720829": ("Steel Flat-Rolled HRC",         "metals"),
     "760110": ("Aluminum Unwrought Non-Alloy",  "metals"),
+    "280429": ("Helium",                        "industrial_gases"),
 }
 
 

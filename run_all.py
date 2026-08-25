@@ -406,6 +406,23 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=300,
     ),
+    PipelineSpec(
+        name="usgs_helium_mcs",
+        file="usgs_helium_mcs_pipeline.py",
+        desc="USGS MCS helium + rare gases annual data releases via ScienceBase (keyless)",
+        stage=1,
+        tables=["usgs_mcs_helium"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="usgs_ds140",
+        file="usgs_ds140_pipeline.py",
+        desc="USGS Data Series 140 helium historical statistics 1935+ (keyless, hash-gated)",
+        stage=1,
+        tables=["usgs_ds140_helium"],
+        timeout=120,
+    ),
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # Re-add if the key is obtained -- see omkar_commodity_pipeline.py.
     # PipelineSpec(
@@ -426,6 +443,14 @@ PIPELINES: list[PipelineSpec] = [
         tables=["comtrade_trade"],
         requires_env=["COMTRADE_API_KEY"],
         backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="gem_trackers",
+        file="gem_trackers_pipeline.py",
+        desc="Global Energy Monitor tracker summary tables via public Google Sheets (keyless)",
+        stage=1,
+        tables=["gem_coal_summary"],
         timeout=600,
     ),
     # ── Stage 1 — Quant / valuation / volatility / banking ─────────────────────

@@ -150,11 +150,16 @@ EXPECTED_TABLES = [
     "ecb_rates",
     # USGS critical minerals
     "usgs_minerals",
+    # USGS MCS helium (+ rare gases) + DS-140 historical statistics
+    "usgs_mcs_helium",
+    "usgs_ds140_helium",
     # Omkar Cloud commodity spot prices
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # "omkar_commodity",
     # UN Comtrade trade flows
     "comtrade_trade",
+    # GEM tracker summary tables
+    "gem_coal_summary",
     # Fama-French factor returns + industry portfolios
     "ff_factors",
     "ff_industry",

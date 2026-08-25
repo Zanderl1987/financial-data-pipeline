@@ -197,11 +197,17 @@ CATALOG: dict[str, str] = {
     "ecb_rates":               _glob("ecb/**/*.parquet"),
     # ── USGS critical mineral statistics ─────────────────────────────────────
     "usgs_minerals":           _glob("usgs_minerals/**/*.parquet"),
+    # ── USGS MCS helium (+ rare gases) annual data releases ───────────────────
+    "usgs_mcs_helium":         _glob("usgs_mcs_helium/**/*.parquet"),
+    # ── USGS DS-140 helium historical statistics ──────────────────────────────
+    "usgs_ds140_helium":       _glob("usgs_ds140/**/*.parquet"),
     # ── Omkar Cloud commodity spot prices ────────────────────────────────────
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # "omkar_commodity":       _glob("omkar_commodity/**/*.parquet"),
     # ── UN Comtrade international trade flows ─────────────────────────────────
     "comtrade_trade":          _glob("comtrade/**/*.parquet"),
+    # ── Global Energy Monitor tracker summary tables ───────────────────────────
+    "gem_coal_summary":        _glob("gem/**/gem_coal_summary_*.parquet"),
     # ── Fama-French factor returns + industry portfolios ──────────────────────
     "ff_factors":              _glob("fama_french/factors/**/*.parquet"),
     "ff_industry":             _glob("fama_french/industry/**/*.parquet"),

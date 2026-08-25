@@ -90,6 +90,9 @@ PIPELINE_MODULES = [
     "fao_pipeline",
     "plastics_pipeline",
     "cfpb_complaints_pipeline",
+    "usgs_helium_mcs_pipeline",
+    "usgs_ds140_pipeline",
+    "gem_trackers_pipeline",
 ]
 
 

@@ -498,6 +498,18 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "table_title", "period", "value"],
         "date_col":    None,
     },
+    # ── USGS MCS helium (+ rare gases) annual releases ────────────────────────
+    "usgs_mcs_helium": {
+        "required":    ["obs_year", "series", "commodity", "country", "value", "unit", "fetched_at"],
+        "critical_nn": ["obs_year", "series", "commodity", "value"],
+        "date_col":    None,
+    },
+    # ── USGS DS-140 helium historical statistics ───────────────────────────────
+    "usgs_ds140_helium": {
+        "required":    ["obs_year", "metric", "value", "unit", "fetched_at"],
+        "critical_nn": ["obs_year", "metric", "value"],
+        "date_col":    None,
+    },
     # Unwired 2026-07-26 (not in CATALOG): requires OMKAR_API_KEY, never set.
     # "omkar_commodity": {
     #     "required":    ["commodity", "price_usd", "fetched_at"],
@@ -580,6 +592,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["hs_code", "obs_year", "flow"],
         "date_col":    None,
         "value_ranges": {"trade_value_usd": (0, 5e12)},
+    },
+    # ── GEM tracker summary tables (biannual Google Sheets exports) ───────────
+    "gem_coal_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
     },
     # ── Open-Meteo daily weather ──────────────────────────────────────────────
     "open_meteo_weather": {
