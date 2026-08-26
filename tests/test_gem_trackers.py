@@ -25,6 +25,9 @@ PAGE_HTML = """
 Newly Operating Coal Plants by Year (MW) View \uf061</a>
 <a href="https://docs.google.com/spreadsheets/d/1t3gO35bzcVI8ekq9318jBUq6nd7UADcut4gY3vjHZMM/edit?usp=sharing">
 Retired Coal Plants (MW) View \uf061</a>
+<a href="https://docs.google.com/spreadsheets/d/1zjO8jgHuGXRiaL16jjSLQdIY6S2-6-DW6mJkmL0Oh2M/edit?gid=982556392#gid=982556392" target="_blank" rel="noopener noreferrer">
+Count of Iron &amp; Steel Plants by Development Status in Each Country/Area
+<div class="more-pop"><div>View</div></div></a>
 <a href="https://example.com/not-a-sheet">ignore me</a>
 </div>
 """
@@ -45,14 +48,31 @@ class TestDiscoverSheets:
         monkeypatch.setattr(gem, "_get", lambda url, timeout=60: PAGE_HTML.encode("utf-8"))
         sheets = gem.discover_sheets("https://example.com/page")
         assert sheets == {
-            "Newly Operating Coal Plants by Year (MW)": "1j35F0WrRJ9dbIJhtRkm8fvPw0Vsf-JV6G95u7gT-DDw",
-            "Retired Coal Plants (MW)": "1t3gO35bzcVI8ekq9318jBUq6nd7UADcut4gY3vjHZMM",
+            "Newly Operating Coal Plants by Year (MW)": ("1j35F0WrRJ9dbIJhtRkm8fvPw0Vsf-JV6G95u7gT-DDw", None),
+            "Retired Coal Plants (MW)":                 ("1t3gO35bzcVI8ekq9318jBUq6nd7UADcut4gY3vjHZMM", None),
+            "Count of Iron & Steel Plants by Development Status in Each Country/Area":
+                ("1zjO8jgHuGXRiaL16jjSLQdIY6S2-6-DW6mJkmL0Oh2M", 982556392),
         }
 
     def test_page_failure_returns_empty_and_fallback_applies(self, monkeypatch):
         monkeypatch.setattr(gem, "_get", lambda url, timeout=60: None)
         assert gem.discover_sheets("https://example.com/page") == {}
-        assert len(gem.FALLBACK_SHEETS) >= 6
+        for source, fallbacks in gem.FALLBACK_SHEETS.items():
+            assert len(fallbacks) >= 2, source
+
+    def test_every_tracker_page_has_fallback(self):
+        assert {p["source"] for p in gem.TRACKER_PAGES} == set(gem.FALLBACK_SHEETS)
+
+    def test_gid_forwarded_to_gviz_url(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, timeout=60):
+            captured["url"] = url
+            return b""
+
+        monkeypatch.setattr(gem, "_get", fake_get)
+        gem.fetch_sheet("sid123", gid=982556392)
+        assert captured["url"].endswith("&gid=982556392")
 
     def test_browser_user_agent_required(self):
         assert "Mozilla/5.0" in gem.HEADERS["User-Agent"]

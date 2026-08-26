@@ -599,6 +599,31 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
         "date_col":    None,
     },
+    "gem_coal_mine_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_steel_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_cement_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_oilgas_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_lng_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
     # ── Open-Meteo daily weather ──────────────────────────────────────────────
     "open_meteo_weather": {
         "required":    ["location", "date", "temperature_2m_max", "temperature_2m_min", "fetched_at"],

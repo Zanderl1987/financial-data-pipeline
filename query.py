@@ -208,6 +208,11 @@ CATALOG: dict[str, str] = {
     "comtrade_trade":          _glob("comtrade/**/*.parquet"),
     # ── Global Energy Monitor tracker summary tables ───────────────────────────
     "gem_coal_summary":        _glob("gem/**/gem_coal_summary_*.parquet"),
+    "gem_coal_mine_summary":   _glob("gem/**/gem_coal_mine_summary_*.parquet"),
+    "gem_steel_summary":       _glob("gem/**/gem_steel_summary_*.parquet"),
+    "gem_cement_summary":      _glob("gem/**/gem_cement_summary_*.parquet"),
+    "gem_oilgas_summary":      _glob("gem/**/gem_oilgas_summary_*.parquet"),
+    "gem_lng_summary":         _glob("gem/**/gem_lng_summary_*.parquet"),
     # ── Fama-French factor returns + industry portfolios ──────────────────────
     "ff_factors":              _glob("fama_french/factors/**/*.parquet"),
     "ff_industry":             _glob("fama_french/industry/**/*.parquet"),

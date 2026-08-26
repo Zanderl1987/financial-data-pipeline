@@ -16,15 +16,15 @@ size_categories:
 
 # Financial Data Pipeline — Full Curated Snapshot
 
-A comprehensive financial dataset covering **201 tables** and **127,097,417 rows** across macro, market, and alternative data sources.
+A comprehensive financial dataset covering **204 tables** and **127,551,776 rows** across macro, market, and alternative data sources.
 
 ## Data Sources
 
 | Category | Tables | Key Sources |
 |---|---|---|
 | Market Prices | 18 | Tiingo, Schwab, Finnhub, CBOE |
-| Macro & Economic | 83 | FRED, BLS, BEA, Treasury, EIA |
-| Fundamentals | 55 | SEC EDGAR, Finnhub, SimFin, Alpha Vantage |
+| Macro & Economic | 85 | FRED, BLS, BEA, Treasury, EIA |
+| Fundamentals | 56 | SEC EDGAR, Finnhub, SimFin, Alpha Vantage |
 | Alternative Data | 31 | Congressional trades, insider transactions, patents, OpenFDA |
 | Crypto & Forex | 8 | CoinGecko, Tiingo |
 | Index & Holdings | 4 | Wikipedia, BlackRock, EdgarTools, OpenFIGI |
@@ -88,9 +88,9 @@ Full source, tests, and architecture docs: https://github.com/Zanderl1987/financ
 
 - **Generated**: 2026-08-25
 - **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
-- **Tables**: 201
-- **Total Rows**: 127,097,417
-- **Total Size**: 4648.6 MB
+- **Tables**: 204
+- **Total Rows**: 127,551,776
+- **Total Size**: 4656.1 MB
 
 ## License
 

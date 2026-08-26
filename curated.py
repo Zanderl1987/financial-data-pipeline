@@ -200,6 +200,11 @@ KEYS: dict[str, list[str]] = {
     # GEM biannual releases restate the same by-year/by-stage series; newest
     # fetch wins per sheet/indicator/row/column.
     "gem_coal_summary":        ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_coal_mine_summary":   ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_steel_summary":       ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_cement_summary":      ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_oilgas_summary":      ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_lng_summary":         ["tracker_sheet", "indicator", "country_or_region", "column_label"],
     # TSA checkpoint travel volumes
     "tsa_checkpoint":         ["date"],
     # Daily weather — one observation per location per day. Without this entry

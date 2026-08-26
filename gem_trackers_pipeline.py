@@ -28,13 +28,19 @@ CLI:
   python gem_trackers_pipeline.py             # all trackers, current sheets
   python gem_trackers_pipeline.py --backfill  # same fetch (sheets are snapshots)
 
-Output:
-  storage/raw/gem/gem_coal_summary_{mode}_{YYYYMMDD}.parquet
+Output (one table per tracker):
+  storage/raw/gem/gem_coal_summary_{mode}_{YYYYMMDD}.parquet       (coal plants)
+  storage/raw/gem/gem_coal_mine_summary_{mode}_{YYYYMMDD}.parquet  (coal mines)
+  storage/raw/gem/gem_steel_summary_{mode}_{YYYYMMDD}.parquet      (iron & steel)
+  storage/raw/gem/gem_cement_summary_{mode}_{YYYYMMDD}.parquet     (cement/concrete)
+  storage/raw/gem/gem_oilgas_summary_{mode}_{YYYYMMDD}.parquet     (oil & gas extraction)
+  storage/raw/gem/gem_lng_summary_{mode}_{YYYYMMDD}.parquet        (LNG + pipelines)
 """
 
 import argparse
 import csv
 import datetime
+import html
 import io
 import os
 import re
@@ -55,26 +61,72 @@ HEADERS = {
                    "Chrome/126.0 Safari/537.36"),
 }
 
-GCPT_DOWNLOAD_URL = ("https://globalenergymonitor.org/projects/"
-                     "global-coal-plant-tracker/download-data/")
+GEM_PROJECT_URL = "https://globalenergymonitor.org/projects/{slug}/download-data/"
 GVIZ_URL = "https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv"
 
+# One entry per tracker download page; each lands in its own table. The
+# oil&gas and LNG trackers link several summary titles to tabs of a single
+# workbook, so discovered links carry a ?gid=<tab> that must be forwarded to
+# the gviz export or every title would parse the same first tab.
 TRACKER_PAGES: list[dict] = [
-    {"source": "gem_gcpt", "page_url": GCPT_DOWNLOAD_URL,
+    {"source": "gem_gcpt", "slug": "global-coal-plant-tracker",
      "table": "gem_coal_summary"},
+    {"source": "gem_gcmt", "slug": "global-coal-mine-tracker",
+     "table": "gem_coal_mine_summary"},
+    {"source": "gem_gspt", "slug": "global-steel-plant-tracker",
+     "table": "gem_steel_summary"},
+    {"source": "gem_gcct", "slug": "global-cement-and-concrete-tracker",
+     "table": "gem_cement_summary"},
+    {"source": "gem_goget", "slug": "global-oil-and-gas-extraction-tracker",
+     "table": "gem_oilgas_summary"},
+    {"source": "gem_ggit", "slug": "global-gas-infrastructure-tracker",
+     "table": "gem_lng_summary"},
 ]
 
-FALLBACK_SHEETS: dict[str, str] = {
-    "Newly Operating Coal Plants by Year (MW)":   "1j35F0WrRJ9dbIJhtRkm8fvPw0Vsf-JV6G95u7gT-DDw",
-    "Retired Coal Plants (MW)":                   "1t3gO35bzcVI8ekq9318jBUq6nd7UADcut4gY3vjHZMM",
-    "Planned Coal Plant Retirements (MW)":        "1E82_2I7n4__oFzDTWVuZwPstfr1tk4jn1kFw4E_gf5w",
-    "Captive Coal Plants":                        "1xnFBS4W6MRF0qmTnn3SyacvTaYlkUKIXTJdGhX0lZpo",
-    "Coal Plants by Combustion Technology":       "1d0NyUPGzXMqxR7OczQXcaHzen381AbMjQ3YEDmCAgj0",
-    "Global Ownership of Coal Plants (MW)":       "1c4YVil_aLWLIApVKoePLJKiNvb4XO2qhrkupGPfT_QE",
+# Known-good IDs verified 2026-08-25, used only when a download page cannot
+# be fetched (multi-tab workbooks fall back to their first tab).
+FALLBACK_SHEETS: dict[str, dict[str, tuple[str, int | None]]] = {
+    "gem_gcpt": {
+        "Newly Operating Coal Plants by Year (MW)": ("1j35F0WrRJ9dbIJhtRkm8fvPw0Vsf-JV6G95u7gT-DDw", None),
+        "Retired Coal Plants (MW)":                 ("1t3gO35bzcVI8ekq9318jBUq6nd7UADcut4gY3vjHZMM", None),
+        "Planned Coal Plant Retirements (MW)":      ("1E82_2I7n4__oFzDTWVuZwPstfr1tk4jn1kFw4E_gf5w", None),
+        "Captive Coal Plants":                      ("1xnFBS4W6MRF0qmTnn3SyacvTaYlkUKIXTJdGhX0lZpo", None),
+        "Coal Plants by Combustion Technology":     ("1d0NyUPGzXMqxR7OczQXcaHzen381AbMjQ3YEDmCAgj0", None),
+        "Global Ownership of Coal Plants (MW)":     ("1c4YVil_aLWLIApVKoePLJKiNvb4XO2qhrkupGPfT_QE", None),
+    },
+    "gem_gcmt": {
+        "Coal Production by Country/Area":           ("16LpUIA4PpV-2a7qOHpOy9-BBSxgJ9KVOrin2ggp6B1U", None),
+        "Coal Production by Region":                 ("1cfDNFMc_mLyS6nXRvWF47OReucFTUfgSppe-4pzMXmA", None),
+        "Coal Production by Mine Type":              ("1PaQnSRjp_U8109i1HrEqzzgNewbdMvKpjK_dPdXqETA", None),
+        "Coal Production by Coal Grade":             ("16YjWPehCEaoS4-Bg4Q45aDZvrurnsiNnzVfIp-R3GpM", None),
+        "Coal Workforce Size by Country/Area":       ("11bPLEcIg6uFcDp1ekLhIe5w4_GQkj2ISqd0i870L9J4", None),
+        "Coal Mine Methane Emissions by Region":     ("1QGGp6rfw7W8phlKc8RCFbudPOAcB-Tz3RSsecs8GyaQ", None),
+    },
+    "gem_gspt": {
+        "Count of Iron & Steel Plants by Development Status in Each Country/Area": ("1zjO8jgHuGXRiaL16jjSLQdIY6S2-6-DW6mJkmL0Oh2M", 982556392),
+        "Steel Capacity (TTPA) by Development Status in Each Country/Area":        ("10aR9TJC00JKeDrF7kZzD261ex86vq8j72UdcVLkc4nU", None),
+        "Operating Steel Capacity (TTPA) by Production Method in Each Country/Area": ("1mOWPPmjCQtoAWUCY0pAChgWskobG0odjdNUHV041_a8", None),
+        "Operating Steel Capacity (TTPA) by Production Method in Each Region":     ("1Z8onPtIemlw3H0hIAp8y1btG6Qm5cU9TpcWiMrxuc98", None),
+    },
+    "gem_gcct": {
+        "Cement and Clinker Capacity (MTPA) by Status in Each Country/Area": ("1xMozMm0OElQBVdKtkqDQsL5oi6vIin7S_1f0n7NJvfE", None),
+        "Operating Cement and Clinker Capacity (MTPA) in Each Country/Area": ("1nWBp_7eGuUO8S1Xs1tkyJlxSScVGyDImMdrYFvNRd7A", None),
+        "Count of Operating Cement Plants in Each Country/Area":             ("1WXRhfTZ40QpiKIxEKP0btssOAETfU1udl3X79o2A0C8", None),
+    },
+    "gem_goget": {
+        "Extraction Sites by Country/Area": ("1JHt24Rmm6e0DyeTSqvqH1i9nJ876iYrq6X1InCAHcf0", None),
+        "Yearly FIDs Approved by Region":   ("1JHt24Rmm6e0DyeTSqvqH1i9nJ876iYrq6X1InCAHcf0", None),
+    },
+    "gem_ggit": {
+        "LNG Export Capacity by Region": ("1NbEpGt2K5nY0XTSB_vlOyw9Ug8ZmvvOaRPuO9TgISIw", None),
+        "LNG Import Capacity by Region": ("1NbEpGt2K5nY0XTSB_vlOyw9Ug8ZmvvOaRPuO9TgISIw", None),
+        "Pipelines by Region":           ("1NbEpGt2K5nY0XTSB_vlOyw9Ug8ZmvvOaRPuO9TgISIw", None),
+    },
 }
 
 _SHEET_LINK_RE = re.compile(
-    r'<a[^>]+href="(https://docs\.google\.com/spreadsheets/d/[^"#?/]+)[^"]*"[^>]*>(.*?)</a>',
+    r'<a[^>]+href="(https://docs\.google\.com/spreadsheets/d/[^"#?/]+)'
+    r'(?:/edit\?(?:[^"#]*&)?gid=(\d+))?[^"]*"[^>]*>(.*?)</a>',
     re.S | re.I,
 )
 _RELEASE_RE = re.compile(r"updated\s+([A-Z][a-z]+ \d{4})")
@@ -104,28 +156,89 @@ def _get(url: str, timeout: int = 60) -> bytes | None:
     return None
 
 
-def discover_sheets(page_url: str) -> dict[str, str]:
-    """Parse a tracker download-data page into {link text -> sheet ID}."""
+def discover_sheets(page_url: str) -> dict[str, tuple[str, int | None]]:
+    """Parse a tracker download-data page into {link text -> (sheet ID, gid)}."""
     content = _get(page_url, timeout=90)
     if not content:
         return {}
-    html = content.decode("utf-8", errors="replace")
-    sheets: dict[str, str] = {}
-    for m in _SHEET_LINK_RE.finditer(html):
+    html_text = content.decode("utf-8", errors="replace")
+    sheets: dict[str, tuple[str, int | None]] = {}
+    for m in _SHEET_LINK_RE.finditer(html_text):
         sheet_id = m.group(1).rstrip("/").split("/")[-1]
-        text = re.sub(r"<[^>]+>", "", m.group(2))
-        text = re.sub(r"\s*View\s+[\uf061a]?\s*$", "", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        if text and sheet_id:
-            sheets[text] = sheet_id
+        gid = int(m.group(2)) if m.group(2) else None
+        title = re.sub(r"<[^>]+>", "", m.group(3))
+        title = re.sub(r"\s*View\b[\s\uf061a]*$", "", title)
+        title = html.unescape(re.sub(r"\s+", " ", title)).strip()
+        if title and sheet_id:
+            sheets[title] = (sheet_id, gid)
     return sheets
 
 
-def fetch_sheet(sheet_id: str) -> str | None:
-    content = _get(GVIZ_URL.format(sheet_id=sheet_id))
+def fetch_sheet(sheet_id: str, gid: int | None = None) -> str | None:
+    url = GVIZ_URL.format(sheet_id=sheet_id)
+    if gid is not None:
+        url += f"&gid={gid}"
+    content = _get(url)
     if content is None:
         return None
     return content.decode("utf-8", errors="replace")
+
+
+_STOPWORDS = {"by", "the", "in", "of", "and", "each", "a", "an", "to", "for"}
+
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _STOPWORDS}
+
+
+def _tab_gids(sheet_id: str) -> list[int]:
+    """Enumerate tab gids of a public workbook via its htmlview page."""
+    content = _get(f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview")
+    if not content:
+        return []
+    gids = {int(m) for m in re.findall(r"gid=([0-9]+)", content.decode("utf-8", errors="replace"))}
+    return sorted(gids)
+
+
+def resolve_multitab_titles(sheets: dict[str, tuple[str, int | None]]) -> dict[str, tuple[str, int | None]]:
+    """Several tracker summary titles can link to tabs of one workbook without
+    per-tab gids in their hrefs; left alone they would all parse tab 1 under
+    different labels. Enumerate the workbook's tabs and match each title to
+    the tab whose banner shares the most title tokens."""
+    by_sheet: dict[str, list[str]] = {}
+    for title, (sid, gid) in sheets.items():
+        if gid is None:
+            by_sheet.setdefault(sid, []).append(title)
+    resolved = dict(sheets)
+    for sid, titles in by_sheet.items():
+        if len(titles) < 2:
+            continue
+        gids = _tab_gids(sid)
+        if not gids:
+            for extra in titles[1:]:
+                del resolved[extra]
+            continue
+        banners: dict[int, str] = {}
+        for gid in gids:
+            txt = fetch_sheet(sid, gid)
+            time.sleep(REQUEST_INTERVAL)
+            if txt:
+                banners[gid] = next(csv.reader(io.StringIO(txt)))[0]
+        matched_any = False
+        for title in titles:
+            want = _tokens(title)
+            best_gid, best_score = None, 1
+            for gid, banner in banners.items():
+                score = len(want & _tokens(banner))
+                if score > best_score:
+                    best_gid, best_score = gid, score
+            if best_gid is not None:
+                resolved[title] = (sid, best_gid)
+                matched_any = True
+        if matched_any:
+            print(f"    resolved {len(titles)} shared-workbook titles across "
+                  f"{len(banners)} tabs")
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -207,21 +320,29 @@ def main(backfill: bool = False) -> None:
 
     os.makedirs(BASE_DIR, exist_ok=True)
     frames: list[pd.DataFrame] = []
+    sheet_cache: dict[tuple[str, int | None], str | None] = {}
 
     for page_cfg in TRACKER_PAGES:
         source = page_cfg["source"]
+        page_url = GEM_PROJECT_URL.format(slug=page_cfg["slug"])
+        table = page_cfg["table"]
         print(f"[{source}] discovering summary sheets...")
-        sheets = discover_sheets(page_cfg["page_url"])
+        sheets = discover_sheets(page_url)
         if sheets:
-            print(f"  found {len(sheets)} sheets on page")
+            print(f"  found {len(sheets)} sheet links on page")
+            sheets = resolve_multitab_titles(sheets)
         else:
-            print(f"  page fetch failed - using {len(FALLBACK_SHEETS)} fallback IDs")
-            sheets = FALLBACK_SHEETS
+            print(f"  page fetch failed - using {len(FALLBACK_SHEETS[source])} fallback IDs")
+            sheets = FALLBACK_SHEETS[source]
 
         total = len(sheets)
-        for i, (indicator, sheet_id) in enumerate(sorted(sheets.items()), 1):
+        for i, (indicator, (sheet_id, gid)) in enumerate(sorted(sheets.items()), 1):
             print(f"  [{i}/{total}] {indicator}")
-            text = fetch_sheet(sheet_id)
+            cache_key = (sheet_id, gid)
+            if cache_key not in sheet_cache:
+                sheet_cache[cache_key] = fetch_sheet(sheet_id, gid)
+                time.sleep(REQUEST_INTERVAL)
+            text = sheet_cache[cache_key]
             if text is None:
                 print("    fetch failed")
                 continue
@@ -233,26 +354,28 @@ def main(backfill: bool = False) -> None:
             df["fetched_at"] = now.isoformat()
             frames.append(df)
             print(f"    {len(df):,} records")
-            time.sleep(REQUEST_INTERVAL)
 
     if not frames:
         print("\nNo summary data fetched.")
         return
 
-    combined = (
-        pd.concat(frames, ignore_index=True)
-        .drop_duplicates()
-        .sort_values(["indicator", "country_or_region", "obs_year"])
-        .reset_index(drop=True)
-    )
+    all_rows = pd.concat(frames, ignore_index=True).drop_duplicates()
 
-    path = write_partitioned(
-        combined, BASE_DIR,
-        f"gem_coal_summary_{mode}_{today_str}.parquet",
-    )
-    print(f"\n-> {path}")
-    print(f"   {len(combined):,} rows | {combined['indicator'].nunique()} sheets "
-          f"| release(s): {sorted(combined['release_label'].unique())}")
+    written: list[str] = []
+    for table in sorted({c["table"] for c in TRACKER_PAGES}):
+        sub = all_rows[all_rows["source"].isin(
+            c["source"] for c in TRACKER_PAGES if c["table"] == table)]
+        if sub.empty:
+            continue
+        sub = sub.sort_values(["indicator", "country_or_region", "obs_year"])
+        path = write_partitioned(
+            sub, BASE_DIR,
+            f"{table}_{mode}_{today_str}.parquet",
+        )
+        written.append(table)
+        print(f"\n-> {path}")
+        print(f"   {len(sub):,} rows | {sub['indicator'].nunique()} sheets "
+              f"| release(s): {sorted(sub['release_label'].unique())}")
 
     print("\n--- GEM TRACKERS PIPELINE COMPLETE ---")
 

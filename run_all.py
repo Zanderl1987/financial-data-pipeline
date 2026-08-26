@@ -450,8 +450,9 @@ PIPELINES: list[PipelineSpec] = [
         file="gem_trackers_pipeline.py",
         desc="Global Energy Monitor tracker summary tables via public Google Sheets (keyless)",
         stage=1,
-        tables=["gem_coal_summary"],
-        timeout=600,
+        tables=["gem_coal_summary", "gem_coal_mine_summary", "gem_steel_summary",
+                "gem_cement_summary", "gem_oilgas_summary", "gem_lng_summary"],
+        timeout=1800,
     ),
     # ── Stage 1 — Quant / valuation / volatility / banking ─────────────────────
     PipelineSpec(

@@ -160,6 +160,11 @@ EXPECTED_TABLES = [
     "comtrade_trade",
     # GEM tracker summary tables
     "gem_coal_summary",
+    "gem_coal_mine_summary",
+    "gem_steel_summary",
+    "gem_cement_summary",
+    "gem_oilgas_summary",
+    "gem_lng_summary",
     # Fama-French factor returns + industry portfolios
     "ff_factors",
     "ff_industry",
