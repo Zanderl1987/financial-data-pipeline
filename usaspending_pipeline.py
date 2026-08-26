@@ -142,8 +142,10 @@ def run_window(mode: str, start: str, end: str, today_str: str, fetched_at: str)
     try:
         counts = fetch_counts(start, end)
         counts["fetched_at"] = fetched_at
+        # Window MUST be in the filename: all windows in one run share the same
+        # fetched_at partition and would otherwise overwrite each other.
         path = write_partitioned(counts, counts_dir,
-                                 f"usaspending_award_counts_{mode}_{today_str}.parquet")
+                                 f"usaspending_award_counts_{mode}_{start}_{end}.parquet")
         total = int(counts["award_count"].sum())
         print(f"  counts {start}..{end}: {total:,} awards -> {path}")
     except Exception as exc:
@@ -160,7 +162,7 @@ def run_window(mode: str, start: str, end: str, today_str: str, fetched_at: str)
         awards["window_end"] = end
         awards["fetched_at"] = fetched_at
         path = write_partitioned(awards, awards_dir,
-                                 f"usaspending_top_awards_{mode}_{today_str}.parquet")
+                                 f"usaspending_top_awards_{mode}_{start}_{end}.parquet")
         print(f"  top_awards {start}..{end}: {len(awards):,} rows -> {path}")
     except Exception as exc:
         print(f"  top_awards {start}..{end}: ERROR - {exc}")
