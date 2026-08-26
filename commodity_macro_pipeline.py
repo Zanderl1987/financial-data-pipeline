@@ -107,6 +107,9 @@ SERIES = {
     "BAMLC0A0CM":     ("IG Corporate Spread (OAS)",    "daily",    "Percent",      "credit"),
     "BAMLH0A0HYM2EY": ("HY Effective Yield",           "daily",    "Percent",      "credit"),
     "BAMLEMCBPIOAS":  ("EM Corporate Spread (OAS)",    "daily",    "Percent",      "credit"),
+    # Municipal bonds — Nasdaq OMRX muni yield index (verified live 2026-08-26;
+    # ICE BofA muni series do NOT exist on FRED, Bond Buyer indexes discontinued)
+    "NASDAQOMRXMUNI": ("Municipal Bond Index (OMRX)",  "daily",    "Index",        "credit"),
 }
 
 

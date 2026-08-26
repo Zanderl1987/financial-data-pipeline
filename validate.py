@@ -1305,6 +1305,27 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": [],
         "date_col":    "fetched_at",
     },
+    # USAspending federal contracts (keyless replacement for finnhub_usa_spending)
+    "usaspending_award_counts": {
+        "required":    ['window_start', 'window_end', 'award_type_code', 'award_count', 'fetched_at'],
+        "critical_nn": ['window_start', 'award_type_code', 'award_count'],
+        "date_col":    "window_end",
+    },
+    "usaspending_top_awards": {
+        # date_col is window_end, NOT start_date: USAspending award-level rows
+        # carry the original award start (can be decades old or even future-
+        # dated for planned awards); only the query window bounds freshness.
+        "required":    ['recipient_name', 'award_amount', 'awarding_agency', 'fetched_at'],
+        "critical_nn": ['recipient_name', 'awarding_agency', 'award_amount'],
+        "date_col":    "window_end",
+    },
+    # Senate LDA lobbying filings (keyless replacement for finnhub_lobbying)
+    "lda_lobbying_filings": {
+        "required":    ['filing_uuid', 'registrant_name', 'fetched_at'],
+        "critical_nn": ['filing_uuid', 'registrant_name'],
+        # dt_posted can be null on amended filings; fetched_at is the safe date_col
+        "date_col":    "fetched_at",
+    },
     "finnhub_earnings_history": {
         "required":    ['symbol', 'obs_year', 'quarter', 'actual', 'fetched_at'],
         "critical_nn": ['symbol', 'obs_year', 'quarter'],
