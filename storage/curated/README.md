@@ -86,7 +86,7 @@ Full source, tests, and architecture docs: https://github.com/Zanderl1987/financ
 
 ## Build Info
 
-- **Generated**: 2026-08-27
+- **Generated**: 2026-08-28
 - **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
 - **Tables**: 216
 - **Total Rows**: 128,277,950
