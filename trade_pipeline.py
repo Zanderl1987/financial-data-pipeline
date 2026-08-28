@@ -1,16 +1,19 @@
 """
-US International Trade Pipeline — Monthly agricultural imports and exports by HTS chapter.
+US International Trade Pipeline — Monthly imports and exports by HTS chapter.
 
 Uses the US Census Bureau International Trade time-series API.
 Register free at https://api.census.gov/data/key_signup.html to get a key.
 Add CENSUS_API_KEY to your .env file.
 
-Covers major agricultural HTS chapters (world totals):
+Covers major HTS chapters (world totals):
   Chapter 10 -- Cereals (wheat, corn, rice, barley)
   Chapter 12 -- Oilseeds (soybeans, rapeseed, sunflower)
   Chapter 15 -- Animal/vegetable fats and oils (palm oil, soybean oil)
   Chapter 23 -- Food industry residues and feed (soybean meal, distillers grains)
   Chapter 31 -- Fertilizers (urea, ammonia, potash, DAP)
+  Chapter 44 -- Wood and articles of wood (lumber)
+  Chapter 72 -- Iron and steel
+  Chapter 73 -- Articles of iron or steel
 
 Backfill fetches December year-to-date totals per year (= annual trade volumes).
 Incremental fetches monthly values for the last 24 months.
@@ -51,13 +54,16 @@ INCREMENTAL_MONTHS = 24
 # World total country code (all trading partners combined)
 WORLD_CTY = "0000"
 
-# Agricultural HTS 2-digit chapters and their descriptions
-AG_CHAPTERS: dict[str, str] = {
+# Tracked HTS 2-digit chapters and their descriptions
+TRACKED_CHAPTERS: dict[str, str] = {
     "10": "Cereals",
     "12": "Oilseeds",
     "15": "Fats and oils",
     "23": "Feed and residues",
     "31": "Fertilizers",
+    "44": "Wood and articles of wood",
+    "72": "Iron and steel",
+    "73": "Articles of iron or steel",
 }
 
 # Variables to retrieve from the Census imports API
@@ -159,7 +165,7 @@ def _incremental_periods(n_months: int) -> list[tuple[int, int]]:
 
 def _fetch_imports_period(year: int, month: int) -> pd.DataFrame:
     frames = []
-    for chapter, chapter_name in AG_CHAPTERS.items():
+    for chapter, chapter_name in TRACKED_CHAPTERS.items():
         params = {
             "get": IMPORT_VARS,
             "YEAR": str(year),
@@ -228,7 +234,7 @@ def _clean_imports(df: pd.DataFrame) -> pd.DataFrame:
 
 def _fetch_exports_period(year: int, month: int) -> pd.DataFrame:
     frames = []
-    for chapter, chapter_name in AG_CHAPTERS.items():
+    for chapter, chapter_name in TRACKED_CHAPTERS.items():
         params = {
             "get": EXPORT_VARS,
             "YEAR": str(year),
@@ -317,13 +323,13 @@ def main(backfill: bool = False) -> None:
         mode_tag = "incremental"
         print(f"Mode: INCREMENTAL (last {INCREMENTAL_MONTHS} months)")
 
-    chapters_str = ", ".join(f"{k} ({v})" for k, v in AG_CHAPTERS.items())
+    chapters_str = ", ".join(f"{k} ({v})" for k, v in TRACKED_CHAPTERS.items())
     print(f"Chapters: {chapters_str}")
     print(f"Periods:  {len(periods)}")
     print()
 
     # ── Imports ────────────────────────────────────────────────────────────────
-    print("--- US Agricultural Imports ---")
+    print("--- US Imports ---")
     df_imports = fetch_imports(periods)
     if not df_imports.empty:
         path = write_partitioned(
@@ -341,7 +347,7 @@ def main(backfill: bool = False) -> None:
     print()
 
     # ── Exports ────────────────────────────────────────────────────────────────
-    print("--- US Agricultural Exports ---")
+    print("--- US Exports ---")
     df_exports = fetch_exports(periods)
     if not df_exports.empty:
         path = write_partitioned(
@@ -361,7 +367,7 @@ def main(backfill: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="US International Trade pipeline -- agricultural imports and exports by HTS chapter"
+        description="US International Trade pipeline -- imports and exports by HTS chapter"
     )
     parser.add_argument(
         "--backfill",

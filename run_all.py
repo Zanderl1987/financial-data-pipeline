@@ -215,7 +215,7 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="trade",
         file="trade_pipeline.py",
-        desc="US Census agricultural imports and exports by HTS chapter (5 chapters)",
+        desc="US Census imports and exports by HTS chapter (8 chapters: ag, lumber, steel)",
         stage=1,
         tables=["us_imports_hs", "us_exports_hs"],
         requires_env=["CENSUS_API_KEY"],

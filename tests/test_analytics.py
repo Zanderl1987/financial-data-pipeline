@@ -112,6 +112,18 @@ class TestFunctionSignatures:
         from analytics import credit_spreads
         assert "start" in self._sig(credit_spreads)
 
+    def test_housing_leading_indicators_params(self):
+        from analytics import housing_leading_indicators
+        assert "start" in self._sig(housing_leading_indicators)
+
+    def test_lead_lag_correlation_params(self):
+        from analytics import lead_lag_correlation
+        sig = self._sig(lead_lag_correlation)
+        assert "leading" in sig
+        assert "target" in sig
+        assert "max_lag" in sig
+        assert "transform" in sig
+
     # sectors
     def test_sector_performance_params(self):
         from analytics import sector_performance
@@ -198,6 +210,17 @@ class TestEmptyDataBehavior:
         from analytics import credit_spreads
         result = credit_spreads()
         assert isinstance(result, pd.DataFrame)
+
+    def test_housing_leading_indicators_empty_returns_df(self):
+        from analytics import housing_leading_indicators
+        result = housing_leading_indicators()
+        assert isinstance(result, pd.DataFrame)
+
+    def test_lead_lag_correlation_empty_returns_df(self):
+        from analytics import lead_lag_correlation
+        result = lead_lag_correlation(pd.DataFrame(), "building_permits", "housing_starts")
+        assert isinstance(result, pd.DataFrame)
+        assert list(result.columns) == ["lag", "corr"]
 
     def test_upcoming_earnings_empty_returns_df(self):
         from analytics import upcoming_earnings

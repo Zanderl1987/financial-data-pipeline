@@ -105,6 +105,101 @@ def credit_spreads(start: "str | None" = None) -> pd.DataFrame:
     )
 
 
+HOUSING_SERIES: dict[str, str] = {
+    "housing_starts":   "HOUST",
+    "building_permits": "PERMIT",
+}
+
+LUMBER_STEEL_SERIES: dict[str, str] = {
+    "lumber_ppi": "WPU081",
+    "steel_ppi":  "WPU101",
+}
+
+
+def housing_leading_indicators(start: "str | None" = None) -> pd.DataFrame:
+    """
+    Housing starts, building permits, and lumber/steel PPI in one wide monthly
+    frame — the base table for lead-lag tests of what predicts new home
+    construction (see lead_lag_correlation()).
+
+    Returns:
+        date | housing_starts | building_permits | lumber_ppi | steel_ppi
+    Columns absent from the data are omitted.
+    """
+    series_map = {**HOUSING_SERIES, **LUMBER_STEEL_SERIES}
+    housing = q.load("fred_macro_housing", series_id=list(HOUSING_SERIES.values()), start=start)
+    commod = q.load("commodities", series_id=list(LUMBER_STEEL_SERIES.values()), start=start)
+
+    frames = [df for df in (housing, commod) if not df.empty]
+    if not frames:
+        return pd.DataFrame(columns=["date"] + list(series_map))
+
+    reverse_map = {v: k for k, v in series_map.items()}
+    combined = pd.concat(frames, ignore_index=True)
+    combined["date"] = pd.to_datetime(combined["date"]).dt.tz_localize(None)
+    combined["label"] = combined["series_id"].map(reverse_map)
+
+    ordered = [k for k in series_map if k in combined["label"].values]
+    return (
+        combined.pivot_table(index="date", columns="label", values="value")[ordered]
+                .reset_index()
+                .sort_values("date")
+    )
+
+
+def lead_lag_correlation(
+    df: pd.DataFrame,
+    leading: str,
+    target: str,
+    max_lag: int = 12,
+    transform: str = "yoy",
+) -> pd.DataFrame:
+    """
+    Cross-correlate two columns of a wide monthly DataFrame at lags
+    -max_lag..+max_lag to test whether `leading` predicts `target` ahead of time.
+
+    Parameters
+    ----------
+    df       : wide DataFrame with a `date` column plus `leading`/`target`
+               columns (e.g. from housing_leading_indicators())
+    leading  : candidate leading-indicator column name
+    target   : column being predicted (e.g. 'housing_starts')
+    max_lag  : months to test in each direction
+    transform: 'yoy' (year-over-year %, detrends level series) or 'level'
+
+    Returns:
+        lag | corr
+    Negative lag means `leading` leads `target` by that many months; positive
+    lag means `leading` actually follows `target` (a lagging indicator). The
+    row with the largest |corr| is the best-fit lag — a genuinely predictive
+    relationship needs that peak at lag < 0, not at 0 or positive.
+    """
+    if df.empty or leading not in df.columns or target not in df.columns:
+        return pd.DataFrame(columns=["lag", "corr"])
+
+    work = df[["date", leading, target]].copy()
+    work["date"] = pd.to_datetime(work["date"])
+    work = work.set_index("date").sort_index()
+
+    if transform == "yoy":
+        a = work[leading].pct_change(12) * 100
+        b = work[target].pct_change(12) * 100
+    elif transform == "level":
+        a = work[leading]
+        b = work[target]
+    else:
+        raise ValueError("transform must be 'yoy' or 'level'")
+
+    rows = []
+    for lag in range(-max_lag, max_lag + 1):
+        shifted = b.shift(-lag)
+        both = pd.concat([a, shifted], axis=1).dropna()
+        r = both.iloc[:, 0].corr(both.iloc[:, 1]) if len(both) >= 24 else None
+        rows.append({"lag": lag, "corr": None if r is None else round(float(r), 4)})
+
+    return pd.DataFrame(rows)
+
+
 def commodity_vs_symbol(
     commodity_series_id: str,
     symbol: str,
