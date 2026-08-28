@@ -373,7 +373,7 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="congressional_trades",
         file="congressional_trades_pipeline.py",
-        desc="US House and Senate stock trade disclosures (keyless)",
+        desc="US House and Senate STOCK Act periodic transaction reports -- House Clerk + Senate eFD (keyless)",
         stage=1,
         tables=["congressional_trades"],
         backfill_args=["--backfill"],
@@ -841,9 +841,9 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
-        desc="Finnhub alt-data expansion -- ESG, congressional trading, lobbying, patents, econ calendar, etc",
+        desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",
         stage=1,
-        tables=['finnhub_esg', 'finnhub_congressional_trading', 'finnhub_supply_chain', 'finnhub_insider_sentiment', 'finnhub_social_sentiment', 'finnhub_sec_filings', 'finnhub_earnings_quality', 'finnhub_lobbying', 'finnhub_usa_spending', 'finnhub_uspto_patents', 'finnhub_visa_applications', 'finnhub_economic_calendar'],
+        tables=['finnhub_esg', 'finnhub_supply_chain', 'finnhub_insider_sentiment', 'finnhub_social_sentiment', 'finnhub_sec_filings', 'finnhub_earnings_quality', 'finnhub_lobbying', 'finnhub_usa_spending', 'finnhub_uspto_patents', 'finnhub_visa_applications', 'finnhub_economic_calendar'],
         requires_env=['FINNHUB_API_KEY'],
         backfill_args=['--backfill'],
         timeout=1200,

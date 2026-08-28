@@ -276,7 +276,8 @@ KEYS: dict[str, list[str]] = {
     "defillama_fees":                 ['protocol_id', 'fetched_at'],
     "defillama_stablecoins":          ['stablecoin_id', 'fetched_at'],
     "finnhub_esg":                    ['symbol', 'fetched_at'],
-    "finnhub_congressional_trading":  ['symbol', 'member_name', 'transaction_date', 'asset_description', 'amount'],
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading":  ['symbol', 'member_name', 'transaction_date', 'asset_description', 'amount'],
     "finnhub_supply_chain":           ['symbol', 'side', 'fetched_at'],
     "finnhub_insider_sentiment":      ['symbol', 'obs_year', 'obs_month'],
     "finnhub_social_sentiment":       ['symbol', 'timestamp'],
@@ -306,6 +307,9 @@ KEYS: dict[str, list[str]] = {
     "usaspending_award_counts":        ['window_start', 'award_type_code'],
     "usaspending_top_awards":          ['award_id'],
     "lda_lobbying_filings":            ['filing_uuid'],
+    # Congressional PTRs: (chamber, doc_id, row_index) is an exact key --
+    # a filing can legitimately repeat the same ticker/date/amount twice.
+    "congressional_trades":            ['chamber', 'doc_id', 'row_index'],
     "treasury_yield_curve":            ['date'],
     "treasury_avg_interest_rates":     ['record_date', 'security_desc'],
     "treasury_interest_expense":       ['record_date', 'expense_catg_desc', 'expense_type_desc'],

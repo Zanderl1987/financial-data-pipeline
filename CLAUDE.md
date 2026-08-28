@@ -231,9 +231,15 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   corporate actions add-on entitlement" for every symbol (confirmed 2026-08-01). The
   sibling `/distributions-yield` (no add-on gate) still works fine — that's the only
   live sub-table of `tiingo_corporate_actions_*`.
-- Congressional trades (`congressional_trades_pipeline.py`) — both House and Senate
-  disclosure aggregator endpoints 403 (confirmed again 2026-08-01, same as 07-23);
-  looks like anti-bot hardening on the source site, not a URL/param bug.
+- ~~Congressional trades -- both House and Senate disclosure aggregator endpoints
+  403~~ **RESOLVED 2026-08-28.** The community `senate-stock-watcher` /
+  `house-stock-watcher` S3 aggregators are permanently dead, but they were only
+  ever scraping the official sources, which work keyless:
+  `congressional_trades_pipeline.py` now reads the House Clerk archive
+  (`{YYYY}FD.ZIP` index -> `ptr-pdfs/{YYYY}/{DocID}.pdf`) and Senate eFD
+  (`efdsearch.senate.gov`, CSRF + `prohibition_agreement=1` POST, then
+  `/search/report/data/`). **General lesson: when a community data aggregator
+  dies, check what it was aggregating before writing the data off.**
 - **UKMTO incident reports** (`www.ukmto.org/recent-incidents`) — Next.js SPA whose
   `/_next/data/...` route returns only an empty Sitecore layout shell; real incidents
   load from a deeper internal API. Would need a headless browser — ruled out

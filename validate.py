@@ -1247,11 +1247,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['symbol'],
         "date_col":    "fetched_at",
     },
-    "finnhub_congressional_trading": {
-        "required":    ['symbol', 'member_name', 'transaction_date', 'fetched_at'],
-        "critical_nn": ['symbol', 'member_name', 'transaction_date'],
-        "date_col":    "transaction_date",
-    },
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading": {
+    #     "required":    ['symbol', 'member_name', 'transaction_date', 'fetched_at'],
+    #     "critical_nn": ['symbol', 'member_name', 'transaction_date'],
+    #     "date_col":    "transaction_date",
+    # },
     "finnhub_supply_chain": {
         "required":    ['symbol', 'side', 'fetched_at'],
         "critical_nn": ['symbol', 'side'],

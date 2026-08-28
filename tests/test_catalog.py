@@ -302,7 +302,8 @@ EXPECTED_TABLES = [
     "eia_natural_gas_production",
     "eia_lng_flows",
     "finnhub_esg",
-    "finnhub_congressional_trading",
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading",
     "finnhub_supply_chain",
     "finnhub_insider_sentiment",
     "finnhub_social_sentiment",

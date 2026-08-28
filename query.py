@@ -368,7 +368,8 @@ CATALOG: dict[str, str] = {
     "eia_natural_gas_production":   _glob("eia/natural_gas_production/**/*.parquet"),
     "eia_lng_flows":                _glob("eia/lng_flows/**/*.parquet"),
     "finnhub_esg":                    _glob("finnhub/esg/**/*.parquet"),
-    "finnhub_congressional_trading":  _glob("finnhub/congressional_trading/**/*.parquet"),
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading":  _glob("finnhub/congressional_trading/**/*.parquet"),
     "finnhub_supply_chain":           _glob("finnhub/supply_chain/**/*.parquet"),
     "finnhub_insider_sentiment":      _glob("finnhub/insider_sentiment/**/*.parquet"),
     "finnhub_social_sentiment":       _glob("finnhub/social_sentiment/**/*.parquet"),

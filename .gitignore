@@ -25,6 +25,10 @@ storage/hf_fundamentals_snapshot/
 Com95_16.txt
 annualof.txt
 
+# Resumable backfill checkpoints (congressional_trades). Regenerable local
+# state, and deliberately outside storage/raw/ so query.py's CATALOG globs
+# never union a partial checkpoint into a table.
+storage/cache/
 storage/eval_registry/
 storage/logs/
 logs/
