@@ -1,0 +1,58 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 4 (URL /scripts/page-4/?script_type=strategies), enumerated 2026-08-28 to
+# extend the campaign after batches 1-3 (2026-08-12, pages 1-3, ranks ~1-69) were
+# fully exhausted (every entry DONE/SKIP). Same sampling frame priority 1 per
+# pre-registration amendment 2026-08-11 (b). The site's "Most popular" ranking is
+# time-sensitive (re-sorts as scripts accrue boosts), so page 4 today is not the
+# same rank-70-92 window a strict snapshot from 08-12 would have shown -- verified
+# pages 2-3 today still substantially overlap already-collected slugs before page 4
+# turned up entirely new material, so no re-processing of earlier batches was done.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE         = .pine + .meta.json in this directory
+#         SKIP-2PA     = author already at the 2-per-author cap (cap tracked across
+#                        ALL batches via meta.json tv_author, not just this page)
+#         SKIP-LEN     = too large to collect through the two-channel workaround
+#         SKIP-INTRADAY = strategy is explicitly designed/documented for intraday
+#                        timeframes (session filters, VWAP-anchored, "best timeframe:
+#                        1-15min") -- cannot be honestly tested against this campaign's
+#                        daily-bar price panel (yfinance_universe_prices). New status
+#                        category added this batch; see pre-registration Sec 2 (Data).
+#         SKIP-DOMAIN  = strategy logic is fundamentally tied to a non-equity
+#                        instrument's mechanics (e.g. commodity-futures seasonal
+#                        harvest calendar) and cannot be sensibly applied to the
+#                        equity universe without changing its entire premise
+#         TODO         = next to collect / not yet evaluated
+#
+DONE         jXxP2m1Q-ETH-DCA-Strategy-3Commas-Quantpilot :: 3Commas :: crypto DCA-bot template; 1st for this author
+DONE         VFzCk3HX-TASC-2026-08-An-Ag-Selling-Model :: PineCodersTASC :: SKIP-DOMAIN -- corn futures seasonal harvest-timing model (contract-based sizing, cents/contract commission, "month of harvest" input); logic has no equity analogue. Was flagged CAND in the 2026-08-11 editors-picks roster but never collected until now (confirmed domain mismatch on inspection, not collected as source)
+DONE         tDAQfHmS-SOL-RSI-DCA-Strategy-3Commas-QuantPilot :: 3Commas :: 2nd for this author, at cap -- remaining 3Commas entries below are SKIP-2PA
+YnLk5B6z-VWAP-Mean-Reversion-Strategy-with-Session-and-Volume-Filter :: AIScripts :: SKIP-2PA (author at cap: jyhTizLX, xSLyyOwI already collected)
+DTZv6GgJ :: DNSE :: TODO -- not evaluated this session (Vietnamese brokerage account, prior DNSE entries were all SKIP-LEN; check length first)
+zrDoqm9F-Webhook-Alert-Strategy-Template :: trade-wzrd :: TODO -- likely a generic EMA/RSI template like 8iayxxss (webhook payload is the point, not the strategy logic); low priority, same mechanism family already covered
+DONE         7gcvFvlg-Fractal-Memory-Strategy-Jayadev-Rana :: bluealgocapital :: admitted, ADMIT/volatility family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see fractal_memory_strategy.pine. ATR-trail flip + analog pattern-match (MSE over 30-bar normalized log-return windows) direction filter, 3-tier scale-out targets. 176 lines, ~20 params (author defaults only, deprioritize-eligible)
+SKIP-2PA     5Tg2Es4G-BTC-DCA-Strategy-3Commas-QuantPilot :: 3Commas :: 3rd by this author
+Je0EGfi9-Execution-Signals-Breakout-Strategy-MTF :: Latibonit15 :: TODO -- name suggests MTF; check for unconfirmed_htf before collecting
+SKIP-2PA     GM1bUrIF-INJ-DCA-Long-Strategy-3Commas-QuantPilot :: 3Commas :: 4th by this author
+0NWRtU59-Adaptive-ATR-Scalper-Instant-Lock-Version :: emretw11 :: TODO -- "Scalper" in title, likely SKIP-INTRADAY; not confirmed this session
+8oH4qCeH-RSI-Divergence-EMA-Trend-Filter :: AIScripts :: SKIP-2PA (author at cap)
+OKxIjdsz :: SystemsOverFeelings :: TODO -- not evaluated
+DONE         adOY8NBg-TrendPulse-9-EMA-VWAP-Continuation-Strategy :: waynemarnold :: SKIP-INTRADAY -- author's own doc: "primarily designed for intraday use... most suitable timeframes: 1/3/5/15 minute". Confirmed via page text, not collected as source.
+igEyqfKW-ARBF-Strategy-v1-8 :: d_jaeger :: TODO -- not evaluated
+SKIP-2PA     LOO7phxG-SOL-RSI-Strategy-3Commas :: 3Commas :: 5th by this author
+WWuTjyDx-Capitulation-Stretch-Reversion-Jayadev-Rana :: bluealgocapital :: TODO -- 2nd for this author (fractal_memory_strategy is 1st), still within cap; not evaluated this session, good next pick
+DdDDGP97-DJT-Strategy-The-Art-of-the-Dip :: GandalfTrades :: TODO -- not evaluated
+SKIP-2PA     6kaqC3R8-GRAM-RSI-Strategy-3Commas :: 3Commas :: 6th by this author
+t578EfVb :: abib14bis :: TODO -- not evaluated (empty title in scrape, needs a visit)
+kaF9Z5PQ :: toldodesty :: TODO -- not evaluated (empty title in scrape, needs a visit)
+MKZxjgdR-Multi-Timeframe-MACD-Cascade-SNR-v6-Janice :: RICKI1155 :: TODO -- name suggests MTF; check for unconfirmed_htf before collecting
+DONE         X6tAPOil-RSI-BB-Inside-Strategy :: jfiejka :: admitted, ADMIT/mean_reversion family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see rsi_bb_inside_strategy.pine. RSI oversold/overbought gated by "still inside the Bollinger Bands" (avoids catching a falling knife), exit on basis-line cross. 47 lines, 3 params, clean.
+
+# Session summary (2026-08-28): 2 new strategies collected and Stage-1-screened
+# (both ADMIT): fractal_memory_strategy (bluealgocapital), rsi_bb_inside_strategy
+# (jfiejka). 1 domain mismatch identified and resolved (TASC Ag Selling Model --
+# futures-seasonal, not equity-portable). 1 confirmed SKIP-INTRADAY. 5 3Commas DCA-
+# bot entries capped at 2 collected / 4 skipped (same crypto-DCA mechanism family
+# repeated across coins). 8 entries left TODO for next session, several flagged with
+# a specific reason to check first (MTF -> screen for unconfirmed_htf; "Scalper" ->
+# likely intraday). Page 5+ not yet touched.

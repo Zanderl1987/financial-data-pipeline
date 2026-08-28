@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-28",
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans, indent chars were U+00A0 not U+0020 on this script -- detected and handled)",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "bluealgocapital",
+  "tv_boosts": 20,
+  "tv_script_name": "Fractal Memory Strategy [Jayadev Rana]",
+  "tv_url": "https://www.tradingview.com/script/7gcvFvlg-Fractal-Memory-Strategy-Jayadev-Rana/",
+  "tv_views": 1425
+}
