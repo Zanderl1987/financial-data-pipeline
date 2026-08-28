@@ -538,6 +538,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=1800,
     ),
     PipelineSpec(
+        name="defillama",
+        file="defillama_pipeline.py",
+        desc="DeFi protocol fundamentals: TVL, fees/revenue, stablecoin supply (keyless, snapshot-only)",
+        stage=1,
+        tables=["defillama_protocols", "defillama_fees", "defillama_stablecoins"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="fed_soma",
         file="fed_soma_pipeline.py",
         desc="NY Fed SOMA weekly balance sheet: Treasury + Agency MBS holdings (keyless)",

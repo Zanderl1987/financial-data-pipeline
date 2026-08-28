@@ -1326,6 +1326,22 @@ SCHEMAS: dict[str, dict] = {
         # dt_posted can be null on amended filings; fetched_at is the safe date_col
         "date_col":    "fetched_at",
     },
+    # DeFi protocol fundamentals (snapshot-only, run daily to accumulate history)
+    "defillama_protocols": {
+        "required":    ['protocol_id', 'name', 'tvl', 'fetched_at'],
+        "critical_nn": ['protocol_id', 'name'],
+        "date_col":    "fetched_at",
+    },
+    "defillama_fees": {
+        "required":    ['protocol_id', 'name', 'total_24h', 'fetched_at'],
+        "critical_nn": ['protocol_id', 'name'],
+        "date_col":    "fetched_at",
+    },
+    "defillama_stablecoins": {
+        "required":    ['stablecoin_id', 'name', 'symbol', 'circulating', 'fetched_at'],
+        "critical_nn": ['stablecoin_id', 'name', 'symbol'],
+        "date_col":    "fetched_at",
+    },
     "finnhub_earnings_history": {
         "required":    ['symbol', 'obs_year', 'quarter', 'actual', 'fetched_at'],
         "critical_nn": ['symbol', 'obs_year', 'quarter'],

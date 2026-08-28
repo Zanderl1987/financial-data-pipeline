@@ -51,6 +51,7 @@ PIPELINE_MODULES = [
     "treasury_curve_pipeline",
     "usaspending_pipeline",
     "lda_lobbying_pipeline",
+    "defillama_pipeline",
     "fed_soma_pipeline",
     "fed_sentiment_pipeline",
     "real_estate_pipeline",
