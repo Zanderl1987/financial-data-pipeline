@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "reindent(page_text, js_indent_array)",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "newton61",
+  "tv_boosts": 7,
+  "tv_script_name": "BIST30 to S&P 500 \u2014 ATR Momentum Rider",
+  "tv_url": "https://www.tradingview.com/script/jd1KSVn7/",
+  "tv_views": 238
+}

@@ -1,0 +1,32 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular", page 2
+# (items ranked 24-46 in popularity order), enumerated 2026-08-12 to extend the
+# batch-1 roster after it was exhausted. Same sampling frame priority 1 per
+# pre-registration amendment 2026-08-11 (b). cs_lev, blitz_locked, and
+# ortizbruno115 hit the 2-per-author cap partway through this page.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE     = .pine + .meta.json in this directory
+#         SKIP-2PA = author already at the 2-per-author cap
+#         SKIP-LEN = too large to collect through the two-channel workaround
+#         TODO     = next to collect
+#
+DONE     UCGXkLvt-MA-Crossover-RSI-Strategy :: clayton1139 :: admitted (deprioritized, 9 params)
+SKIP-LEN Fc4IHcm4-TT-Lorentzian :: ai_distribution_express :: 395 lines
+SKIP-2PA egTb7TgJ-TRADLEWARE-Gaussian-Channel-StochRSI-ETH :: cs_lev :: 3rd by this author
+SKIP-LEN UqKr1TZS-REVERSAL-PRO-v2-Failure-BOS-CHoCH :: Lelloman :: 547 lines
+SKIP-2PA d1JxXpid-TRADLEWARE-Gaussian-Channel-StochRSI-BTC :: cs_lev :: 4th by this author
+SKIP-LEN FtRppcLM-TT-Autotune :: ai_distribution_express :: 609 lines
+SKIP-LEN 642rbEbE-SVT-Big-Swing-Capture-Early-Catch :: seanvtran :: 852 lines
+SKIP-LEN 4s4X741x-ryans-XAUUSD-SMC-Signal-Bot-HTF-MSS-Entry-TF :: Ryanhalliwell18 :: 511 lines
+SKIP-LEN uOaILfJT-DNSE-VN301-Bollinger-Bands-Break-Out-Strategy :: DNSE :: 428 lines
+SKIP-LEN wTvvjVJi-RK-Gold-Sniper-AI-PRO :: rishabhkapoor268 :: 431 lines
+SKIP-LEN MQDDEl1e-Poor-Mans-Orderflow-Simple-AlgoPilot :: Kpt-Ahab :: 1443 lines
+SKIP-2PA W67tJltC-Z-Edge-Confluence-Z-score-Strategy :: blitz_locked :: 3rd by this author (hezSShJr, xx3enmiW already collected)
+SKIP-LEN XoWVndPv-3-Session-ORB-BudgeDaddy :: MarkBurgess :: 1887 lines
+SKIP-LEN z9ZAdxT0-Laxman-Rekha-Reversal-Strategy :: prathambaldawa3 :: 477 lines
+DONE     AlvLl7j2-NAS100-Practical-SMC-5m-v12 :: AdvJavedkhan :: screened OUT (lookahead, barmerge.lookahead_on despite a misleading "prevents look-ahead" comment)
+SKIP-LEN CLvCY5Rp-fcraynel-strategy :: raynelperez9 :: 653 lines
+DONE     ymepYSLq-NNFX-BTC-SSL-QQE-SignalForge :: SignalForge-Ai :: admitted (deprioritized, 12 params)
+DONE     Ott3SiyK-Opening-Range-Breakout-ORB :: ortizbruno115 :: admitted (deprioritized, 10 params)
+DONE     f2lBhqNS-Donchian-Intraday-Momentum-Breakout :: ortizbruno115 :: 2nd for this author, still within cap; admitted (deprioritized, 11 params)
+SKIP-2PA CNC6abWu-VWAP-Band-Mean-Reversion :: ortizbruno115 :: 3rd by this author

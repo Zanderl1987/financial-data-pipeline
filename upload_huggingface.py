@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
-from huggingface_hub import HfApi, login
+from huggingface_hub import HfApi, HfFileSystem, login
 
 STORAGE_ROOT = Path(__file__).parent / "storage" / "curated"
 README_TEMPLATE = """---
@@ -82,6 +82,31 @@ Each table is stored as a separate parquet file. Key columns:
 - `fetched_at`: UTC timestamp when data was fetched
 - `year` / `month`: Hive partition columns (where applicable)
 
+## Engineering & data quality
+
+This snapshot is the output of a tested pipeline, not a one-off scrape:
+
+- **761 automated tests**, including guard tests that fail the suite if a pipeline
+  is added but not wired into the query catalog, schema registry, and curated-table
+  dedup step — so a table can't silently go missing from downstream queries.
+- **Schema/null-rate/range validation** (`validate.py`) runs as an operational health
+  check against every table after each pipeline run.
+- **Raw vs. curated separation**: pipelines write Hive-partitioned raw Parquet, which
+  can contain overlapping re-fetches (measured up to ~42% duplicate rows on some raw
+  tables); a dedup step (`curated.py`) produces the deduplicated tables published here.
+- **Point-in-time discipline**: downstream feature joins use filing/publication date
+  with explicit lags rather than observation date, so a backtest can't accidentally
+  see information before it was actually available. `fetched_at` records ingestion
+  time separately from the business dates already present in the source data (e.g.
+  dividend tables carry `declaration_date`/`record_date`/`payment_date`/
+  `ex_dividend_date`, which are four different points in time for the same event).
+- **Iceberg pilot**: a subset of tables (`prices`, `macro`, `fundamentals_annual`,
+  `fundamentals_quarterly`) are additionally mirrored into an Apache Iceberg warehouse
+  with real snapshot-based reads and automated snapshot expiration (30-day retention),
+  as a pilot toward full lakehouse-style versioning of the rest of the store.
+
+Full source, tests, and architecture docs: https://github.com/Zanderl1987/financial-data-pipeline
+
 ## Build Info
 
 - **Generated**: {generated_date}
@@ -102,7 +127,37 @@ def count_rows(parquet_path: Path) -> int:
     return pq.read_metadata(str(parquet_path)).num_rows
 
 
-def main(repo_name: str = "financial-data-pipeline", private: bool = False):
+def remote_row_counts(repo_id: str, token: str) -> dict:
+    """
+    Row counts for every table currently published on HF, read from each
+    parquet file's footer over HTTP range requests (no full download).
+    Returns {} if the repo has no parquet files yet (first publish).
+
+    This exists because `upload_folder` is last-writer-wins per file: a stale
+    local snapshot can silently overwrite fresher remote data and still report
+    success (a rising *aggregate* row count once masked a table losing 56% of
+    its rows — see feedback_hf_publish_hazards). Comparing per-table, before
+    upload, is the only thing that catches that class of failure.
+    """
+    import pyarrow.parquet as pq
+
+    fs = HfFileSystem(token=token)
+    counts = {}
+    try:
+        remote_files = fs.glob(f"datasets/{repo_id}/**/*.parquet")
+    except Exception:
+        return counts
+    for rf in remote_files:
+        name = Path(rf).stem
+        try:
+            with fs.open(rf, "rb") as f:
+                counts[name] = pq.read_metadata(f).num_rows
+        except Exception as e:
+            print(f"  WARN: could not read remote row count for {name}: {e}")
+    return counts
+
+
+def main(repo_name: str = "financial-data-pipeline", private: bool = False, force: bool = False):
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         print("ERROR: Set HUGGINGFACE_TOKEN or HF_TOKEN env variable.")
@@ -124,6 +179,16 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
     print(f"Creating/updating repo: {repo_id} (private={private})")
 
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
+
+    # create_repo's `private` only applies when it actually creates the repo --
+    # with exist_ok=True it silently no-ops on an existing one, so --private
+    # would print "private=True" and still publish to a public repo. Found in
+    # the shipping pipeline 2026-08-10, where that sent a real upload out
+    # publicly. Enforce the requested visibility BEFORE any data is uploaded.
+    current = api.dataset_info(repo_id).private
+    if current != private:
+        print(f"  repo already existed with private={current}; setting private={private}")
+        api.update_repo_settings(repo_id=repo_id, repo_type="dataset", private=private)
 
     # Count rows and categorize
     total_rows = 0
@@ -177,6 +242,36 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False):
     print(f"  Market: {categories['market']}, Macro: {categories['macro']}, Fund: {categories['fund']}")
     print(f"  Alt: {categories['alt']}, Crypto: {categories['crypto']}, Index: {categories['index']}, Sent: {categories['sent']}")
 
+    # Per-table regression guard -- see remote_row_counts() docstring. Runs
+    # before any upload; a rising aggregate total can hide a losing table.
+    print("\nChecking remote row counts for regressions...")
+    remote_counts = remote_row_counts(repo_id, token)
+    if not remote_counts:
+        print("  (first publish or repo has no parquet files yet -- nothing to compare)")
+    else:
+        local_counts = {name: rows for name, rows, _ in table_stats}
+        regressions = []
+        for name, remote_n in remote_counts.items():
+            local_n = local_counts.get(name)
+            if local_n is None:
+                regressions.append((name, remote_n, 0))
+            elif local_n < remote_n:
+                regressions.append((name, remote_n, local_n))
+        if regressions:
+            print(f"  REGRESSION: {len(regressions)} table(s) would lose rows:")
+            for name, remote_n, local_n in regressions:
+                pct = (local_n / remote_n - 1) * 100 if remote_n else 0
+                print(f"    {name}: {remote_n:,} -> {local_n:,} ({pct:+.1f}%)")
+            if not force:
+                print("\nABORTING publish -- pass --force to publish anyway "
+                      "(only if this regression is expected, e.g. a source "
+                      "removed data upstream).")
+                return None
+            print("  --force set: publishing despite regression(s).")
+        else:
+            print(f"  OK: no table regressed vs. the current remote revision "
+                  f"({len(remote_counts)} tables compared).")
+
     # Generate README
     readme = README_TEMPLATE.format(
         repo_id=repo_id,
@@ -227,5 +322,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload curated data to HuggingFace")
     parser.add_argument("--repo-name", default="financial-data-pipeline", help="HF repo name")
     parser.add_argument("--private", action="store_true", help="Make dataset private")
+    parser.add_argument("--force", action="store_true",
+                         help="Publish even if a table's row count would regress vs. the remote revision")
     args = parser.parse_args()
-    main(repo_name=args.repo_name, private=args.private)
+    main(repo_name=args.repo_name, private=args.private, force=args.force)

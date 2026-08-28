@@ -50,12 +50,16 @@ FIELD_CROPS = [
     "OATS",
 ]
 
-# Fertilizer input cost commodities tracked in USDA Prices Paid survey
+# Fertilizer input cost commodities tracked in USDA Prices Paid survey.
+# NASS's real commodity_desc taxonomy here is broad categories, not individual
+# products -- "ANHYDROUS AMMONIA"/"DAP"/"UREA" are not valid values (verified via
+# get_param_values). NITROGEN covers ammonia/urea, PHOSPHATE covers DAP.
+# PHOSPHATE and POTASH were discontinued after 2014 -- kept for backfill history.
 FERTILIZER_COMMODITIES = [
-    "ANHYDROUS AMMONIA",
-    "DAP",
-    "UREA",
+    "NITROGEN",
+    "PHOSPHATE",
     "POTASH",
+    "FERTILIZER TOTALS",
 ]
 
 
@@ -175,7 +179,11 @@ def _clean_crops(df: pd.DataFrame) -> pd.DataFrame:
     # "year" dropped from output: DuckDB's hive_partitioning=True treats "year"
     # as a reserved virtual column (from storage/raw/.../year=YYYY/) and would
     # silently overwrite it with the fetch year — "date" already covers it.
-    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "agg_level", "value"]
+    # domaincat_desc kept: a handful of series (e.g. corn-for-fuel-alcohol) break
+    # the same commodity/description/date/period down further by sub-domain
+    # (dry-mill vs wet-mill plant) — dropping it collapsed distinct values into
+    # false duplicates.
+    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "agg_level", "domaincat_desc", "value"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["value"])
     df["source"] = "USDA NASS QuickStats"
@@ -204,13 +212,29 @@ def fetch_fertilizers(start_year: int, end_year: int) -> pd.DataFrame:
         }
         print(f"  {fert}...", end=" ", flush=True)
         data = _get_with_backoff(params)
+        needs_filter = False
+        if data is None:
+            # NASS returns a generic 400 (not an empty result) when year__GE
+            # excludes every year a discontinued commodity has data for
+            # (e.g. PHOSPHATE/POTASH stopped in 2014). Retry without the lower
+            # bound and filter to the requested window client-side.
+            params.pop("year__GE", None)
+            data = _get_with_backoff(params)
+            needs_filter = True
         if data is None:
             print("request failed")
         elif _api_error(data):
             print(f"API error: {_api_error(data)}")
         elif "data" in data and data["data"]:
-            frames.append(pd.DataFrame(data["data"]))
-            print(f"{len(data['data'])} records")
+            df = pd.DataFrame(data["data"])
+            if needs_filter:
+                years = pd.to_numeric(df["year"], errors="coerce")
+                df = df[years.ge(start_year) & years.le(end_year)]
+            if df.empty:
+                print("no data in range (discontinued before requested years)")
+            else:
+                frames.append(df)
+                print(f"{len(df)} records")
         else:
             print("no data")
         time.sleep(REQUEST_INTERVAL)
@@ -257,8 +281,9 @@ def _clean_fertilizers(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
 
-    # "year" dropped — see note in _clean_crops above.
-    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "frequency", "value"]
+    # "year" dropped — see note in _clean_crops above. domaincat_desc kept — see
+    # note in _clean_crops above.
+    keep = ["commodity", "stat_category", "description", "unit", "date", "period", "frequency", "domaincat_desc", "value"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].dropna(subset=["value"])
     df["source"] = "USDA NASS QuickStats"

@@ -91,33 +91,61 @@ def fetch_edgar_tickers() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 2. Index membership flags + GICS sector from existing index_members table
 # ---------------------------------------------------------------------------
+
+# NOTE: each index source (Wikipedia/BlackRock/etc.) reports its own company_name
+# (and only the SPX/Wikipedia source carries cik/gics_sector) for the same ticker,
+# so this must GROUP BY ticker alone -- grouping by those metadata columns too
+# (as this used to) splits one ticker into multiple rows, one per distinct
+# metadata combination, and each row only captures the flags that co-occurred
+# with it. That silently dropped is_russell3000/is_nasdaq100 for names like
+# AAPL/MSFT/NVDA once a later drop_duplicates(subset="ticker") kept only one
+# of the split rows. Metadata is picked with an explicit source priority
+# (SPX/Wikipedia first, since it's the only source with cik/gics_sector).
+_INDEX_FLAGS_SQL = """
+    SELECT
+        ticker,
+        COALESCE(
+            MAX(CASE WHEN index_code = 'SPX'     THEN company_name END),
+            MAX(CASE WHEN index_code = 'NDX'     THEN company_name END),
+            MAX(CASE WHEN index_code = 'RUT3000' THEN company_name END),
+            MAX(CASE WHEN index_code = 'W5000'   THEN company_name END),
+            MAX(CASE WHEN index_code = 'RUT2000' THEN company_name END)
+        ) AS company_name,
+        MAX(CASE WHEN index_code = 'SPX' THEN cik END) AS cik,
+        MAX(CASE WHEN index_code = 'SPX' THEN gics_sector END) AS gics_sector,
+        MAX(CASE WHEN index_code = 'SPX' THEN gics_sub_industry END) AS gics_sub_industry,
+        MAX(CASE WHEN index_code = 'SPX'     THEN 1 ELSE 0 END) AS is_sp500,
+        MAX(CASE WHEN index_code = 'NDX'     THEN 1 ELSE 0 END) AS is_nasdaq100,
+        MAX(CASE WHEN index_code = 'RUT3000' THEN 1 ELSE 0 END) AS is_russell3000,
+        MAX(CASE WHEN index_code = 'RUT2000' THEN 1 ELSE 0 END) AS is_russell2000,
+        MAX(CASE WHEN index_code = 'W5000'   THEN 1 ELSE 0 END) AS is_wilshire5000
+    FROM members
+    WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM members)
+    GROUP BY ticker
+"""
+
+
+def _aggregate_index_flags(members) -> pd.DataFrame:
+    """Run _INDEX_FLAGS_SQL against `members` (a DataFrame or duckdb relation with
+    ticker/company_name/cik/gics_sector/gics_sub_industry/index_code/snapshot_date
+    columns). Split out from build_index_flags() so the aggregation logic is
+    testable against synthetic data, not just the real Iceberg files."""
+    import duckdb
+
+    df = duckdb.sql(_INDEX_FLAGS_SQL).fetchdf()
+    for col in ["is_sp500", "is_nasdaq100", "is_russell3000", "is_russell2000", "is_wilshire5000"]:
+        df[col] = df[col].astype(bool)
+    return df
+
+
 def build_index_flags() -> pd.DataFrame:
     """Read the existing index_members Iceberg table and compute per-ticker index membership flags."""
     import duckdb
 
     log.info("[INDEX] Reading index_members for membership flags...")
     parquet_path = (ICEBERG_WAREHOUSE / "constituents" / "index_members" / "**" / "*.parquet").as_posix()
-
-    df = duckdb.sql(f"""
-        SELECT
-            ticker,
-            company_name,
-            cik,
-            gics_sector,
-            gics_sub_industry,
-            MAX(CASE WHEN index_code = 'SPX'     THEN 1 ELSE 0 END) AS is_sp500,
-            MAX(CASE WHEN index_code = 'NDX'     THEN 1 ELSE 0 END) AS is_nasdaq100,
-            MAX(CASE WHEN index_code = 'RUT3000' THEN 1 ELSE 0 END) AS is_russell3000,
-            MAX(CASE WHEN index_code = 'RUT2000' THEN 1 ELSE 0 END) AS is_russell2000,
-            MAX(CASE WHEN index_code = 'W5000'   THEN 1 ELSE 0 END) AS is_wilshire5000
-        FROM read_parquet('{parquet_path}', hive_partitioning=true)
-        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM read_parquet('{parquet_path}', hive_partitioning=true))
-        GROUP BY ticker, company_name, cik, gics_sector, gics_sub_industry
-    """).fetchdf()
-
-    # Cast boolean flags
-    for col in ["is_sp500", "is_nasdaq100", "is_russell3000", "is_russell2000", "is_wilshire5000"]:
-        df[col] = df[col].astype(bool)
+    members = duckdb.sql(f"SELECT * FROM read_parquet('{parquet_path}', hive_partitioning=true)")
+    df = _aggregate_index_flags(members)
 
     log.info("[INDEX] Computed flags for %d unique tickers", len(df))
     return df
@@ -162,6 +190,53 @@ def fetch_finnhub_profiles(symbols: list[str]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     log.info("[FINNHUB] Fetched %d profiles", len(df))
     return df
+
+
+def load_existing_enrichment() -> pd.DataFrame:
+    """Read the current constituents.securities table and return its Finnhub
+    profile fields as a {symbol: profile} frame, so a --skip-finnhub run keeps
+    previously-fetched market_cap/industry/... instead of nulling them out on
+    the full overwrite below. Returns empty on a first build or catalog errors."""
+    cols = {
+        "symbol": "symbol",
+        "company_name": "name",
+        "exchange": "exchange",
+        "country": "country",
+        "ipo_date": "ipo",
+        "market_cap": "marketCapitalization",
+        "shares_outstanding": "shareOutstanding",
+        "industry": "finnhubIndustry",
+        "currency": "currency",
+    }
+    try:
+        from pyiceberg.catalog import load_catalog
+        catalog = load_catalog(
+            "constituents",
+            type="sql",
+            uri=f"sqlite:///{CATALOG_DB.as_posix()}",
+            warehouse=f"file://{ICEBERG_WAREHOUSE.as_posix()}",
+        )
+        table = catalog.load_table("constituents.securities")
+        df = table.scan().to_pandas()
+    except Exception as exc:
+        log.warning("[EXISTING] Could not read existing securities table: %s", exc)
+        return pd.DataFrame()
+    if df.empty:
+        return df
+
+    have = {k: v for k, v in cols.items() if k in df.columns}
+    out = df[list(have)].rename(columns=have)
+    enrich_cols = [c for c in ("marketCapitalization", "shareOutstanding",
+                               "finnhubIndustry", "ipo") if c in out.columns]
+    if enrich_cols:
+        mask = pd.Series(False, index=out.index)
+        for c in enrich_cols:
+            mask |= out[c].notna() & (out[c].astype(str).str.strip() != "")
+        out = out[mask]
+    out = out.dropna(subset=["symbol"])
+    log.info("[EXISTING] Carrying forward enrichment for %d symbols",
+             out["symbol"].nunique())
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +446,11 @@ def main(skip_finnhub: bool = False, finnhub_symbols: list[str] | None = None):
 
     # 3. Finnhub enrichment (optional)
     finnhub = pd.DataFrame()
-    if not skip_finnhub:
+    if skip_finnhub:
+        # Preserve enrichment already present in the table -- a full overwrite
+        # below would otherwise null out Finnhub fields on a --skip-finnhub run.
+        finnhub = load_existing_enrichment()
+    else:
         # Determine which symbols to enrich
         if finnhub_symbols:
             symbols = finnhub_symbols

@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/eDyfoKkr-Joey-Strategy/",
+  "tv_author": "Geckin",
+  "tv_script_name": "Joey Strategy",
+  "tv_boosts": 6,
+  "tv_views": 921,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Long-only Stochastic %K/%D crossover gated to oversold territory (K<30), market-order entry, ATR-based TP/SL locked in at entry (1.5x ATR each side, symmetric). No request.security, no session logic. Author's doc: 'The strategy can work on any candlestick timeframe, but it was originally designed for 1-day candlesticks.' 85 lines, ~6 params."
+}

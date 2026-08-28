@@ -135,10 +135,9 @@ def get_dji_symbols():
     except Exception as e:
         print(f"Wikipedia scrape failed ({e}). Using fallback.")
         return [
-            "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX",
-            "DIS", "DOW", "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM",
-            "KO", "MCD", "MMM", "MRK", "MSFT", "NKE", "NVDA", "PG", "SHW",
-            "TRV", "UNH", "VZ", "WBA", "WMT", "XOM",
+            "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
+            "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
+            "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
         ]
 
 

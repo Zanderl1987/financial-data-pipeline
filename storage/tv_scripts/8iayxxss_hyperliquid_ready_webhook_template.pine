@@ -1,0 +1,135 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+//  Hyperliquid-Ready Webhook Strategy Template [PopsPineDev]
+//  License: Open-source (Mozilla Public License 2.0 — TradingView default)
+//
+//  WHAT THIS IS
+//  A clean EMA-cross + RSI-filter strategy whose real value is the ALERT
+//  PAYLOAD: a production-grade JSON webhook message with the fields most
+//  templates forget — an idempotency id, a timestamp for staleness checks,
+//  and a secret placeholder for HMAC validation.
+//
+//  The strategy logic is intentionally simple so you can replace it with
+//  your own. The webhook plumbing is the part you keep.
+//
+//  HOW TO USE
+//  1. Add to chart (crypto perps recommended: BTC/ETH/SOL, 15m-1H)
+//  2. Create alert → Condition: this strategy → "alert() function calls only"
+//     is NOT used here; select "Order fills events". In the message box put:
+//     {{strategy.order.alert_message}}
+//  3. Point the alert's Webhook URL at your execution backend / bridge.
+//     This template works with any TradingView→exchange webhook bridge.
+//
+//  WHY EACH PAYLOAD FIELD EXISTS  (the part nobody explains)
+//  • id     → unique per signal (ticker+timeframe+bar time). Your backend
+//             should treat this as an IDEMPOTENCY KEY: if the same id
+//             arrives twice (TradingView retries on slow responses!),
+//             execute once and drop the duplicate. One Redis SET NX and
+//             you'll never double-fill an order.
+//  • ts     → fire-time timestamp ({{timenow}}). Reject alerts older than
+//             N seconds so a delayed/replayed webhook can't trade on a
+//             stale price.
+//  • secret → replace with a long random token, then VERIFY it server-side
+//             (or better: HMAC the body). Anyone who finds your webhook URL
+//             can POST to it — this field is your lock.
+//  • reduce_only → true on exits, so a close can never accidentally flip
+//             you into a new position if state desyncs.
+//
+//  Built by PopsPineDev — I build custom TradingView→Hyperliquid execution
+//  pipelines. Links in signature.
+// ─────────────────────────────────────────────────────────────────────────────
+
+strategy("Hyperliquid-Ready Webhook Strategy Template [PopsPineDev]",
+     shorttitle = "HL Webhook Template",
+     overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 5,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.045,          // ≈ Hyperliquid taker fee, adjust to your tier
+     slippage = 2,
+     process_orders_on_close = true,    // signals fire on confirmed bars only
+     calc_on_every_tick = false)
+
+// ── INPUTS ───────────────────────────────────────────────────────────────────
+grpStrat  = "Strategy"
+fastLen   = input.int(21,  "Fast EMA",            minval = 1,   group = grpStrat)
+slowLen   = input.int(55,  "Slow EMA",            minval = 2,   group = grpStrat)
+rsiLen    = input.int(14,  "RSI Length",          minval = 2,   group = grpStrat)
+rsiLongMin  = input.int(50, "RSI ≥ for Longs",    minval = 0, maxval = 100, group = grpStrat)
+rsiShortMax = input.int(50, "RSI ≤ for Shorts",   minval = 0, maxval = 100, group = grpStrat)
+allowLongs  = input.bool(true,  "Enable Longs",   group = grpStrat)
+allowShorts = input.bool(true,  "Enable Shorts",  group = grpStrat)
+
+grpRisk   = "Risk (ATR-based)"
+atrLen    = input.int(14,   "ATR Length",         minval = 1,   group = grpRisk)
+slMult    = input.float(1.5, "Stop-Loss  × ATR",  minval = 0.1, step = 0.1, group = grpRisk)
+tpMult    = input.float(3.0, "Take-Profit × ATR", minval = 0.1, step = 0.1, group = grpRisk)
+
+grpHook   = "Webhook Payload"
+qtyPct    = input.float(5.0, "Position Size (% of equity)", minval = 0.1, maxval = 100, step = 0.5, group = grpHook)
+levX      = input.int(3,     "Leverage (sent to backend)",  minval = 1,  maxval = 50, group = grpHook,
+     tooltip = "Informational field for your backend. Cap leverage SERVER-SIDE too — never trust the client alone.")
+hookSecret = input.string("REPLACE_WITH_LONG_RANDOM_TOKEN", "Webhook Secret", group = grpHook,
+     tooltip = "Your backend must verify this (or HMAC the body). Never publish a chart screenshot showing your real token.")
+
+// ── LOGIC ────────────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+rsiVal  = ta.rsi(close, rsiLen)
+atrVal  = ta.atr(atrLen)
+
+longSignal  = allowLongs  and ta.crossover(emaFast, emaSlow)  and rsiVal >= rsiLongMin
+shortSignal = allowShorts and ta.crossunder(emaFast, emaSlow) and rsiVal <= rsiShortMax
+
+// SL/TP levels captured at entry time
+longSL  = close - atrVal * slMult
+longTP  = close + atrVal * tpMult
+shortSL = close + atrVal * slMult
+shortTP = close - atrVal * tpMult
+
+// ── PAYLOAD BUILDER ──────────────────────────────────────────────────────────
+// One JSON shape for every event. {{timenow}} is substituted by TradingView
+// when the alert actually fires (not at bar close) — that's what you want
+// for staleness checks.
+f_payload(_action, _sl, _tp, _reduceOnly) =>
+    _id = syminfo.ticker + "-" + timeframe.period + "-" + str.tostring(time)
+    '{'
+     + '"id":"'        + _id                                   + '",'
+     + '"ts":"{{timenow}}",'
+     + '"action":"'    + _action                               + '",'
+     + '"symbol":"'    + syminfo.ticker                        + '",'
+     + '"exchange":"HYPERLIQUID",'
+     + '"qty_pct":'    + str.tostring(qtyPct)                  + ','
+     + '"leverage":'   + str.tostring(levX)                    + ','
+     + '"price":"{{close}}",'
+     + '"sl":'         + str.tostring(_sl,  format.mintick)    + ','
+     + '"tp":'         + str.tostring(_tp,  format.mintick)    + ','
+     + '"reduce_only":'+ (_reduceOnly ? "true" : "false")      + ','
+     + '"secret":"'    + hookSecret                            + '"'
+     + '}'
+
+// ── ORDERS ───────────────────────────────────────────────────────────────────
+if longSignal
+    strategy.entry("Long", strategy.long,
+         alert_message = f_payload("buy",  longSL,  longTP,  false))
+    strategy.exit("Long-X", from_entry = "Long",  stop = longSL,  limit = longTP,
+         alert_message = f_payload("close_long",  longSL,  longTP,  true))
+
+if shortSignal
+    strategy.entry("Short", strategy.short,
+         alert_message = f_payload("sell", shortSL, shortTP, false))
+    strategy.exit("Short-X", from_entry = "Short", stop = shortSL, limit = shortTP,
+         alert_message = f_payload("close_short", shortSL, shortTP, true))
+
+// ── VISUALS ──────────────────────────────────────────────────────────────────
+plot(emaFast, "Fast EMA", color = color.new(color.teal,   0), linewidth = 2)
+plot(emaSlow, "Slow EMA", color = color.new(color.orange, 0), linewidth = 2)
+plotshape(longSignal,  title = "Long",  style = shape.triangleup,   location = location.belowbar, color = color.teal,   size = size.small, text = "LONG")
+plotshape(shortSignal, title = "Short", style = shape.triangledown, location = location.abovebar, color = color.orange, size = size.small, text = "SHORT")
+
+// Payload preview table — verify your JSON before wiring real money
+var table t = table.new(position.bottom_right, 1, 2, border_width = 1)
+if barstate.islast
+    table.cell(t, 0, 0, "Webhook payload preview (next long):", text_color = color.gray, text_size = size.tiny)
+    table.cell(t, 0, 1, f_payload("buy", longSL, longTP, false), text_color = color.silver, text_size = size.tiny)

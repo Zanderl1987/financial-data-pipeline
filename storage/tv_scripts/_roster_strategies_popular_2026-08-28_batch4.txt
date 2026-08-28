@@ -1,0 +1,75 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 4 (URL /scripts/page-4/?script_type=strategies), enumerated 2026-08-28 to
+# extend the campaign after batches 1-3 (2026-08-12, pages 1-3, ranks ~1-69) were
+# fully exhausted (every entry DONE/SKIP). Same sampling frame priority 1 per
+# pre-registration amendment 2026-08-11 (b). The site's "Most popular" ranking is
+# time-sensitive (re-sorts as scripts accrue boosts), so page 4 today is not the
+# same rank-70-92 window a strict snapshot from 08-12 would have shown -- verified
+# pages 2-3 today still substantially overlap already-collected slugs before page 4
+# turned up entirely new material, so no re-processing of earlier batches was done.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE         = .pine + .meta.json in this directory
+#         SKIP-2PA     = author already at the 2-per-author cap (cap tracked across
+#                        ALL batches via meta.json tv_author, not just this page)
+#         SKIP-LEN     = too large to collect through the two-channel workaround
+#         SKIP-INTRADAY = strategy is explicitly designed/documented for intraday
+#                        timeframes (session filters, VWAP-anchored, "best timeframe:
+#                        1-15min") -- cannot be honestly tested against this campaign's
+#                        daily-bar price panel (yfinance_universe_prices). New status
+#                        category added this batch; see pre-registration Sec 2 (Data).
+#         SKIP-DOMAIN  = strategy logic is fundamentally tied to a non-equity
+#                        instrument's mechanics (e.g. commodity-futures seasonal
+#                        harvest calendar) and cannot be sensibly applied to the
+#                        equity universe without changing its entire premise
+#         TODO         = next to collect / not yet evaluated
+#
+DONE         jXxP2m1Q-ETH-DCA-Strategy-3Commas-Quantpilot :: 3Commas :: crypto DCA-bot template; 1st for this author
+DONE         VFzCk3HX-TASC-2026-08-An-Ag-Selling-Model :: PineCodersTASC :: SKIP-DOMAIN -- corn futures seasonal harvest-timing model (contract-based sizing, cents/contract commission, "month of harvest" input); logic has no equity analogue. Was flagged CAND in the 2026-08-11 editors-picks roster but never collected until now (confirmed domain mismatch on inspection, not collected as source)
+DONE         tDAQfHmS-SOL-RSI-DCA-Strategy-3Commas-QuantPilot :: 3Commas :: 2nd for this author, at cap -- remaining 3Commas entries below are SKIP-2PA
+YnLk5B6z-VWAP-Mean-Reversion-Strategy-with-Session-and-Volume-Filter :: AIScripts :: SKIP-2PA (author at cap: jyhTizLX, xSLyyOwI already collected)
+SKIP-INTRADAY DTZv6GgJ-DNSE-VN301-Donchian-Break-Out-Strategy :: DNSE :: Donchian breakout + SMA(200) trend filter, but author's doc: "recommended 15-minute timeframe" with explicit "Trading Session: 09:00-14:30" and auto-close at session end. VN30 index futures (VND-denominated contract sizing), not equity-portable either. Confirmed via page text, not collected as source.
+SKIP-TEMPLATE zrDoqm9F-Webhook-Alert-Strategy-Template :: trade-wzrd :: not a real strategy -- author's own doc: "Demo entry: MA crossover... Replace this with your own logic" and "Default MA entry is only a placeholder so the shell compiles and can be tested. Backtest results with the demo entry are not a performance claim." It's infrastructure for webhook alert-string plumbing, no edge claim. New status category (no candidate strategy logic to screen). Confirmed via page text, not collected as source.
+DONE         7gcvFvlg-Fractal-Memory-Strategy-Jayadev-Rana :: bluealgocapital :: admitted, ADMIT/volatility family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see fractal_memory_strategy.pine. ATR-trail flip + analog pattern-match (MSE over 30-bar normalized log-return windows) direction filter, 3-tier scale-out targets. 176 lines, ~20 params (author defaults only, deprioritize-eligible)
+SKIP-2PA     5Tg2Es4G-BTC-DCA-Strategy-3Commas-QuantPilot :: 3Commas :: 3rd by this author
+SKIP-INTRADAY Je0EGfi9-Execution-Signals-Breakout-Strategy-MTF :: Latibonit15 :: "mechanical price action breakout strategy for intraday futures (NQ/MNQ/ES/MES)... Designed to run on a 1-minute chart"; overnight futures session (entries from 6PM ET, force-closed 4:09PM ET). Not equity-daily-bar portable. Confirmed via page text, not collected as source.
+SKIP-2PA     GM1bUrIF-INJ-DCA-Long-Strategy-3Commas-QuantPilot :: 3Commas :: 4th by this author
+SKIP-INTRADAY 0NWRtU59-Adaptive-ATR-Scalper-Instant-Lock-Version :: emretw11 :: confirmed -- author's own doc: "Timeframes: Designed primarily for 1m, 3m, 5m, and 15m charts." ADX-adaptive ATR trailing-stop scalper. Confirmed via page text, not collected as source.
+8oH4qCeH-RSI-Divergence-EMA-Trend-Filter :: AIScripts :: SKIP-2PA (author at cap)
+SKIP-NOEXIT  OKxIjdsz-BTC-Trend-Momentum-Strategy :: SystemsOverFeelings :: collected then rejected -- Stage 1 screen_source() returned EXCLUDE:no_exit (no strategy.exit() calls; positions close only via opposite-signal reversal, which the pre-registration's screening criteria disqualify). Mechanism itself (EMA200 trend + CMF volume + StochRSI momentum + optional ATR filter) was daily-bar and equity-portable despite an author "calibrated only for BTC" warning label (informational only, doesn't gate entries) -- excluded on the no-exit rule, not on domain grounds. Source file not kept (Stage 1 reject). New status category.
+DONE         adOY8NBg-TrendPulse-9-EMA-VWAP-Continuation-Strategy :: waynemarnold :: SKIP-INTRADAY -- author's own doc: "primarily designed for intraday use... most suitable timeframes: 1/3/5/15 minute". Confirmed via page text, not collected as source.
+SKIP-INTRADAY igEyqfKW-ARBF-Strategy-v1-8 :: d_jaeger :: Asia/London session-range breakout ("Asia Range Breakout Framework"), author's own doc recommends "Timeframe: 5-minute chart"; also Gold/BTC-crypto domain (dollar-based vs percentage-based range profiles per instrument), not equity. Confirmed via page text, not collected as source.
+SKIP-2PA     LOO7phxG-SOL-RSI-Strategy-3Commas :: 3Commas :: 5th by this author
+DONE         WWuTjyDx-Capitulation-Stretch-Reversion-Jayadev-Rana :: bluealgocapital :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see capitulation_stretch_reversion.pine. 2nd/2 for this author (cap reached). ATR-stretch mean-reversion long (200-EMA regime filter, 0.5xATR stretch + 2 lower closes, mean-touch target vs 3xATR stop + 10-bar time stop). 162 lines, ~13 params. NOTE: non-default license -- CC BY-NC-SA 4.0, not TV's default MPL-2.0 (noncommercial clause fine for this research use, flagged for the record)
+SKIP-INTRADAY DdDDGP97-DJT-Strategy-The-Art-of-the-Dip :: GandalfTrades :: satirical VIX-spike fade; author's own doc: "Intraday timeframes; defaults tuned around 5m", time stop "78 bars ≈ one full RTH session on 5m". Also depends on external VIX + VIX9D symbols, not just the traded instrument. Confirmed via page text, not collected as source.
+SKIP-2PA     6kaqC3R8-GRAM-RSI-Strategy-3Commas :: 3Commas :: 6th by this author
+DONE         t578EfVb-Ineficient-market :: abib14bis :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see ineficient_market_123_pattern.pine. 1-2-3 price-structure reversal pattern (Joe Ross/Zeiierman lineage, 3-alternating-pivot Higher-Low/Lower-High) gated by an ATR-compression volatility filter; fixed small %TP + wide %SL + bar-count time-stop, deliberately no trailing/BE (author's write-up argues active management destroys the edge). Demo chart is 2h crypto perpetual but mechanism is timeframe/instrument-agnostic. 140 lines, ~8 params.
+SKIP-INTRADAY kaF9Z5PQ-GOLDEN-WDGE-PRO-1-05V :: toldodesty :: EMA21/50 pullback-continuation strategy, author's own doc: "Timeframes: M30, H1" and explicitly intrabar execution (triggers on intrabar EMA21 contact, not bar close, to avoid missing brief touches). Also Forex/Gold-specific (EUR/USD, GBP/USD, USD/CAD, XAU/USD), with per-instrument-calibrated EMA-gap thresholds -- domain mismatch too. Confirmed via page text, not collected as source.
+SKIP-INTRADAY MKZxjgdR-Multi-Timeframe-MACD-Cascade-SNR-v6-Janice :: RICKI1155 :: MACD cascade across "45m, 1h, 2h, 90m, 3h, and 4h+" timeframes on Gold (OANDA XAUUSD); inherently sub-daily. Confirmed via page text, not collected as source.
+DONE         X6tAPOil-RSI-BB-Inside-Strategy :: jfiejka :: admitted, ADMIT/mean_reversion family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see rsi_bb_inside_strategy.pine. RSI oversold/overbought gated by "still inside the Bollinger Bands" (avoids catching a falling knife), exit on basis-line cross. 47 lines, 3 params, clean.
+
+# Session summary (2026-08-28, part 1): 2 new strategies collected and Stage-1-screened
+# (both ADMIT): fractal_memory_strategy (bluealgocapital), rsi_bb_inside_strategy
+# (jfiejka). 1 domain mismatch identified and resolved (TASC Ag Selling Model --
+# futures-seasonal, not equity-portable). 1 confirmed SKIP-INTRADAY. 5 3Commas DCA-
+# bot entries capped at 2 collected / 4 skipped (same crypto-DCA mechanism family
+# repeated across coins). 8 entries left TODO for next session, several flagged with
+# a specific reason to check first (MTF -> screen for unconfirmed_htf; "Scalper" ->
+# likely intraday). Page 5+ not yet touched.
+#
+# Session summary (2026-08-28, part 2): all 8 remaining TODOs resolved, page 4 now
+# fully exhausted (0 TODO left). 2 more admitted (both ADMIT): capitulation_stretch_
+# reversion (bluealgocapital, 2nd/2 -- author now at cap; non-default CC BY-NC-SA 4.0
+# license, noted), ineficient_market_123_pattern (abib14bis, 1-2-3 price-structure
+# reversal + ATR-compression gate). 6 confirmed SKIP-INTRADAY (ARBF Asia-range/Gold-
+# BTC scalper, DJT satirical VIX-fade, Execution Signals MTF futures, Adaptive ATR
+# Scalper, DNSE Donchian VN30 futures, MACD Cascade 45m-4h, GOLDEN WDGE Forex/Gold
+# M30-H1). 1 new status SKIP-TEMPLATE (Webhook Alert shell -- no real edge, demo MA
+# crossover is explicitly a placeholder). 1 new status SKIP-NOEXIT (BTC Trend-
+# Momentum -- collected, but Stage 1 screen_source() rejected on EXCLUDE:no_exit;
+# generic EMA/CMF/StochRSI mechanism was equity-portable despite an author "BTC-only"
+# warning label, but the missing strategy.exit() disqualified it mechanically; source
+# file not kept). Running total: 36 .pine files collected campaign-wide (was 32
+# before 2026-08-28), comfortably inside the pre-registered 30-50 range. Page 5+
+# still not touched -- next session's choice: continue toward 50, or move to Stage 2
+# (translate) / Stage 3 (development test) on what's already ADMIT.

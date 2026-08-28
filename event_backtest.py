@@ -43,17 +43,20 @@ import math
 import os
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import query as q
+from evaluation import execution as ev_execution
 
 HORIZONS = (1, 3, 5, 10, 21, 63)
 
 # price tables searched in order; (table, close preference)
-_PRICE_TABLES = ("tiingo_prices", "prices", "market_history", "sector_etfs")
+_PRICE_TABLES = ("tiingo_prices", "yfinance_universe_prices", "prices",
+                 "market_history", "sector_etfs")
 
 
 # ------------------------------------------------------------------ prices
@@ -65,15 +68,23 @@ def _table_has(table: str, symbol: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=None)
 def load_close(symbol: str, start: "str | None" = None,
                end: "str | None" = None,
                price_table: "str | None" = None) -> pd.Series:
     """
-    Daily (adjusted-when-available) close series for one symbol. Every price
-    table is checked and the longest series wins, so a deep source
+    Daily (split-adjusted-when-available) close series for one symbol. Every
+    price table is checked and the longest series wins, so a deep source
     (market_history) beats a shallow one (a recent tiingo watchlist pull).
     Date-indexed float series, ascending.
+
+    Uses split-only adjustment (analytics.technical._split_only_adjust),
+    NOT a source's dividend-adjusted column -- dividend adjustment
+    compounds backward over decades and distorts price history for
+    high-yield names; see that function's docstring and
+    experiments/2026-08-08_tv-technical-rating-signal-eval.md.
     """
+    from analytics.technical import _split_only_adjust
     tables = [price_table] if price_table else list(_PRICE_TABLES)
     best = pd.Series(dtype=float, name=symbol)
     for t in tables:
@@ -81,12 +92,12 @@ def load_close(symbol: str, start: "str | None" = None,
             df = q.load(t, symbol=symbol, start=start, end=end)
         except Exception:
             continue
-        if df.empty:
+        if df.empty or "close" not in df.columns:
             continue
-        col = "adj_close" if "adj_close" in df.columns and df["adj_close"].notna().any() else "close"
-        s = (df.assign(date=pd.to_datetime(df["date"]))
-               .drop_duplicates("date").sort_values("date")
-               .set_index("date")[col].astype(float).dropna())
+        df = (df.assign(date=pd.to_datetime(df["date"]))
+                .drop_duplicates("date").sort_values("date"))
+        df = _split_only_adjust(df)
+        s = df.set_index("date")["close"].astype(float).dropna()
         if len(s) > len(best):
             s.name = symbol
             best = s
@@ -299,6 +310,7 @@ class ScenarioResult:
     equity: pd.Series            # daily equity of an equal-weight overlay
     metrics: dict = field(default_factory=dict)
     params: dict = field(default_factory=dict)
+    event_study: "EventStudyResult | None" = None  # internal study (day0 = entry)
 
     def summary(self) -> pd.DataFrame:
         return pd.DataFrame.from_dict({**self.params, **self.metrics},
@@ -320,23 +332,32 @@ def scenario(
     stop_loss_pct: "float | None" = None,
     take_profit_pct: "float | None" = None,
     cost_bps: float = 0.0,
+    spread_bps: float = 0.0,
+    slippage_model: "str | None" = None,
+    atr_stop_mult: "float | None" = None,
     price_table: "str | None" = None,
     min_gap_days: int = 0,
 ) -> ScenarioResult:
     """
-    Simulate trading every event: enter at the close `entry_lag` trading days
-    after the event, exit after `holding_days` closes or when a close breaches
-    the stop-loss / take-profit level, whichever comes first.
-
-    side='short' flips the position. cost_bps is charged round-trip.
-    Overlapping trades are combined into an equal-weight daily overlay for the
-    equity curve; per-trade stats are independent of overlap.
+    Simulate trading every event with cost models, ATR trailing stops, and risk metrics.
     """
+    from evaluation import stats as ev_stats
+
     res = event_study(events, symbols=symbols, window=(0, holding_days),
                       entry_lag=entry_lag, price_table=price_table,
                       min_gap_days=min_gap_days)
     sign = -1.0 if side == "short" else 1.0
-    cost = cost_bps / 1e4
+    # Cost rate comes from evaluation/execution.py, shared with backtest.py.
+    # NOTE: this engine's "sqrt_impact" is a FLAT 10 bps per side -- no square
+    # root, no coefficient -- unlike backtest.py's turnover**0.5 * coeff under
+    # the same flag name. flat_impact_bps=10.0 preserves that exactly; see
+    # evaluation/execution.py's docstring.
+    effective_cost = ev_execution.per_side_rate(
+        ev_execution.costs_from_legacy_kwargs(
+            cost_bps=cost_bps, spread_bps=spread_bps,
+            slippage_model=slippage_model, flat_impact_bps=10.0,
+        )
+    )
 
     trades = []
     daily_rets: dict[pd.Timestamp, list] = {}
@@ -344,57 +365,92 @@ def scenario(
 
     for i, e in res.events.iterrows():
         path = res.car.loc[i]                      # cum return from entry close
+        symbol_closes = closes[e["symbol"]].dropna() if e["symbol"] in closes.columns else None
+
+        # Compute ATR threshold if requested
+        atr_stop_pct = None
+        if atr_stop_mult is not None and symbol_closes is not None and e["day0"] in symbol_closes.index:
+            loc0 = symbol_closes.index.get_loc(e["day0"])
+            if loc0 >= 14:
+                window_px = symbol_closes.iloc[loc0 - 14 : loc0]
+                tr = window_px.diff().abs().mean()
+                px0 = symbol_closes.iloc[loc0]
+                if px0 > 0:
+                    atr_stop_pct = (tr * atr_stop_mult / px0) * 100.0
+
+        effective_stop_pct = atr_stop_pct if atr_stop_pct is not None else stop_loss_pct
+
         # exit day: stop/take-profit on closes, else final day
         exit_rel = holding_days
         reason = "time"
         for rel in range(1, holding_days + 1):
             r = sign * path[rel]
-            if stop_loss_pct is not None and r <= -abs(stop_loss_pct) / 100:
+            if effective_stop_pct is not None and r <= -abs(effective_stop_pct) / 100:
                 exit_rel, reason = rel, "stop"
                 break
             if take_profit_pct is not None and r >= abs(take_profit_pct) / 100:
                 exit_rel, reason = rel, "target"
                 break
+
         gross = sign * path[exit_rel]
-        net = gross - cost
-        s = closes[e["symbol"]].dropna()
-        loc = s.index.get_loc(e["day0"])
-        exit_loc = min(loc + exit_rel, len(s) - 1)
+        net = gross - (effective_cost * 2.0)  # entry + exit friction
+
+        if symbol_closes is not None and e["day0"] in symbol_closes.index:
+            loc = symbol_closes.index.get_loc(e["day0"])
+            exit_loc = min(loc + exit_rel, len(symbol_closes) - 1)
+            exit_date = symbol_closes.index[exit_loc]
+            seg = symbol_closes.iloc[loc: exit_loc + 1].pct_change().dropna() * sign
+            for d, r in seg.items():
+                daily_rets.setdefault(d, []).append(r)
+        else:
+            exit_date = e.get("date")
+
         trades.append({
             "symbol": e["symbol"], "event_date": e.get("date"),
-            "entry_date": e["day0"], "exit_date": s.index[exit_loc],
+            "entry_date": e["day0"], "exit_date": exit_date,
             "days_held": exit_rel, "exit_reason": reason,
             "return_pct": round(100 * net, 2),
         })
-        # spread daily returns of this trade into the overlay
-        seg = s.iloc[loc: exit_loc + 1].pct_change().dropna() * sign
-        for d, r in seg.items():
-            daily_rets.setdefault(d, []).append(r)
 
     tdf = pd.DataFrame(trades).sort_values("entry_date").reset_index(drop=True)
     overlay = pd.Series({d: np.mean(rs) for d, rs in daily_rets.items()}).sort_index()
-    equity = (1 + overlay).cumprod()
+    equity = (1 + overlay).cumprod() if not overlay.empty else pd.Series(dtype=float)
 
-    rets = tdf["return_pct"] / 100
+    rets = tdf["return_pct"] / 100 if not tdf.empty else pd.Series(dtype=float)
     wins, losses = rets[rets > 0], rets[rets <= 0]
     pf = float(wins.sum() / abs(losses.sum())) if len(losses) and losses.sum() != 0 else float("inf")
+
+    total_ret_pct = round(100 * float(equity.iloc[-1] - 1), 2) if len(equity) else 0.0
+    max_dd_pct = round(100 * float((equity / equity.cummax() - 1).min()), 2) if len(equity) else 0.0
+
+    sortino_res = ev_stats.sortino_ratio(overlay)
+    calmar_res = ev_stats.calmar_ratio(total_ret_pct, max_dd_pct)
+    var_res = ev_stats.value_at_risk(overlay)
+
     metrics = {
         "n_trades": len(tdf),
-        "win_rate_pct": round(100 * float((rets > 0).mean()), 1),
-        "avg_return_pct": round(100 * float(rets.mean()), 2),
-        "median_return_pct": round(100 * float(rets.median()), 2),
-        "best_pct": round(float(tdf["return_pct"].max()), 2),
-        "worst_pct": round(float(tdf["return_pct"].min()), 2),
+        "win_rate_pct": round(100 * float((rets > 0).mean()), 1) if len(rets) else 0.0,
+        "avg_return_pct": round(100 * float(rets.mean()), 2) if len(rets) else 0.0,
+        "median_return_pct": round(100 * float(rets.median()), 2) if len(rets) else 0.0,
+        "best_pct": round(float(tdf["return_pct"].max()), 2) if len(rets) else 0.0,
+        "worst_pct": round(float(tdf["return_pct"].min()), 2) if len(rets) else 0.0,
         "profit_factor": round(pf, 2),
-        "expectancy_pct": round(100 * float(rets.mean()), 2),
-        "overlay_total_return_pct": round(100 * float(equity.iloc[-1] - 1), 2) if len(equity) else 0.0,
-        "stops_hit": int((tdf["exit_reason"] == "stop").sum()),
-        "targets_hit": int((tdf["exit_reason"] == "target").sum()),
+        "expectancy_pct": round(100 * float(rets.mean()), 2) if len(rets) else 0.0,
+        "overlay_total_return_pct": total_ret_pct,
+        "max_drawdown_pct": max_dd_pct,
+        "sortino": sortino_res.get("sortino"),
+        "calmar": calmar_res.get("calmar"),
+        "var_95_pct": var_res.get("var_95_pct"),
+        "stops_hit": int((tdf["exit_reason"] == "stop").sum()) if not tdf.empty else 0,
+        "targets_hit": int((tdf["exit_reason"] == "target").sum()) if not tdf.empty else 0,
     }
     params = {"holding_days": holding_days, "side": side, "entry_lag": entry_lag,
               "stop_loss_pct": stop_loss_pct, "take_profit_pct": take_profit_pct,
-              "cost_bps": cost_bps}
-    return ScenarioResult(trades=tdf, equity=equity, metrics=metrics, params=params)
+              "cost_bps": cost_bps, "spread_bps": spread_bps,
+              "slippage_model": slippage_model or "none", "atr_stop_mult": atr_stop_mult}
+    return ScenarioResult(trades=tdf, equity=equity, metrics=metrics,
+                          params=params, event_study=res)
+
 
 
 # ------------------------------------------------------- event generators
@@ -593,6 +649,7 @@ def technical_events(
     signal="golden_cross",
     price_table: "str | None" = None,
     start: "str | None" = None,
+    frames: "dict[str, pd.DataFrame] | None" = None,
 ) -> pd.DataFrame:
     """
     Dates when a technical signal fires for each symbol.
@@ -600,6 +657,9 @@ def technical_events(
     signal: one of {names} or any callable(indicator_frame) -> boolean Series.
     The frame passed to callables has every analytics.technical indicator plus
     rating_all/rating_ma/rating_osc, so custom conditions can combine them.
+    frames: optional precomputed dict mapping each symbol to its rating_history
+    frame, so several signals can be evaluated against one set of indicators
+    instead of re-deriving them per signal (signal_monitor builds it once).
     Columns: symbol, date, signal.
     """
     from analytics.technical import rating_history
@@ -608,19 +668,23 @@ def technical_events(
     fn = _TECH_SIGNALS[signal] if isinstance(signal, str) else signal
     name = signal if isinstance(signal, str) else getattr(signal, "__name__", "custom")
 
-    frames = []
-    for sym in symbols:
-        d = rating_history(sym, price_table=price_table, start=start)
-        if d.empty:
+    if frames is None:
+        frames = {sym: rating_history(sym, price_table=price_table, start=start)
+                  for sym in dict.fromkeys(symbols)}
+
+    out = []
+    for sym in dict.fromkeys(symbols):
+        d = frames.get(sym)
+        if d is None or d.empty:
             continue
         fired = fn(d).fillna(False)
         if fired.any():
-            frames.append(pd.DataFrame({"symbol": sym,
-                                        "date": d.index[fired],
-                                        "signal": name}))
-    return (pd.concat(frames, ignore_index=True).sort_values("date")
+            out.append(pd.DataFrame({"symbol": sym,
+                                    "date": d.index[fired],
+                                    "signal": name}))
+    return (pd.concat(out, ignore_index=True).sort_values("date")
               .reset_index(drop=True)
-            if frames else pd.DataFrame(columns=["symbol", "date", "signal"]))
+            if out else pd.DataFrame(columns=["symbol", "date", "signal"]))
 
 
 technical_events.__doc__ = technical_events.__doc__.format(

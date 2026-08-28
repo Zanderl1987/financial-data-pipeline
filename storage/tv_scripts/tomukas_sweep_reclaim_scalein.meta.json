@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/IFSv46kK-Tomukas-Daily-Scale-In/",
+  "tv_author": "Tomukasss",
+  "tv_script_name": "Tomukas Daily Scale-In",
+  "tv_boosts": 26,
+  "tv_views": 880,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Internal strategy() title is 'Tomukas Sweep Reclaim Scale-In Strategy'. Swing-pivot liquidity sweep + reclaim entry (ATR-bounded sweep depth, close-location and body-size confirmation, EMA200 directional bias), then up to 5 tiered scale-in adds at fixed %-below/above-base-entry steps (10/10/20/40/80% of equity per tier), exit on a fixed % take-profit from the average entry price (always active, not gated). Author's doc: 'The Daily timeframe is where this framework makes the most sense.' 2nd/2 for this author -- now at cap. 162 lines."
+}

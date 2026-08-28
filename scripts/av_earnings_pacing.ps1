@@ -7,7 +7,10 @@
 # run still saw it as unexpired. Firing at 10:45 (after TranscriptPull's own
 # run, not before it) is correct relative to the rolling window, though it
 # still won't get real progress until earnings_sentiment_tool's 725-file
-# transcript cache completes (ETA ~2026-08-06 per that repo's CLAUDE.md) and
+# transcript cache completes (the "~2026-08-06" ETA that used to be quoted here
+# came from that repo's CLAUDE.md and was wrong -- the cache was still 488/725
+# on 08-05 at ~24/day, so mid-to-late August is realistic; treat any date here
+# as an estimate, not a deadline) and
 # its daily pull becomes a zero-quota no-op -- until then this will legitimately
 # keep reporting QUOTA below, which is expected, not a bug. Registered as
 # recurring Windows Scheduled Task "ClaudeAuto-AVEarningsPacing" (see
@@ -38,7 +41,7 @@ if ($exit -ne 0) {
         Out-File $flag -Encoding utf8
 } elseif ($rateLimited) {
     $status = "QUOTA"
-    "AV earnings pacing run on $stamp hit the daily rate limit -- likely no real progress.`n$summaryLine`nFull report: $report`nExpected until earnings_sentiment_tool's transcript cache completes (~2026-08-06); retries automatically tomorrow at 10:45am." |
+    "AV earnings pacing run on $stamp hit the daily rate limit -- likely no real progress.`n$summaryLine`nFull report: $report`nExpected until earnings_sentiment_tool's transcript cache completes (488/725 as of 08-05 at ~24/day, so mid-to-late August); retries automatically tomorrow at 10:45am." |
         Out-File $flag -Encoding utf8
 } else {
     if (Test-Path $flag) { Remove-Item $flag -Force }

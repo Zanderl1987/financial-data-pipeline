@@ -142,7 +142,7 @@ PIPELINES: list[PipelineSpec] = [
         file="bls_pipeline.py",
         desc="BLS CPI, PPI, employment (nonfarm payrolls by sector), JOLTS, unemployment",
         stage=1,
-        tables=["bls_cpi", "bls_ppi", "bls_employment", "bls_jolts", "bls_unemployment"],
+        tables=["bls_cpi", "bls_ppi", "bls_avg_price", "bls_employment", "bls_jolts", "bls_unemployment"],
         backfill_args=["--backfill"],
         timeout=600,
     ),
@@ -163,6 +163,82 @@ PIPELINES: list[PipelineSpec] = [
         tables=["world_bank"],
         backfill_args=["--backfill"],
         timeout=900,
+    ),
+    # These five sources were live and healthy but had no spec here, so a full
+    # run_all.py never touched them and they quietly froze between 2026-06-17
+    # and 2026-07-02 (found 2026-08-11). See tests/test_catalog.py's
+    # orphaned-table guard, which now makes that omission fail the suite.
+    PipelineSpec(
+        name="worldbank_pink_sheet",
+        file="worldbank_pink_sheet.py",
+        desc="World Bank Pink Sheet monthly commodity prices — 71 commodities back to 1960",
+        stage=1,
+        tables=["wb_commodities"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="imf_commodities",
+        file="imf_commodities_pipeline.py",
+        desc="IMF Primary Commodity Prices — 14 series across 4 categories",
+        stage=1,
+        tables=["imf_commodities"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="metals",
+        file="metals_pipeline.py",
+        desc="Metals spot prices (FRED) — copper, aluminum, nickel, lead, iron ore, tin",
+        stage=1,
+        tables=["metals_spot"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
+    PipelineSpec(
+        name="fao",
+        file="fao_pipeline.py",
+        desc="FAO FAOSTAT producer prices + production; falls back to bulk ZIP when the REST API times out",
+        stage=1,
+        tables=["fao_prices", "fao_production"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="plastics",
+        file="plastics_pipeline.py",
+        desc="OWID global plastics production (keyless static historical series, 1950-2019)",
+        stage=1,
+        tables=["plastics_production"],
+        backfill_args=["--backfill"],
+        timeout=120,
+    ),
+    PipelineSpec(
+        name="cfpb_complaints",
+        file="cfpb_complaints_pipeline.py",
+        desc="CFPB consumer complaint database -- full bulk CSV snapshot re-downloaded each run (~17M rows, ~1.4GB compressed)",
+        stage=1,
+        tables=["cfpb_complaints"],
+        backfill_args=["--backfill"],
+        timeout=1800,
+    ),
+    PipelineSpec(
+        name="yahoo_options",
+        file="yahoo_options_pipeline.py",
+        desc="Yahoo per-contract options OHLCV history (NVDA/PLTR/MSFT/AAPL) — feeds put_call_ratio",
+        # Stage 1, not 2: stage 2 is the Schwab-authenticated block, and this
+        # source needs no credentials and no upstream table.
+        stage=1,
+        tables=["options_history"],
+        # Phase 2 is one HTTP request per contract, so the incremental run is
+        # bounded on both axes: only the last 5 sessions, only contracts with
+        # real open interest. curated dedups on
+        # (symbol, expiration_date, strike_price, contract_type, date), so
+        # overlapping short pulls accumulate cleanly. Measured 2026-08-11:
+        # ~8 min for AAPL alone at --min-oi 500 (1,158 of 2,694 contracts).
+        incremental_args=["--range", "5d", "--min-oi", "500"],
+        backfill_args=["--range", "max"],
+        timeout=3600,
     ),
     PipelineSpec(
         name="simfin",
@@ -297,7 +373,7 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="congressional_trades",
         file="congressional_trades_pipeline.py",
-        desc="US House and Senate stock trade disclosures (keyless)",
+        desc="US House and Senate STOCK Act periodic transaction reports -- House Clerk + Senate eFD (keyless)",
         stage=1,
         tables=["congressional_trades"],
         backfill_args=["--backfill"],
@@ -330,6 +406,23 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=300,
     ),
+    PipelineSpec(
+        name="usgs_helium_mcs",
+        file="usgs_helium_mcs_pipeline.py",
+        desc="USGS MCS helium + rare gases annual data releases via ScienceBase (keyless)",
+        stage=1,
+        tables=["usgs_mcs_helium"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="usgs_ds140",
+        file="usgs_ds140_pipeline.py",
+        desc="USGS Data Series 140 helium historical statistics 1935+ (keyless, hash-gated)",
+        stage=1,
+        tables=["usgs_ds140_helium"],
+        timeout=120,
+    ),
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # Re-add if the key is obtained -- see omkar_commodity_pipeline.py.
     # PipelineSpec(
@@ -351,6 +444,15 @@ PIPELINES: list[PipelineSpec] = [
         requires_env=["COMTRADE_API_KEY"],
         backfill_args=["--backfill"],
         timeout=600,
+    ),
+    PipelineSpec(
+        name="gem_trackers",
+        file="gem_trackers_pipeline.py",
+        desc="Global Energy Monitor tracker summary tables via public Google Sheets (keyless)",
+        stage=1,
+        tables=["gem_coal_summary", "gem_coal_mine_summary", "gem_steel_summary",
+                "gem_cement_summary", "gem_oilgas_summary", "gem_lng_summary"],
+        timeout=1800,
     ),
     # ── Stage 1 — Quant / valuation / volatility / banking ─────────────────────
     PipelineSpec(
@@ -405,6 +507,42 @@ PIPELINES: list[PipelineSpec] = [
         stage=1,
         tables=["market_valuation", "treasury_yield_curve"],
         requires_env=["NASDAQ_DATA_LINK_API_KEY"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="treasury_curve",
+        file="treasury_curve_pipeline.py",
+        desc="Treasury.gov daily par yield curve - keyless replacement for dead NDL USTREASURY/YIELD",
+        stage=1,
+        tables=["treasury_yield_curve"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="usaspending",
+        file="usaspending_pipeline.py",
+        desc="USAspending federal contracts - keyless replacement for 403'd finnhub_usa_spending",
+        stage=1,
+        tables=["usaspending_award_counts", "usaspending_top_awards"],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="lda_lobbying",
+        file="lda_lobbying_pipeline.py",
+        desc="Senate LDA lobbying filings - keyless replacement for 403'd finnhub_lobbying",
+        stage=1,
+        tables=["lda_lobbying_filings"],
+        backfill_args=["--backfill"],
+        timeout=1800,
+    ),
+    PipelineSpec(
+        name="defillama",
+        file="defillama_pipeline.py",
+        desc="DeFi protocol fundamentals: TVL, fees/revenue, stablecoin supply (keyless, snapshot-only)",
+        stage=1,
+        tables=["defillama_protocols", "defillama_fees", "defillama_stablecoins"],
         backfill_args=["--backfill"],
         timeout=300,
     ),
@@ -498,6 +636,15 @@ PIPELINES: list[PipelineSpec] = [
         stage=1,
         tables=["shipping_gscpi", "shipping_freight_ppi"],
         requires_env=["FRED_API_KEY"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="piracy",
+        file="piracy_pipeline.py",
+        desc="Piracy incidents - ICC IMB live-map archive (global, 2012+, geo) + Wikipedia Somali hijacking log (2005+, dated)",
+        stage=1,
+        tables=["piracy_incidents", "somali_hijackings"],
         backfill_args=["--backfill"],
         timeout=300,
     ),
@@ -663,6 +810,7 @@ PIPELINES: list[PipelineSpec] = [
         tables=['securities'],
         requires_env=['FINNHUB_API_KEY'],
         backfill_args=['--skip-finnhub'],
+        incremental_args=['--skip-finnhub'],
         timeout=600,
     ),
     PipelineSpec(
@@ -671,7 +819,16 @@ PIPELINES: list[PipelineSpec] = [
         desc="Fund holdings -- iShares ETFs (BlackRock API) + mutual funds (EdgarTools N-PORT) (Iceberg table)",
         stage=1,
         tables=['fund_holdings'],
-        timeout=1200,
+        # EdgarTools N-PORT fetches run ~55s/fund (network+XML parse, not our
+        # rate limiting) x 53 mutual funds = ~49min alone; 1200s was timing out
+        # every night before the ETF/bond legs even started. First fix (3600s)
+        # STILL wasn't enough -- measured live 2026-08-22: fetch phase (52 ETF
+        # + 4 bond + 53 MF) took ~54min end to end, then the batched per-fund
+        # Iceberg write phase (~8s/fund x ~105 funds) needs another ~14min on
+        # top -- real total ~68min. 5400s (90min) leaves real headroom this
+        # time. See daily_pipelines_2026-08-21/-22 and
+        # storage/logs/failures/fund_holdings_20260822_204418.log.
+        timeout=5400,
     ),
     PipelineSpec(
         name="etf_holdings",
@@ -684,9 +841,9 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
-        desc="Finnhub alt-data expansion -- ESG, congressional trading, lobbying, patents, econ calendar, etc",
+        desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",
         stage=1,
-        tables=['finnhub_esg', 'finnhub_congressional_trading', 'finnhub_supply_chain', 'finnhub_insider_sentiment', 'finnhub_social_sentiment', 'finnhub_sec_filings', 'finnhub_earnings_quality', 'finnhub_lobbying', 'finnhub_usa_spending', 'finnhub_uspto_patents', 'finnhub_visa_applications', 'finnhub_economic_calendar'],
+        tables=['finnhub_esg', 'finnhub_supply_chain', 'finnhub_insider_sentiment', 'finnhub_social_sentiment', 'finnhub_sec_filings', 'finnhub_earnings_quality', 'finnhub_lobbying', 'finnhub_usa_spending', 'finnhub_uspto_patents', 'finnhub_visa_applications', 'finnhub_economic_calendar'],
         requires_env=['FINNHUB_API_KEY'],
         backfill_args=['--backfill'],
         timeout=1200,
@@ -880,7 +1037,7 @@ PIPELINES: list[PipelineSpec] = [
         desc="TA-rating signal health tracker — win rate/PF/CAR by window, flags decline",
         stage=3,
         tables=["signal_health"],
-        timeout=900,
+        timeout=1800,
     ),
 ]
 

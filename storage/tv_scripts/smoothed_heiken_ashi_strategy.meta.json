@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/zmlXzncC/",
+  "tv_author": "yovanygarcia87",
+  "tv_script_name": "Smoothed Heiken Ashi Strategy v1",
+  "tv_boosts": 14,
+  "tv_views": 800,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Double-smoothed Heikin-Ashi (EMA on OHLC, then a 2nd EMA on the resulting HA candles) color-streak system: enter long/short on the Nth consecutive same-color HA candle (default 2), exit on the first opposite-color candle. Long+short, symmetric. Demo chart is EUR/USD 5-min but no textual timeframe restriction; mechanism (candle color-streak counting) is timeframe-portable. 104 lines, 6 params."
+}

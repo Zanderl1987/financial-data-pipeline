@@ -69,7 +69,11 @@ def _curated_file(table: str) -> str:
 # Pilot tables mirrored into the local Iceberg warehouse by migrate_pilot.py.
 # query.py reads these via real `iceberg_scan` calls (preferred over the curated
 # parquet snapshot when the Iceberg table exists). See iceberg_pilot.py.
-PILOT_ICEBERG_TABLES = {"prices", "macro", "fundamentals_annual", "fundamentals_quarterly"}
+PILOT_ICEBERG_TABLES = {
+    "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+    "fao_prices", "fao_production", "plastics_production",
+    "usda_crops", "usda_fertilizers", "bls_avg_price",
+}
 
 
 def _pilot_iceberg_metadata(table: str) -> str | None:
@@ -104,6 +108,7 @@ CATALOG: dict[str, str] = {
     # ── BLS labor market ─────────────────────────────────────────────────────
     "bls_cpi":                 _glob("bls/cpi/**/*.parquet"),
     "bls_ppi":                 _glob("bls/ppi/**/*.parquet"),
+    "bls_avg_price":           _glob("bls/avg_price/**/*.parquet"),
     "bls_employment":          _glob("bls/employment/**/*.parquet"),
     "bls_jolts":               _glob("bls/jolts/**/*.parquet"),
     "bls_unemployment":        _glob("bls/unemployment/**/*.parquet"),
@@ -146,6 +151,8 @@ CATALOG: dict[str, str] = {
     # ── FAO global food & agriculture statistics ──────────────────────────────
     "fao_production":          _glob("fao/production/**/*.parquet"),
     "fao_prices":              _glob("fao/prices/**/*.parquet"),
+    "plastics_production":     _glob("plastics/production/**/*.parquet"),
+    "cfpb_complaints":         _glob("cfpb/complaints/**/*.parquet"),
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities":          _glob("worldbank_pink/**/*.parquet"),
     # ── NOAA climate ─────────────────────────────────────────────────────────
@@ -190,11 +197,22 @@ CATALOG: dict[str, str] = {
     "ecb_rates":               _glob("ecb/**/*.parquet"),
     # ── USGS critical mineral statistics ─────────────────────────────────────
     "usgs_minerals":           _glob("usgs_minerals/**/*.parquet"),
+    # ── USGS MCS helium (+ rare gases) annual data releases ───────────────────
+    "usgs_mcs_helium":         _glob("usgs_mcs_helium/**/*.parquet"),
+    # ── USGS DS-140 helium historical statistics ──────────────────────────────
+    "usgs_ds140_helium":       _glob("usgs_ds140/**/*.parquet"),
     # ── Omkar Cloud commodity spot prices ────────────────────────────────────
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # "omkar_commodity":       _glob("omkar_commodity/**/*.parquet"),
     # ── UN Comtrade international trade flows ─────────────────────────────────
     "comtrade_trade":          _glob("comtrade/**/*.parquet"),
+    # ── Global Energy Monitor tracker summary tables ───────────────────────────
+    "gem_coal_summary":        _glob("gem/**/gem_coal_summary_*.parquet"),
+    "gem_coal_mine_summary":   _glob("gem/**/gem_coal_mine_summary_*.parquet"),
+    "gem_steel_summary":       _glob("gem/**/gem_steel_summary_*.parquet"),
+    "gem_cement_summary":      _glob("gem/**/gem_cement_summary_*.parquet"),
+    "gem_oilgas_summary":      _glob("gem/**/gem_oilgas_summary_*.parquet"),
+    "gem_lng_summary":         _glob("gem/**/gem_lng_summary_*.parquet"),
     # ── Fama-French factor returns + industry portfolios ──────────────────────
     "ff_factors":              _glob("fama_french/factors/**/*.parquet"),
     "ff_industry":             _glob("fama_french/industry/**/*.parquet"),
@@ -265,6 +283,9 @@ CATALOG: dict[str, str] = {
     # ── Shipping / logistics (Iceberg) ──────────────────────────────────────
     "shipping_gscpi":         _iceberg_glob("shipping/gscpi/**/*.parquet"),
     "shipping_freight_ppi":   _iceberg_glob("shipping/freight_ppi/**/*.parquet"),
+    # ── Piracy incidents (ICC IMB live-map archive + Wikipedia Somali log) ────
+    "piracy_incidents":        _glob("piracy/imb/**/*.parquet"),
+    "somali_hijackings":       _glob("piracy/wiki/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────
@@ -276,7 +297,9 @@ CATALOG: dict[str, str] = {
     "finnhub_upgrades":        _glob("finnhub/upgrades/**/*.parquet"),
     "finnhub_news":            _glob("finnhub/news/**/*.parquet"),
     # ── Yahoo Finance deep market history (indices, futures, FX, rates) ──────
-    "market_history":          _glob("yfinance/**/*.parquet"),
+    "market_history":          _glob("yfinance/**/market_history_*.parquet"),
+    # ── Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV) ────
+    "yfinance_universe_prices": _glob("yfinance/**/yfinance_universe_*.parquet"),
     # ── TradingView technical-rating snapshots ───────────────────────────────
     "tv_ratings":              _glob("tradingview/**/*.parquet"),
     # ── SEC EDGAR filing index (8-K, 10-K/Q, S-1, 13D/G, proxies) ────────────
@@ -345,7 +368,8 @@ CATALOG: dict[str, str] = {
     "eia_natural_gas_production":   _glob("eia/natural_gas_production/**/*.parquet"),
     "eia_lng_flows":                _glob("eia/lng_flows/**/*.parquet"),
     "finnhub_esg":                    _glob("finnhub/esg/**/*.parquet"),
-    "finnhub_congressional_trading":  _glob("finnhub/congressional_trading/**/*.parquet"),
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading":  _glob("finnhub/congressional_trading/**/*.parquet"),
     "finnhub_supply_chain":           _glob("finnhub/supply_chain/**/*.parquet"),
     "finnhub_insider_sentiment":      _glob("finnhub/insider_sentiment/**/*.parquet"),
     "finnhub_social_sentiment":       _glob("finnhub/social_sentiment/**/*.parquet"),
@@ -356,6 +380,12 @@ CATALOG: dict[str, str] = {
     "finnhub_uspto_patents":          _glob("finnhub/uspto_patents/**/*.parquet"),
     "finnhub_visa_applications":      _glob("finnhub/visa_applications/**/*.parquet"),
     "finnhub_economic_calendar":      _glob("finnhub/economic_calendar/**/*.parquet"),
+    "usaspending_award_counts":       _glob("usaspending/counts/**/*.parquet"),
+    "usaspending_top_awards":         _glob("usaspending/top_awards/**/*.parquet"),
+    "lda_lobbying_filings":           _glob("lda_lobbying/**/*.parquet"),
+    "defillama_protocols":            _glob("defillama/protocols/**/*.parquet"),
+    "defillama_fees":                 _glob("defillama/fees/**/*.parquet"),
+    "defillama_stablecoins":          _glob("defillama/stablecoins/**/*.parquet"),
     "finnhub_earnings_history":        _glob("finnhub/earnings_history/**/*.parquet"),
     "finnhub_eps_estimates":           _glob("finnhub/eps_estimates/**/*.parquet"),
     "finnhub_revenue_estimates":       _glob("finnhub/revenue_estimates/**/*.parquet"),

@@ -5,6 +5,7 @@ BLS (Bureau of Labor Statistics) Pipeline.
 Fetches comprehensive labor market data from the BLS Public Data API:
   - CPI — all items, core, shelter, energy, food and sub-components
   - PPI — finished goods, intermediate, crude, services, farm products
+  - Average Price — actual US city average retail prices (e.g. eggs), not an index
   - Employment — nonfarm payrolls by sector, avg hourly earnings, avg weekly hours
   - JOLTS — job openings, hires, quits, layoffs, total separations (levels + rates)
   - Unemployment — U-3 rate, U-6 broader measure, participation, long-term unemployed
@@ -19,6 +20,7 @@ CLI:
 Outputs:
   storage/raw/bls/cpi/bls_cpi_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/ppi/bls_ppi_{mode}_{YYYYMMDD}.parquet
+  storage/raw/bls/avg_price/bls_avg_price_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/employment/bls_employment_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/jolts/bls_jolts_{mode}_{YYYYMMDD}.parquet
   storage/raw/bls/unemployment/bls_unemployment_{mode}_{YYYYMMDD}.parquet
@@ -40,6 +42,14 @@ BLS_API_KEY = os.environ.get("BLS_API_KEY", "")
 BLS_V1 = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
 BLS_V2 = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BLS_URL = BLS_V2 if BLS_API_KEY else BLS_V1
+
+# Bulk flat-file mirror of the "Average Price" (AP) survey -- keyless, no
+# per-day request quota (unlike the timeseries API above, whose shared v1
+# quota gets exhausted repo-wide by other pipelines/sessions). Full history,
+# updated monthly. Used only for bls_avg_price, since every AVG_PRICE_SERIES
+# entry today is a food item covered by this one file.
+AP_FLATFILE_URL = "https://download.bls.gov/pub/time.series/ap/ap.data.3.Food"
+AP_FLATFILE_HEADERS = {"User-Agent": "financial-data-pipeline research (contact: zander.s.luke@gmail.com)"}
 
 BASE_DIR = os.path.join("storage", "raw", "bls")
 REQUEST_INTERVAL = 1.5
@@ -106,6 +116,37 @@ PPI_SERIES = {
     "PCU336111336111":  ("PPI Automobile Manufacturing",          "Index 2012=100"),
     "PCU3363":          ("PPI Motor Vehicle Parts Mfg",           "Index 2012=100"),
     "PCU334413334413":  ("PPI Semiconductor Device Mfg",          "Index 2012=100"),
+}
+
+AVG_PRICE_SERIES = {
+    # BLS Average Price Data (APU series) — actual US city average retail
+    # prices, not an index. This is the classic "price of eggs" series.
+    "APU0000708111": ("Eggs, Grade A Large, US City Average", "USD per Dozen"),
+    # Meat, poultry, fish — item codes from https://download.bls.gov/pub/time.series/ap/ap.item
+    "APU0000703112": ("Ground Beef, 100% Beef",              "USD per Lb"),
+    "APU0000703211": ("Chuck Roast, USDA Choice, Bone-In",   "USD per Lb"),
+    "APU0000703613": ("Steak, Sirloin, USDA Choice, Boneless", "USD per Lb"),
+    "APU0000703425": ("Steak, Rib Eye, USDA Choice, Boneless", "USD per Lb"),
+    "APU0000704111": ("Bacon, Sliced",                       "USD per Lb"),
+    "APU0000704211": ("Pork Chops, Center Cut, Bone-In",     "USD per Lb"),
+    "APU0000704312": ("Ham, Boneless, Excluding Canned",     "USD per Lb"),
+    "APU0000706111": ("Chicken, Fresh, Whole",                "USD per Lb"),
+    "APU0000706211": ("Chicken Breast, Bone-In",              "USD per Lb"),
+    "APU0000FF1101": ("Chicken Breast, Boneless",             "USD per Lb"),
+    "APU0000706311": ("Turkey, Frozen, Whole",                "USD per Lb"),
+    "APU0000707111": ("Tuna, Light, Chunk",                   "USD per Lb"),
+    "APU0000705142": ("Lamb and Mutton, Bone-In",             "USD per Lb"),
+    # Vegetables
+    "APU0000712112": ("Potatoes, White",                      "USD per Lb"),
+    "APU0000712211": ("Lettuce, Iceberg",                     "USD per Lb"),
+    "APU0000FL2101": ("Lettuce, Romaine",                     "USD per Lb"),
+    "APU0000712311": ("Tomatoes, Field Grown",                "USD per Lb"),
+    "APU0000712401": ("Cabbage",                               "USD per Lb"),
+    "APU0000712403": ("Carrots, Short Trimmed and Topped",    "USD per Lb"),
+    "APU0000712404": ("Onions, Dry Yellow",                    "USD per Lb"),
+    "APU0000712406": ("Peppers, Sweet",                        "USD per Lb"),
+    "APU0000712409": ("Cucumbers",                             "USD per Lb"),
+    "APU0000712412": ("Broccoli",                              "USD per Lb"),
 }
 
 EMPLOYMENT_SERIES = {
@@ -194,6 +235,7 @@ UNEMPLOYMENT_SERIES = {
 TABLE_CONFIGS = {
     "bls_cpi":          (CPI_SERIES,          os.path.join(BASE_DIR, "cpi")),
     "bls_ppi":          (PPI_SERIES,          os.path.join(BASE_DIR, "ppi")),
+    "bls_avg_price":    (AVG_PRICE_SERIES,    os.path.join(BASE_DIR, "avg_price")),
     "bls_employment":   (EMPLOYMENT_SERIES,   os.path.join(BASE_DIR, "employment")),
     "bls_jolts":        (JOLTS_SERIES,        os.path.join(BASE_DIR, "jolts")),
     "bls_unemployment": (UNEMPLOYMENT_SERIES, os.path.join(BASE_DIR, "unemployment")),
@@ -276,6 +318,55 @@ def parse_series(raw_series, catalog):
     return pd.DataFrame(rows)
 
 
+def fetch_avg_price_flatfile(series_ids, catalog):
+    """Pull bls_avg_price data from the keyless AP bulk flat file instead of
+    the quota-limited timeseries API. Returns a DataFrame matching
+    parse_series()'s schema, or an empty DataFrame on any failure."""
+    wanted = set(series_ids)
+    try:
+        resp = requests.get(AP_FLATFILE_URL, headers=AP_FLATFILE_HEADERS, timeout=60)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"  Flat-file fetch failed: {exc}")
+        return pd.DataFrame()
+
+    rows = []
+    lines = resp.text.splitlines()
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        sid = parts[0].strip()
+        if sid not in wanted:
+            continue
+        meta = catalog.get(sid)
+        if not meta:
+            continue
+        name, unit = meta
+        year_str = parts[1].strip()
+        period = parts[2].strip()
+        value_str = parts[3].strip()
+        if not period.startswith("M"):
+            continue
+        month = int(period[1:])
+        if month > 12:
+            continue  # M13 = annual average -- skip
+        try:
+            value = float(value_str)
+            year = int(year_str)
+        except ValueError:
+            continue
+        rows.append({
+            "series_id": sid,
+            "name":      name,
+            "unit":      unit,
+            "date":      f"{year}-{month:02d}-01",
+            "period":    period,
+            "value":     value,
+        })
+    return pd.DataFrame(rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description="BLS labor market data pipeline")
     parser.add_argument("--backfill", action="store_true",
@@ -305,15 +396,22 @@ def main():
         print(f"[{table_name}]  {len(series_list)} series, {len(year_chunks)} year chunk(s)...")
 
         all_frames = []
-        for y_start, y_end in year_chunks:
-            for batch_start in range(0, len(series_list), BATCH_SIZE):
-                batch = series_list[batch_start:batch_start + BATCH_SIZE]
-                raw = fetch_batch(batch, y_start, y_end)
-                if raw:
-                    df = parse_series(raw, catalog)
-                    if not df.empty:
-                        all_frames.append(df)
-                time.sleep(REQUEST_INTERVAL)
+        if table_name == "bls_avg_price":
+            df = fetch_avg_price_flatfile(series_list, catalog)
+            if not df.empty:
+                all_frames.append(df)
+            else:
+                print("  Flat file returned nothing -- falling back to timeseries API.")
+        if not all_frames:
+            for y_start, y_end in year_chunks:
+                for batch_start in range(0, len(series_list), BATCH_SIZE):
+                    batch = series_list[batch_start:batch_start + BATCH_SIZE]
+                    raw = fetch_batch(batch, y_start, y_end)
+                    if raw:
+                        df = parse_series(raw, catalog)
+                        if not df.empty:
+                            all_frames.append(df)
+                    time.sleep(REQUEST_INTERVAL)
 
         if not all_frames:
             print(f"  No data returned.\n")

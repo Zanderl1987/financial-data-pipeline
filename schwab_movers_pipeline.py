@@ -28,6 +28,7 @@ import datetime
 import argparse
 import pandas as pd
 import schwabdev
+from schwab_auth import preflight
 from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
@@ -74,6 +75,8 @@ def _screener_rows(payload: dict, index_symbol: str, sort: str,
 
 def main(indices=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    preflight()
+
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,

@@ -44,6 +44,7 @@ EXPECTED_TABLES = [
     # BLS labor market
     "bls_cpi",
     "bls_ppi",
+    "bls_avg_price",
     "bls_employment",
     "bls_jolts",
     "bls_unemployment",
@@ -87,6 +88,8 @@ EXPECTED_TABLES = [
     "finnhub_news",
     # Yahoo Finance deep market history
     "market_history",
+    # Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV)
+    "yfinance_universe_prices",
     # TradingView technical-rating snapshots
     "tv_ratings",
     # SEC EDGAR filing index
@@ -104,6 +107,10 @@ EXPECTED_TABLES = [
     # FAO global food & agriculture
     "fao_production",
     "fao_prices",
+    # Plastics production (OWID)
+    "plastics_production",
+    # CFPB consumer complaints
+    "cfpb_complaints",
     # World Bank Pink Sheet
     "wb_commodities",
     # NOAA climate
@@ -143,11 +150,21 @@ EXPECTED_TABLES = [
     "ecb_rates",
     # USGS critical minerals
     "usgs_minerals",
+    # USGS MCS helium (+ rare gases) + DS-140 historical statistics
+    "usgs_mcs_helium",
+    "usgs_ds140_helium",
     # Omkar Cloud commodity spot prices
     # Unwired 2026-07-26: requires OMKAR_API_KEY, never set, pipeline never run.
     # "omkar_commodity",
     # UN Comtrade trade flows
     "comtrade_trade",
+    # GEM tracker summary tables
+    "gem_coal_summary",
+    "gem_coal_mine_summary",
+    "gem_steel_summary",
+    "gem_cement_summary",
+    "gem_oilgas_summary",
+    "gem_lng_summary",
     # Fama-French factor returns + industry portfolios
     "ff_factors",
     "ff_industry",
@@ -177,6 +194,9 @@ EXPECTED_TABLES = [
     # Shipping / logistics (NY Fed GSCPI + FRED freight PPI)
     "shipping_gscpi",
     "shipping_freight_ppi",
+    # Piracy incidents (ICC IMB live-map archive + Wikipedia Somali hijacking log)
+    "piracy_incidents",
+    "somali_hijackings",
     # Signal health monitor (maintained backtest performance tracking)
     "signal_health",
     # EIA refinery + crude trade (oil/transportation depth batch)
@@ -282,7 +302,8 @@ EXPECTED_TABLES = [
     "eia_natural_gas_production",
     "eia_lng_flows",
     "finnhub_esg",
-    "finnhub_congressional_trading",
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading",
     "finnhub_supply_chain",
     "finnhub_insider_sentiment",
     "finnhub_social_sentiment",
@@ -293,6 +314,12 @@ EXPECTED_TABLES = [
     "finnhub_uspto_patents",
     "finnhub_visa_applications",
     "finnhub_economic_calendar",
+    "usaspending_award_counts",
+    "usaspending_top_awards",
+    "lda_lobbying_filings",
+    "defillama_protocols",
+    "defillama_fees",
+    "defillama_stablecoins",
     "finnhub_earnings_history",
     "finnhub_eps_estimates",
     "finnhub_revenue_estimates",
@@ -416,6 +443,8 @@ class TestPilotIcebergViews:
     def test_pilot_tables_defined(self):
         assert q.PILOT_ICEBERG_TABLES == {
             "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+            "fao_prices", "fao_production", "plastics_production",
+            "usda_crops", "usda_fertilizers", "bls_avg_price",
         }
 
     def test_iceberg_metadata_wins_over_curated(self, monkeypatch, tmp_path):
@@ -457,6 +486,184 @@ class TestPilotIcebergViews:
         # prices' raw glob exists in storage/raw -> view registered via parquet
         assert sql is not None
         assert "iceberg_scan" not in sql[0]
+
+
+class TestNoOrphanedTables:
+    """
+    A table registered in CATALOG but not produced by any run_all.py
+    PipelineSpec never gets refreshed by a full run. It keeps serving whatever
+    was last written by hand, and nothing reports a failure -- validate.py
+    still PASSes it, because the data is there, just old.
+
+    That is not hypothetical: on 2026-08-11 six live, healthy sources
+    (wb_commodities, imf_commodities, metals_spot, fao_prices, fao_production,
+    options_history) were found frozen between 2026-06-17 and 2026-07-02 for
+    exactly this reason. All six were reachable and returned fresh data the
+    moment they were run by hand. The wiring checklist in CLAUDE.md lists the
+    run_all.py registration; nothing enforced it.
+    """
+
+    # Tables written by analytics/tooling rather than a source pipeline.
+    # Anything added here needs a reason, not just a green suite.
+    NOT_PIPELINE_PRODUCED = {
+        # written by event_backtest.py as a price cache, not fetched
+        "yfinance_universe_prices",
+    }
+
+    def test_every_catalog_table_has_a_producing_pipeline(self):
+        import run_all
+
+        produced = set()
+        for spec in run_all.PIPELINES:
+            produced.update(spec.tables or [])
+
+        orphans = set(q.CATALOG) - produced - self.NOT_PIPELINE_PRODUCED
+        assert not orphans, (
+            "CATALOG tables with no run_all.py PipelineSpec -- a full run will "
+            "never refresh them and they will silently go stale: "
+            f"{sorted(orphans)}"
+        )
+
+    def test_pipeline_specs_only_claim_real_tables(self):
+        """The inverse typo: a spec claiming a table that isn't in CATALOG."""
+        import run_all
+
+        known = set(q.CATALOG) | set(q.ANALYTICS_VIEWS)
+        unknown = {
+            (spec.name, t)
+            for spec in run_all.PIPELINES
+            for t in (spec.tables or [])
+            if t not in known
+        }
+        assert not unknown, f"PipelineSpec.tables entries missing from CATALOG: {sorted(unknown)}"
+
+    def test_every_spec_points_at_a_file_that_exists(self):
+        import run_all
+
+        missing = [
+            (spec.name, spec.file)
+            for spec in run_all.PIPELINES
+            if not os.path.exists(os.path.join(REPO_ROOT, spec.file))
+        ]
+        assert not missing, f"PipelineSpec.file does not exist: {missing}"
+
+
+class TestScheduledJobSkipLists:
+    """
+    `run_all.py --skip` silently ignores a name that matches no pipeline, so a
+    typo in a scheduled job's skip list is invisible: the job keeps passing and
+    the pipeline it meant to exclude quietly runs anyway (burning a metered API
+    key, or failing every night against a known-dead source and masking real
+    failures underneath). Added 2026-08-11 with scripts/daily_stage1.ps1.
+    """
+
+    SCRIPTS = ["scripts/daily_pipelines.ps1"]
+
+    def _skip_names(self, path):
+        """Pull the names out of the `$skip = @( ... ) -join ","` block."""
+        import re
+
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        m = re.search(r"\$skip\s*=\s*@\((.*?)\)\s*-join", body, re.S)
+        assert m, f"{path}: no `$skip = @(...) -join` block found"
+        # Strip PowerShell line comments before pulling quoted names, so a name
+        # mentioned in an explanatory comment is not treated as a skip entry.
+        block = re.sub(r"#[^\n]*", "", m.group(1))
+        return re.findall(r'"([^"]+)"', block)
+
+    @pytest.mark.parametrize("script", SCRIPTS)
+    def test_skip_entries_name_real_pipelines(self, script):
+        import run_all
+
+        names = {p.name for p in run_all.PIPELINES}
+        skips = self._skip_names(os.path.join(REPO_ROOT, script))
+        assert skips, f"{script}: parsed an empty skip list"
+        unknown = [s for s in skips if s not in names]
+        assert not unknown, (
+            f"{script} skips names that match no PipelineSpec (silent no-op): {unknown}"
+        )
+
+
+class TestDocumentedScriptsAreTracked:
+    """
+    CLAUDE.md is the first thing a new session reads, so a script path in it is
+    an instruction. On 2026-08-11 it was pointed at `scripts\\schwab_local_reauth.py`
+    -- a file that existed on this machine but was never `git add`ed, so any
+    other clone got "can't open file" while the tracked, tested equivalent sat
+    unmentioned. Untracked is the dangerous case precisely because it looks fine
+    locally; only git can tell you.
+    """
+
+    DOCS = ["CLAUDE.md", "docs/PROJECT_NOTES.md", "docs/AUTOMATION.md"]
+
+    def _tracked_files(self):
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            pytest.skip("not a git checkout")
+        return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+    def _body(self, doc):
+        path = os.path.join(REPO_ROOT, doc)
+        if not os.path.exists(path):
+            pytest.skip(f"{doc} absent")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_referenced_scripts_exist_and_are_tracked(self, doc):
+        import re
+
+        body = self._body(doc)
+        # Match scripts/<name>.py or scripts\<name>.py however it is quoted.
+        referenced = {
+            m.replace("\\", "/")
+            for m in re.findall(r"scripts[\\/][A-Za-z0-9_./\\-]+\.py", body)
+        }
+        assert referenced, f"{doc}: no script references found -- regex likely stale"
+
+        tracked = self._tracked_files()
+        broken = sorted(r for r in referenced if r not in tracked)
+        assert not broken, (
+            f"{doc} points at script(s) git does not track: {broken}. "
+            f"Either `git add` them or point the doc at the tracked equivalent."
+        )
+
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_referenced_notes_exist_and_are_tracked(self, doc):
+        """
+        Same defect, one file type over. "see work-notes/financial-data-pipeline/SESSION_NOTES_<date>.md" is a
+        promise that the detail is somewhere retrievable; an untracked notes
+        file keeps that promise only on the machine that wrote it. Caught
+        2026-08-11 with work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md, which four docs pointed at
+        while it existed nowhere but this clone.
+        """
+        import re
+
+        body = self._body(doc)
+        refs = {m.replace("\\", "/") for m in re.findall(r"[A-Za-z0-9_./\\-]+\.md", body)}
+
+        # Only in-repo references are ours to keep. A path whose first segment
+        # is a directory this repo does not have is a pointer at a sibling repo
+        # (e.g. earnings_sentiment_tool/EXPERT_BRIEF.md) and can never be
+        # tracked here -- flagging those would train people to ignore this test.
+        def in_repo(ref):
+            head = ref.split("/")[0]
+            return head == ref or os.path.isdir(os.path.join(REPO_ROOT, head))
+
+        referenced = {r for r in refs if in_repo(r)}
+        assert referenced, f"{doc}: no markdown references found -- regex likely stale"
+
+        tracked = self._tracked_files()
+        broken = sorted(r for r in referenced if r not in tracked)
+        assert not broken, (
+            f"{doc} points at markdown git does not track: {broken}. "
+            f"`git add` them, or the reference is dead for everyone but this clone."
+        )
 
 
 class TestDiscoveryHelpers:

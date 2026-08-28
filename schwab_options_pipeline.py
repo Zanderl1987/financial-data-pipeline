@@ -22,15 +22,23 @@ Schema:
   bid | ask | last | mark | volume | open_interest |
   delta | gamma | theta | vega | rho |
   implied_volatility | in_the_money | intrinsic_value | time_value |
-  underlying_price | fetched_at
+  underlying_price | snapshot_date | fetched_at
+
+  snapshot_date (market-time trading day, added 2026-08-11) is part of the
+  curated dedup key. Schwab serves no options history, so this table's history
+  exists only because each daily run appends another snapshot -- snapshot_date
+  is what makes each one a distinct fact rather than a re-fetch of the last.
 """
 
 import os
 import time
 import datetime
 import argparse
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 import schwabdev
+from schwab_auth import preflight
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
 from symbol_universe import get_broad_universe
@@ -43,6 +51,16 @@ CALLBACK_URL = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
 TOKEN_PATH   = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 
 OUTPUT_DIR = os.path.join("storage", "raw", "schwab", "options")
+
+# snapshot_date is stamped in market time, not UTC. Schwab has no historical
+# options endpoint -- this table's history exists ONLY because the daily job
+# accumulates snapshots -- so the snapshot's trading day is the fact being
+# recorded. A chain pulled at 21:00 ET belongs to that session, but is already
+# tomorrow in UTC, so a UTC-derived date would file it under a day the market
+# never opened. Deliberately no fallback if tzdata is unavailable: a loud
+# ZoneInfo error is far better than silently reverting to UTC dates, which
+# would corrupt the key that the whole history depends on.
+MARKET_TZ = ZoneInfo("America/New_York")
 
 # Fallback if --symbols isn't passed and the broad universe can't be resolved
 # (e.g. no IVV holdings snapshot yet). Real default is the S&P 500 (via
@@ -139,7 +157,12 @@ def fetch_option_chain(
                     return None
 
                 df = pd.DataFrame(rows)
-                df["fetched_at"] = datetime.datetime.utcnow().isoformat()
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                # Keep fetched_at byte-identical to what it always was (naive UTC
+                # isoformat) -- changing it would alter a column downstream code
+                # already parses.
+                df["fetched_at"] = now_utc.replace(tzinfo=None).isoformat()
+                df["snapshot_date"] = now_utc.astimezone(MARKET_TZ).date().isoformat()
                 return df
 
             if resp.status_code == 429:
@@ -170,6 +193,8 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    preflight()
 
     client = schwabdev.Client(
         app_key=API_KEY,

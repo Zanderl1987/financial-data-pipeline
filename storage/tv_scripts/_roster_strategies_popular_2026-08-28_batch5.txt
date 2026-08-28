@@ -1,0 +1,68 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 5 (URL /scripts/page-5/?script_type=strategies), enumerated 2026-08-28 to
+# continue the campaign toward the pre-registered 30-50 close after page 4 was
+# fully exhausted (36 collected as of the end of batch4). Same sampling frame
+# priority 1 per pre-registration amendment 2026-08-11 (b). "Open-source only"
+# toggle confirmed ON via aria-pressed check before enumerating.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE          = .pine + .meta.json in this directory
+#         SKIP-2PA      = author already at the 2-per-author cap (cap tracked across
+#                         ALL batches via meta.json tv_author, not just this page)
+#         SKIP-LEN      = too large to collect through the two-channel workaround
+#         SKIP-INTRADAY = strategy is explicitly designed/documented for intraday
+#                         timeframes (session filters, VWAP-anchored, "best timeframe:
+#                         1-15min") -- cannot be honestly tested against this campaign's
+#                         daily-bar price panel (yfinance_universe_prices)
+#         SKIP-DOMAIN   = strategy logic is fundamentally tied to a non-equity
+#                         instrument's mechanics and cannot be sensibly applied to the
+#                         equity universe without changing its entire premise
+#         SKIP-TEMPLATE = not a real strategy -- infrastructure/shell/tool requiring the
+#                         user to insert their own strategy logic, no edge claim of its own
+#         SKIP-NOEXIT   = collected then Stage 1 screen_source() rejected: EXCLUDE:no_exit
+#                         (no strategy.exit() calls; source file not kept)
+#         TODO          = next to collect / not yet evaluated
+#
+DONE         NeEiwmDq-Donchian-Breakout-with-ATR-Trailing-Stop-Trend-Following :: raven_suurineru :: admitted, ADMIT/breakout family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see donchian_atr_trail_btc.pine. Classic Donchian N-bar breakout + 200-EMA trend filter + ATR-multiple trailing stop, fixed-% risk sizing. NOTE: English write-up claims timeframe/instrument robustness, but internal Slovak comments hardcode "BTCUSD capital.com, TIMEFRAME: 4 hodiny" tuning -- mechanism itself is timeframe-portable (no session/intrabar logic beyond an optional no-op-safe Friday flatten), so admitted on mechanism grounds; discrepancy flagged in meta.json. 146 lines, ~10 params.
+SKIP-NOEXIT  9VZKhSFJ-Super-trend-Signal-Engine-Quantum-Edge :: Quantum-Edge-Capital :: inspected source (classic public-domain Supertrend calc) -- only strategy.entry() calls for BUY and SELL (flip-reversal), no strategy.exit() anywhere, same shape that got OKxIjdsz (BTC Trend-Momentum) rejected as EXCLUDE:no_exit this batch. Skipped without full collection to save effort given near-certain Stage 1 rejection.
+SKIP-NOEXIT  n9ty3SVh-Super-trend-Signal-Engine-Strat-QUANTUM-EDGE :: Quantum-Edge-Capital :: same author + near-identical title/mechanism to 9VZKhSFJ (also rejected on no-exit grounds); not opened separately.
+SKIP-INTRADAY X7S94bsA-intraday-long-short :: sich1111 :: title is literally "Intraday Long Short". Not opened further.
+SKIP-INTRADAY 1LkYAS4y-Bowman-RSI-Signals-Backtester-v3 :: drewskills :: author's own doc: "backtests well with default settings on 15min timeframe"; also uses higher-timeframe (HTF) filters. Confirmed via page text, not collected as source.
+DONE         vX4g2EH0-Dual-Bollinger-Band-Cross-Strategy-v6 :: deependrasrivastavalko :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see dual_bollinger_band_cross.pine. Fast(5,1)/Slow(10,2) Bollinger-midline cross, long-only, exit on close<slowMid. Author says "can be used on any time frame... do not use below 30min" (a floor not a ceiling -- daily OK). 39 lines, 4 params, very simple/clean.
+DONE         CzLuDuzf-Optimized-Doji-Breakout-Strategy-Short-Only-V6 :: deependrasrivastavalko :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see optimized_doji_breakout_short.pine. Short-only doji-candle-shape (body/range<=0.10) + red-followup-candle entry, dynamic R:R (3.0 high-vol / 1.5 low-vol via ATR-vs-its-own-MA gate), exit on TP/SL or emergency green-candle close. 2nd/2 for this author -- now at cap. 65 lines, 1 param.
+SKIP-2PA     43eIQfDj-ATR-Trailing-Stop-Strategy-with-EMA-Trend-Filter :: AIScripts :: author already at cap (jyhTizLX, xSLyyOwI already collected per 2026-08-28 batch4 notes)
+DONE         zmlXzncC-Smoothed-Heiken-Ashi-Strategy-v1 :: yovanygarcia87 :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see smoothed_heiken_ashi_strategy.pine. Double-smoothed Heikin-Ashi color-streak: enter on Nth (default 2) consecutive same-color candle, exit on first opposite-color candle. Long+short symmetric. 104 lines, 6 params.
+SKIP-INTRADAY jg9Mpcmj-JAIRO-PARRA :: LassTradrer :: listing title is just the author's name ("JAIRO PARRA"), but the actual source's strategy() title is "MTF EMA Pullback Strategy - Compras y Ventas" with explicit "Temporalidad Mayor" (higher timeframe, options 60/240/D) + "Temporalidad de Entrada" (lower entry timeframe) groups plus a "Sesion" (session) input group -- a genuine intraday MTF pullback design, not daily-bar portable. Confirmed via source code inspection, not fully collected.
+SKIP-INTRADAY ZxL34uho-Daily-Close-HA-Gap-Strategy-for-Testing :: fondBird7020 :: despite "Daily" in the name and a 1D demo chart, the source pulls the daily close via request.security(syminfo.tickerid, "D", close) (unconfirmed-HTF repaint risk) and gates its signal on `hour(time_close)==15 and minute(time_close)==30` -- i.e. it's designed to run on an intraday chart watching for the 3:30 PM (NSE close) bar, not to run directly on daily bars. Confirmed via source code, not collected as source.
+SKIP-INTRADAY FBWhneRX-BTC-8AM-Pattern-Breakout-Instant-Entry :: abhijeetkawale :: title is a specific session-time (8AM) pattern on BTC. Not opened further.
+SKIP-INTRADAY qcuYijIN-XAU-Clear-EMA-ATR-Strategy-TP-SL-Voice-V6-Clean-TP :: ionplesu88 :: author's own doc: "Recommended timeframes: 5M, 15M, and 30M." Gold-specific too. Confirmed via page text, not collected as source.
+SKIP-INTRADAY V1gn0uGO-SMC-Clean-4H-Zones-Center-Labels-HH-HL-LL-LH :: ionplesu88 :: "4H" explicit in title, consistent with this author's other two entries (both confirmed/inferred SKIP-INTRADAY, 5M-30M range). Not opened further.
+SKIP-INTRADAY zudiHFjK-XAU-Clear-EMA-ATR-Strategy-TP-SL-Voice-V6 :: ionplesu88 :: near-duplicate title/mechanism of qcuYijIN (same author, same "XAU Clear EMA ATR...Voice V6" naming, minus "Clean TP"); same author's other entry confirmed SKIP-INTRADAY (5M/15M/30M recommended) via page text -- not opened separately.
+SKIP-TEMPLATE VcRiudNf-MHIDa-Strategy-Honesty-Dashboard :: MHIDa :: 285 lines, almost entirely a 6-panel robustness-check dashboard (min trade count, OOS split, cost stress, etc.) wrapped around one small sample entry/exit. Author explicitly disclaims the embedded strategy: "the sample strategy is a teaching example, not a tuned configuration" and "A CONTEXT / educational tool, not a signal or advice." Same category as the webhook-template skip -- no edge claim of its own. Not collected as source.
+DONE         qQUC1ncY-Apex-Fusion-AI-Smart-Trend-Engine :: Tomukasss :: admitted, ADMIT/trend family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see apex_fusion_confluence.pine. "AI" name is marketing -- actual mechanism is a weighted-confluence score (200-EMA + Supertrend + volume spike + MACD histogram slope + momentum + fractal BOS + Fib retracement zone + naive volume-bar POC proxy) vs a threshold (default 80/100). No ML, no session logic. 139 lines, 9 params.
+DONE         CxLXiMwm-BPS-v17-Strong-Trend-Filter :: georgefushi :: admitted, ADMIT/trend family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see bps_v17_strong_trend_filter.pine. "Institutional sentiment" marketing framing; mechanically a fixed-weight linear blend (RSI+MACD+ROC momentum 0.35, 50/200-SMA trend 0.3, price-vs-200SMA valuation 0.2, volume-spike term) smoothed 3-EMA, enter on score crossing +-0.4 w/ trend+volume confirm, fixed-% TP/SL. 47 lines.
+SKIP-2PA     SOy4JYX2-BPS-v17-Strong-Trend-Filter :: georgefushi :: identical title + same author as the collected CxLXiMwm (already ADMIT); author now effectively at cap given this is the same script republished. Not opened separately.
+SKIP-INTRADAY xaTFzMnD-Blueprint-Vol :: mantrafx :: public description is a throwaway ("teset puirporses only educawtion experiment"), but the actual source is a substantial (403 lines) "Session V/A Strategy (XAUUSD)" with explicit EST time windows (Asia 20:30-21:15, London 04:30-05:30, NY 08:15-09:15, etc.), "backtested on GC=F - 5m". Gold-futures + session-time-window design, not daily-bar portable. Confirmed via source inspection, not collected.
+SKIP-INTRADAY 83hmaEOQ-Tomukas-Elite-SMC :: Tomukasss :: author's own doc: "Best suited for: Gold (XAUUSD), major Forex pairs, and indices on lower timeframes such as 1M, 3M, and 5M"; also has an explicit London/New York session filter and HTF confirmation (unconfirmed-HTF repaint risk). Confirmed via page text, not collected as source.
+SKIP-NOEXIT  xjmYAnYo-sandhu-rise :: drjaspreetsingh7 :: collected then rejected -- Stage 1 screen_source() returned EXCLUDE:intrabar_recalc (stop-based strategy.entry()/strategy.exit() calls, calc_on_order_fills=true). Real "3 SMA Band Alert Candle Break Strategy" mechanism (candle fully clears an SMA band -> alert -> entry on alert-candle range break, fixed 1:1/1:2/1:3 R-multiple targets) was otherwise timeframe-portable, no session/HTF logic. Source file not kept.
+SKIP-TEMPLATE b4HV7iJR-Optimal-F-by-Ralph-Vince-Position-Sizing-and-Risk-Analysis :: Smollet :: a position-sizing / money-management module (Ralph Vince Optimal-F calculator), explicitly meant to be pasted around an existing strategy: "1. Insert your own strategy code into the designated strategy section... 2. Disable Optimal F Position Sizing... test using one contract." No entry signal of its own. Confirmed via full page text (read earlier this session), not collected as source.
+
+# Session summary (2026-08-28): page 5 (23 entries) fully triaged. 6 admitted (all
+# ADMIT): donchian_atr_trail_btc (raven_suurineru, breakout family), dual_bollinger_
+# band_cross + optimized_doji_breakout_short (deependrasrivastavalko, both authored
+# by the same person, now at 2-per-author cap), smoothed_heiken_ashi_strategy
+# (yovanygarcia87, hybrid), apex_fusion_confluence (Tomukasss, weighted-confluence
+# trend despite "AI" marketing), bps_v17_strong_trend_filter (georgefushi, weighted-
+# blend trend despite "institutional sentiment" marketing). 2 candidates collected
+# then Stage-1-rejected on EXCLUDE:intrabar_recalc / EXCLUDE:no_exit (source files
+# not kept); 2 more inspected-and-rejected on no-exit grounds without full
+# collection once the "only strategy.entry(), no strategy.exit()" pattern was
+# recognized from the first rejection (saved effort on the Quantum-Edge-Capital
+# duplicate pair). 11 confirmed SKIP-INTRADAY (several caught only after opening
+# the actual source, not just the listing description -- "Daily Close-HA Gap" and
+# "JAIRO PARRA" both had innocuous/misleading titles but turned out to be session-
+# or MTF-gated on inspection). 2 SKIP-TEMPLATE (a robustness-check dashboard, a
+# money-management/Optimal-F overlay). 3 SKIP-2PA (author cap or exact-duplicate
+# republish). Running total: 42 .pine files campaign-wide (was 36 at the end of
+# batch4), 8 short of the pre-registered 50 ceiling. Targeted suite: 84 passed,
+# zero regressions. Page 6+ not yet touched.

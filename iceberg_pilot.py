@@ -32,7 +32,13 @@ PILOT_CATALOG_DB = ICEBERG_WAREHOUSE / "pilot_catalog.db"
 PILOT_NAMESPACE = "pilot"
 
 # Tables mirrored to Iceberg by migrate_pilot.py. Keep in sync with query.py.
-PILOT_TABLES = ("prices", "macro", "fundamentals_annual", "fundamentals_quarterly")
+PILOT_TABLES = (
+    "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
+    # Commodity/materials tables added 2026-08-24 (rubber/plastics/eggs/
+    # fertilizer data audit session).
+    "fao_prices", "fao_production", "plastics_production",
+    "usda_crops", "usda_fertilizers", "bls_avg_price",
+)
 
 # DuckDB 1.5.4's iceberg_scan reads by metadata.json path (read-only); writes
 # require a REST catalog, which we don't have. pyiceberg does the writing.
@@ -108,6 +114,23 @@ def _schema_matches(table, arrow_schema: pa.Schema) -> bool:
     return True
 
 
+def _coerce_null_columns(schema: pa.Schema) -> pa.Schema:
+    """Replace any pa.null()-typed field with pa.string().
+
+    A column that is entirely NULL across every row in a parquet file (e.g. a
+    sparse wide-format leftover, or a source field nothing has ever populated)
+    gets inferred as pa.null() by PyArrow, which Iceberg format-version=2
+    rejects outright ("Null type is not supported ... Requires format-version
+    3+ or use a concrete type"). string is a safe universal choice since every
+    value being cast is None regardless of the target type.
+    """
+    fields = [
+        pa.field(f.name, pa.string(), nullable=True) if pa.types.is_null(f.type) else f
+        for f in schema
+    ]
+    return pa.schema(fields)
+
+
 def replace_from_parquet(identifier: str, parquet_path: str, batch_rows: int = 200_000) -> int:
     """Stream-replace a pilot table with the contents of a local parquet file.
 
@@ -122,7 +145,7 @@ def replace_from_parquet(identifier: str, parquet_path: str, batch_rows: int = 2
     """
     catalog = load_catalog()
     pf = pq.ParquetFile(parquet_path)
-    arrow_schema = pf.schema_arrow
+    arrow_schema = _coerce_null_columns(pf.schema_arrow)
     table = ensure_table(catalog, identifier, arrow_schema)
 
     if not _schema_matches(table, arrow_schema):
@@ -134,7 +157,7 @@ def replace_from_parquet(identifier: str, parquet_path: str, batch_rows: int = 2
     first = True
     with table.transaction() as txn:
         for batch in pf.iter_batches(batch_size=batch_rows):
-            arrow = pa.Table.from_batches([batch], schema=arrow_schema)
+            arrow = pa.Table.from_batches([batch]).cast(arrow_schema)
             if first:
                 txn.overwrite(arrow)  # AlwaysTrue -> replaces all existing data
                 first = False

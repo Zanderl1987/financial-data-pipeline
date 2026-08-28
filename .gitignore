@@ -25,6 +25,10 @@ storage/hf_fundamentals_snapshot/
 Com95_16.txt
 annualof.txt
 
+# Resumable backfill checkpoints (congressional_trades). Regenerable local
+# state, and deliberately outside storage/raw/ so query.py's CATALOG globs
+# never union a partial checkpoint into a table.
+storage/cache/
 storage/eval_registry/
 storage/logs/
 logs/
@@ -40,7 +44,15 @@ storage/iceberg/pilot_catalog.db
 
 # Regenerable progress state for the long-running universe backfill
 schwab_universe_backfill_progress.json
+yfinance_universe_backfill_progress.json
+# SchwabUniverseIncrementalPrices writes one date-stamped file per nightly run,
+# so without a glob the repo root grows an untracked json every single day.
+schwab_universe_incremental_*.json
 
 # Automation failure flags -- created/cleared by scheduled task scripts,
 # not repo state (see AUTOMATION.md)
 *_FAIL.txt
+
+# Third-party TradingView Pine scripts (other authors, MPL-2.0) -- not this
+# project's own code, excluded from the public repo
+storage/tv_scripts/

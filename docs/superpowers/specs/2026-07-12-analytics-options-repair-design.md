@@ -21,7 +21,7 @@ volatility and no open interest at all** — those exist only in the (currently 
 Schwab chain tables. Result: `iv_summary` raises `KeyError: 'expirationDate'` and
 `put_call_ratio` raises `KeyError` on `optionType`/`openInterest`. Found 2026-07-12
 after the `underlying`→`symbol` rename fixed the `q.load` call but exposed this deeper
-drift (SESSION_NOTES_2026-07-12.md).
+drift (work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-12.md).
 
 ## Constraints
 

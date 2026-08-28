@@ -3726,7 +3726,7 @@ quota is spent.
 
 **Files:**
 - Create: `docs/EVALUATION.md`
-- Modify: `CLAUDE.md` (commands + architecture pointer), `SESSION_NOTES_2026-07-19-eval-framework.md` (outcome)
+- Modify: `CLAUDE.md` (commands + architecture pointer), `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-19-eval-framework.md` (outcome)
 
 **Recorded baselines being reproduced (tolerance: IC within +/-0.005 and the same noise/weak/significant verdicts):**
 - VADER news sentiment (2026-07-07 session): pooled IC ~ +0.01, no significant horizon — verdict noise everywhere.
@@ -3874,7 +3874,7 @@ In the Architecture diagram, extend the backtest line:
 
 - [ ] **Step 9: Update session notes**
 
-Append to `SESSION_NOTES_2026-07-19-eval-framework.md`: plan executed
+Append to `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-19-eval-framework.md`: plan executed
 through Task 12; the acceptance numbers actually observed (sentiment IC,
 TV rating IC per horizon, the 9 factor first-baseline ICs, trade-rule
 summary vs legacy); any deviations from the recorded baselines and how they
@@ -3883,7 +3883,7 @@ were resolved; registry row count.
 - [ ] **Step 10: Final commit**
 
 ```bash
-git add docs/EVALUATION.md CLAUDE.md SESSION_NOTES_2026-07-19-eval-framework.md
+git add docs/EVALUATION.md CLAUDE.md work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-19-eval-framework.md
 git commit -m "docs(evaluation): acceptance run reproduced recorded baselines; framework usage guide"
 ```
 

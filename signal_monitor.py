@@ -27,6 +27,7 @@ import os
 import json
 import argparse
 import datetime
+import time
 
 import pandas as pd
 
@@ -60,8 +61,8 @@ def _symbols_key(spec, symbols):
 
 
 def _score_window(events, holding_days, side, run_date_ts, window_name):
-    """Run scenario() + event_study() over `events` (already date-filtered
-    for this window) and return one metrics row, or None if too thin to score."""
+    """Run scenario() and reuse its internal event study for the CAR21 stat,
+    so the (expensive) event study is computed once per window, not twice."""
     if events.empty:
         return None
     try:
@@ -71,15 +72,12 @@ def _score_window(events, holding_days, side, run_date_ts, window_name):
     if sc.metrics.get("n_trades", 0) == 0:
         return None
     car21_mean, car21_tstat = None, None
-    try:
-        es = eb.event_study(events, window=(0, 21))
-        if 21 in es.horizons.index:
-            row = es.horizons.loc[21]
-            sign = -1.0 if side == "short" else 1.0
-            car21_mean = round(sign * row["mean_pct"], 2)
-            car21_tstat = round(sign * row["t_stat"], 2)
-    except Exception:
-        pass
+    es = getattr(sc, "event_study", None)
+    if es is not None and holding_days in es.horizons.index:
+        row = es.horizons.loc[holding_days]
+        sign = -1.0 if side == "short" else 1.0
+        car21_mean = round(sign * row["mean_pct"], 2)
+        car21_tstat = round(sign * row["t_stat"], 2)
     return {
         "window": window_name,
         "n_trades": sc.metrics["n_trades"],
@@ -99,6 +97,23 @@ def run(config, run_date_ts):
     pf_floor = thresholds.get("profit_factor_floor", 1.0)
     min_trades = thresholds.get("min_trades_for_flag", 10)
 
+    # Build the rating-history frames ONCE per symbol, then evaluate every
+    # signal lambda against them. Without this, technical_events() re-derives
+    # the same indicator frames per signal (5 signals x 63 symbols = ~5x
+    # redundant compute and DuckDB loads).
+    from analytics.technical import rating_history
+    all_symbols = []
+    for sig in config["signals"]:
+        for sym in _expand_symbols(sig["symbols"]):
+            if sym not in all_symbols:
+                all_symbols.append(sym)
+    frames = {}
+    for sym in all_symbols:
+        d = rating_history(sym)
+        if not d.empty:
+            frames[sym] = d
+    print(f"  built rating frames for {len(frames)}/{len(all_symbols)} symbol(s)")
+
     rows = []
     reports = []
     for sig in config["signals"]:
@@ -108,7 +123,7 @@ def run(config, run_date_ts):
         holding_days = sig.get("holding_days", 21)
         side = sig.get("side", "long")
 
-        events = eb.technical_events(symbols, signal=name)
+        events = eb.technical_events(symbols, signal=name, frames=frames)
         if events.empty:
             print(f"  {name}: no events found for {len(symbols)} symbol(s), skipping.")
             continue
@@ -123,9 +138,16 @@ def run(config, run_date_ts):
                     continue
                 cutoff = run_date_ts - pd.Timedelta(days=days)
                 sub = events[pd.to_datetime(events["date"]) >= cutoff]
+            t0 = time.monotonic()
             metrics = _score_window(sub, holding_days, side, run_date_ts, w)
+            elapsed = time.monotonic() - t0
             if metrics is None:
+                print(f"  {name} / {w}: skipped (no scoreable events) [{elapsed:.1f}s]",
+                      flush=True)
                 continue
+            print(f"  {name} / {w}: n={metrics['n_trades']} "
+                  f"win={metrics['win_rate_pct']}% avg={metrics['avg_return_pct']}% "
+                  f"pf={metrics['profit_factor']} [{elapsed:.1f}s]", flush=True)
             by_window[w] = metrics
             rows.append({
                 "run_date": run_date_ts.strftime("%Y-%m-%d"),

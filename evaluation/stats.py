@@ -16,6 +16,24 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sps
 
+#: Relative floor below which a standard deviation is treated as zero.
+#:
+#: `sd > 0` is NOT a sufficient guard, which is the trap this constant exists
+#: for. A constant series of 0.001 has an arithmetically-zero sd, but in float64
+#: it comes out around 6e-19 rather than exactly 0.0 -- positive, finite, and
+#: enough to produce a Sharpe of 2.4e16. That passes every `> 0` check in the
+#: repo and would render as a plausible-looking huge number rather than as the
+#: degenerate input it is. First caught by tests/test_tearsheet.py in the
+#: tearsheet implementation; canonical home moved here (2026-08-23) so the
+#: rest of the battery guards the same way.
+SD_FLOOR = 1e-12
+
+
+def _degenerate_sd(sd: float, scale: float = 1.0) -> bool:
+    """True when `sd` is zero, non-finite, or float-noise around zero."""
+    return not (np.isfinite(sd) and sd > SD_FLOOR * max(1.0, abs(scale)))
+
+
 # --------------------------------------------------------------- Tier 1
 
 
@@ -56,7 +74,7 @@ def daily_ic(panel: pd.DataFrame, value_col: str, fwd_col: str,
     sd = a.std(ddof=1)
     out = {"mean_daily_ic": round(float(a.mean()), 4), "ic_days": int(len(a)),
            "ic_pct_positive": round(100 * float((a > 0).mean()), 1)}
-    if sd > 0:
+    if not _degenerate_sd(sd):
         se = sd / math.sqrt(len(a))
         out["ic_se"] = round(float(se), 5)
         out["ic_t_stat"] = round(float(a.mean() / se), 2)
@@ -94,7 +112,9 @@ def quantile_spread(panel: pd.DataFrame, value_col: str, fwd_col: str,
            "top_mean_pct": round(100 * float(top.mean()), 3),
            "bottom_mean_pct": round(100 * float(bot.mean()), 3),
            "spread_pct": round(100 * float(top.mean() - bot.mean()), 3)}
-    if (sd_t > 0 or sd_b > 0) and np.isfinite(sd_t) and np.isfinite(sd_b):
+    # Welch still runs when exactly ONE bucket is flat (its variance term is
+    # just 0); both buckets float-noise-flat is the degenerate case.
+    if not (_degenerate_sd(sd_t) and _degenerate_sd(sd_b)):
         t, p = sps.ttest_ind(top, bot, equal_var=False)
         out["spread_t"] = round(float(t), 2)
         out["spread_p"] = round(float(p), 4)
@@ -149,7 +169,7 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
         return {"sharpe": None, "sharpe_ci_lo": None, "sharpe_ci_hi": None,
                 "sharpe_reason": f"only {n} days (< {3 * block_len})"}
     sd = r.std(ddof=0)
-    if not sd > 0:
+    if _degenerate_sd(sd):
         return {"sharpe": None, "sharpe_ci_lo": None, "sharpe_ci_hi": None,
                 "sharpe_reason": "zero return variance"}
     ann = math.sqrt(252.0)
@@ -161,7 +181,7 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
         starts = rng.integers(0, n - block_len + 1, size=n_blocks)
         sample = np.concatenate([r[s:s + block_len] for s in starts])[:n]
         ssd = sample.std(ddof=0)
-        sharpes[i] = sample.mean() / ssd * ann if ssd > 0 else np.nan
+        sharpes[i] = sample.mean() / ssd * ann if not _degenerate_sd(ssd) else np.nan
     sharpes = sharpes[np.isfinite(sharpes)]
     if len(sharpes) < n_boot // 2:
         return {"sharpe": round(obs, 2), "sharpe_ci_lo": None,
@@ -173,15 +193,25 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
 
 
 def permutation_trades(rule, cache: dict, n_perm: int = 200,
-                       seed: int = 0) -> dict:
+                       seed: int = 0, *, config=None) -> dict:
     """
     Permutation null for a trade system: within each symbol, relocate the
     same NUMBER of entry signals to uniformly random days (exit rule kept
     as-is), re-simulate through the same engine, and compare total P&L and
     win rate. One-sided empirical p-values with the +1 correction.
+
+    `config` is an ExecutionConfig applied identically to the observed run and
+    to every permutation -- the null must pay the same costs and obey the same
+    stops as the strategy, or the comparison is rigged in the strategy's favor.
+    None means LEGACY.
     """
     from evaluation import trades as tr        # local import (no cycles)
-    obs = tr.simulate(rule, cache)
+    from evaluation import execution as ev_execution
+    _cfg = ev_execution.resolve(config)
+    _perm_needs_portfolio = (_cfg.limits.capital is not None
+                             or _cfg.limits.max_concurrent is not None
+                             or _cfg.sizing.mode != "fixed_notional")
+    obs = tr.simulate(rule, cache, config=config)
     if obs.empty:
         return {"pnl_p": None, "win_rate_p": None,
                 "perm_reason": "no realized trades"}
@@ -208,7 +238,14 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
             if k:
                 pse[rng.choice(n, size=k, replace=False)] = True
             rows.extend(tr.simulate_symbol(index, close, ple, lx, pse, sx,
-                                           sym, rule.notional))
+                                           sym, rule.notional, config=config))
+        if _perm_needs_portfolio and rows:
+            # The null must face the SAME capital budget and concurrency cap as
+            # the observed run. Skipping this would let the null take every
+            # trade while the strategy is rationed -- an unconstrained null is
+            # a harder bar, so the test would be conservative rather than
+            # anti-conservative, but it would no longer be the stated null.
+            rows = tr._portfolio_pass(rows, _cfg)
         perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
         if perm.empty:
             continue
@@ -374,3 +411,124 @@ def registry_percentile(value, population) -> dict:
                 "pct_reason": f"population too small (n={len(pop)})"}
     return {"percentile": round(100.0 * float((pop <= value).mean()), 1),
             "n_population": int(len(pop))}
+
+
+# --------------------------------------------------------------- Risk & Factor Extensions
+
+def sortino_ratio(ret, rf: float = 0.0, ann: float = 252.0) -> dict:
+    """Annualized Sortino ratio (downside deviation risk-adjusted return)."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"sortino": None, "sortino_reason": f"fewer than 5 data points (n={len(s)})"}
+    downside = s[s < rf] - rf
+    if len(downside) == 0:
+        return {"sortino": None, "sortino_reason": "no downside returns below threshold"}
+    down_vol = float(np.sqrt(np.mean(downside ** 2)) * np.sqrt(ann))
+    if down_vol <= 0 or not np.isfinite(down_vol):
+        return {"sortino": None, "sortino_reason": "zero downside volatility"}
+    mean_excess = float((s.mean() - rf) * ann)
+    return {"sortino": round(float(mean_excess / down_vol), 2),
+            "downside_vol_pct": round(100.0 * down_vol, 2)}
+
+
+def calmar_ratio(cagr_pct: "float | None", max_drawdown_pct: "float | None") -> dict:
+    """Calmar ratio: CAGR / |Max Drawdown|."""
+    if cagr_pct is None or max_drawdown_pct is None or not np.isfinite(cagr_pct) or not np.isfinite(max_drawdown_pct):
+        return {"calmar": None, "calmar_reason": "missing CAGR or Max Drawdown"}
+    mdd = abs(float(max_drawdown_pct))
+    if mdd <= 0:
+        return {"calmar": None, "calmar_reason": "zero max drawdown"}
+    return {"calmar": round(float(cagr_pct / mdd), 2)}
+
+
+def omega_ratio(ret, threshold: float = 0.0) -> dict:
+    """Omega ratio: sum of gains above threshold / sum of losses below threshold."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"omega": None, "omega_reason": f"fewer than 5 data points (n={len(s)})"}
+    gains = float((s[s > threshold] - threshold).sum())
+    losses = float((threshold - s[s < threshold]).sum())
+    if losses <= 0:
+        return {"omega": None, "omega_reason": "no losses below threshold"}
+    return {"omega": round(float(gains / losses), 2)}
+
+
+def value_at_risk(ret, alpha: float = 0.05) -> dict:
+    """Value at Risk (VaR) at alpha quantile (e.g. 5% worst loss)."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 10:
+        return {"var_95_pct": None, "var_reason": f"fewer than 10 data points (n={len(s)})"}
+    q = float(np.percentile(s, alpha * 100))
+    return {"var_95_pct": round(100.0 * float(-q), 2)}
+
+
+def conditional_var(ret, alpha: float = 0.05) -> dict:
+    """Conditional Value at Risk (CVaR / Expected Shortfall) beyond alpha quantile."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 10:
+        return {"cvar_95_pct": None, "cvar_reason": f"fewer than 10 data points (n={len(s)})"}
+    q = float(np.percentile(s, alpha * 100))
+    tail = s[s <= q]
+    if len(tail) == 0:
+        return {"cvar_95_pct": None, "cvar_reason": "empty tail"}
+    return {"cvar_95_pct": round(100.0 * float(-tail.mean()), 2)}
+
+
+def gain_to_pain_ratio(ret) -> dict:
+    """Schwager's Gain-to-Pain ratio: sum of all returns / absolute sum of negative returns."""
+    s = pd.Series(ret).dropna()
+    if len(s) < 5:
+        return {"gain_to_pain": None, "gtp_reason": f"fewer than 5 data points (n={len(s)})"}
+    total_gain = float(s[s > 0].sum())
+    total_loss = float(abs(s[s < 0].sum()))
+    if total_loss <= 0:
+        return {"gain_to_pain": None, "gtp_reason": "zero total loss"}
+    return {"gain_to_pain": round(float((total_gain - total_loss) / total_loss), 2)}
+
+
+def fama_french_factor_attribution(ret_series: pd.Series, start: "str | None" = None,
+                                   end: "str | None" = None) -> dict:
+    """
+    OLS Factor Attribution against Fama-French factors.
+    Returns alpha, beta_mkt, beta_smb, beta_hml, r_squared or ff_reason string.
+    """
+    s = pd.Series(ret_series).dropna()
+    if len(s) < 30:
+        return {"ff_alpha": None, "ff_reason": f"fewer than 30 return observations (n={len(s)})"}
+    try:
+        import query as q
+        df = q.load("ff_factors", start=start, end=end)
+        if df.empty:
+            return {"ff_alpha": None, "ff_reason": "ff_factors dataset empty"}
+        freq_df = df[df["frequency"].isin(["daily", "monthly"])]
+        if freq_df.empty:
+            return {"ff_alpha": None, "ff_reason": "no daily/monthly Fama-French factors available in storage"}
+        piv = (freq_df.drop_duplicates(["date", "factor"])
+               .pivot(index="date", columns="factor", values="value") / 100.0)
+        piv.index = pd.to_datetime(piv.index)
+        s.index = pd.to_datetime(s.index)
+        aligned = pd.concat([s.rename("strategy"), piv], axis=1, join="inner").dropna()
+        if len(aligned) < 30:
+            return {"ff_alpha": None, "ff_reason": f"fewer than 30 overlapping dates (n={len(aligned)})"}
+        factors = [c for c in ["Mkt-RF", "SMB", "HML", "RMW", "CMA"] if c in aligned.columns]
+        if not factors:
+            return {"ff_alpha": None, "ff_reason": "required factor columns missing"}
+        rf = aligned["RF"] if "RF" in aligned.columns else 0.0
+        y = aligned["strategy"] - rf
+        X = aligned[factors].copy()
+        X.insert(0, "Alpha", 1.0)
+        coefs, _, _, _ = np.linalg.lstsq(X.values, y.values, rcond=None)
+        y_pred = X.values @ coefs
+        ss_tot = float(np.sum((y.values - y.values.mean()) ** 2))
+        ss_res = float(np.sum((y.values - y_pred) ** 2))
+        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        res = {
+            "ff_alpha_ann": round(float(coefs[0] * 252.0 * 100), 2),
+            "ff_r_squared": round(float(r2), 4),
+        }
+        for i, f in enumerate(factors, start=1):
+            res[f"beta_{f.lower().replace('-', '_')}"] = round(float(coefs[i]), 3)
+        return res
+    except Exception as e:
+        return {"ff_alpha": None, "ff_reason": f"Fama-French attribution error: {e}"}
+

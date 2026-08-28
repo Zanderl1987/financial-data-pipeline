@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/CxLXiMwm-BPS-v17-Strong-Trend-Filter/",
+  "tv_author": "georgefushi",
+  "tv_script_name": "BPS v17 - Strong Trend Filter",
+  "tv_boosts": 8,
+  "tv_views": 669,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Marketed as approximating 'institutional big-player sentiment' (positioning/breadth/valuation/momentum/volume composite) but mechanically a fixed-weight linear blend of RSI+MACD+ROC momentum, 50/200-SMA trend, price-vs-200SMA valuation deviation, and a volume-spike term, smoothed by a 3-period EMA, entering on the smoothed score crossing +-0.4 with trend+volume confirmation; fixed-% TP/SL. No session/HTF logic. 47 lines, small param set."
+}

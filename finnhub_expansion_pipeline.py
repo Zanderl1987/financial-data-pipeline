@@ -136,24 +136,50 @@ FILING_RENAME = {
 }
 
 LOBBYING_RENAME = {
-    "startDate":      "start_date",
-    "endDate":        "end_date",
-    "lobbyingFirm":   "lobbying_firm",
-    "generalIssueCode":"general_issue_code",
-    "specificIssue":  "specific_issue",
-    "lobbyistName":   "lobbyist_name",
-    "amount":         "amount",
+    # Verified live 2026-08-22 against the real /stock/lobbying response --
+    # the old map assumed startDate/lobbyingFirm/etc, none of which exist.
+    "name":               "client_name",
+    "description":        "description",
+    "country":            "country",
+    "year":               "year",
+    "period":             "period",
+    "documentUrl":        "document_url",
+    "income":             "income",
+    "expenses":           "expenses",
+    "postedName":         "posted_name",
+    "date":               "posted_date",
+    "clientId":           "client_id",
+    "registrantId":       "registrant_id",
+    "senateId":           "senate_id",
+    "houseRegistrantId":  "house_registrant_id",
 }
 
 USA_SPENDING_RENAME = {
-    "startDate":      "start_date",
-    "endDate":        "end_date",
-    "awardingAgency": "awarding_agency",
-    "awardeeName":    "awardee_name",
-    "amount":         "amount",
-    "contractType":   "contract_type",
-    "naicsCode":      "naics_code",
-    "description":    "description",
+    # Verified live 2026-08-22 against the real /stock/usa-spending response --
+    # the old map assumed startDate/awardingAgency/amount/etc, none of which exist.
+    "recipientName":                   "recipient_name",
+    "recipientParentName":             "recipient_parent_name",
+    "country":                         "country",
+    "totalValue":                      "total_value",
+    "outlayedAmount":                  "outlayed_amount",
+    "obligatedAmount":                 "obligated_amount",
+    "potentialAmount":                 "potential_amount",
+    "actionDate":                      "action_date",
+    "performanceStartDate":            "performance_start_date",
+    "performanceEndDate":              "performance_end_date",
+    "awardingAgencyName":              "awarding_agency",
+    "awardingSubAgencyName":           "awarding_sub_agency",
+    "awardingOfficeName":              "awarding_office",
+    "performanceCountry":              "performance_country",
+    "performanceCity":                 "performance_city",
+    "performanceCounty":               "performance_county",
+    "performanceState":                "performance_state",
+    "performanceZipCode":              "performance_zip",
+    "performanceCongressionalDistrict":"performance_congressional_district",
+    "awardDescription":                "description",
+    "naicsCode":                       "naics_code",
+    "permalink":                       "permalink",
+    "lastModifiedDate":                "last_modified_date",
 }
 
 
@@ -299,11 +325,9 @@ def fetch_lobbying(symbol, start_date, end_date):
         "stock/lobbying",
         {"symbol": symbol, "from": start_date, "to": end_date},
     )
-    if not data:
+    if not data or not data.get("data"):
         return None
-    rows = data if isinstance(data, list) else []
-    if not rows:
-        return None
+    rows = data["data"]
     df = pd.DataFrame(rows)
     df = df.rename(columns=LOBBYING_RENAME)
     if "symbol" not in df.columns:
@@ -318,11 +342,9 @@ def fetch_usa_spending(symbol, start_date, end_date):
         "stock/usa-spending",
         {"symbol": symbol, "from": start_date, "to": end_date},
     )
-    if not data:
+    if not data or not data.get("data"):
         return None
-    rows = data if isinstance(data, list) else []
-    if not rows:
-        return None
+    rows = data["data"]
     df = pd.DataFrame(rows)
     df = df.rename(columns=USA_SPENDING_RENAME)
     if "symbol" not in df.columns:
@@ -337,11 +359,9 @@ def fetch_uspto_patents(symbol, start_date, end_date):
         "stock/uspto-patent",
         {"symbol": symbol, "from": start_date, "to": end_date},
     )
-    if not data:
+    if not data or not data.get("data"):
         return None
-    rows = data if isinstance(data, list) else []
-    if not rows:
-        return None
+    rows = data["data"]
     df = pd.DataFrame(rows)
     if "symbol" not in df.columns:
         df["symbol"] = symbol
@@ -355,11 +375,9 @@ def fetch_visa_applications(symbol, start_date, end_date):
         "stock/visa-application",
         {"symbol": symbol, "from": start_date, "to": end_date},
     )
-    if not data:
+    if not data or not data.get("data"):
         return None
-    rows = data if isinstance(data, list) else []
-    if not rows:
-        return None
+    rows = data["data"]
     df = pd.DataFrame(rows)
     if "symbol" not in df.columns:
         df["symbol"] = symbol

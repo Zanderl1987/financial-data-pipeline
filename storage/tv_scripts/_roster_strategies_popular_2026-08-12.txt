@@ -1,0 +1,38 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# enumerated 2026-08-12 (sampling frame priority 1 per pre-registration amendment
+# 2026-08-11 (b)). Order below is the listing's own popularity order.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE     = .pine + .meta.json in this directory
+#         SKIP-2PA = author already at the 2-per-author cap
+#         SKIP-LEN = too large to collect through the two-channel workaround
+#                    (see pre-registration amendment 2026-08-12)
+#         TODO     = next to collect
+#
+DONE     PkUPYbw7-Ultimate-Prop-Firm-Artillery :: ArtilleryTrades :: collected 2026-08-11
+DONE     hKhtC6DE-Rabiah6X-High-Winrate-Scalper-UT-Bot-FVG-DEMA :: Soheibhussen357 :: screened OUT (unconfirmed_htf)
+DONE     njRv2ENC-Supertrend-with-Entry-TP1-TP2-and-TP3 :: jlockhart1316 :: admitted
+SKIP-LEN mikVFwAu-Alpha-S-R-Channel-Strategy :: Awab_Hassan :: 801 lines
+DONE     J6JxBgkr-Vegas-Channel-Tunnel-Strategy-v1-1 :: yubinzhang802 :: admitted
+DONE     hezSShJr-Hybrid-Breakout-VCP-Inspired-Trend :: blitz_locked :: admitted
+DONE     1FgHp6Cv-MRR-Mean-Reversion-Range :: abdulrehmantatvacare :: admitted (deprioritized, 11 params)
+DONE     SPvazS2g-Elite-Hybrid-ORB-Artillery :: ArtilleryTrades :: 2nd for this author, still within cap; admitted (deprioritized, 15 params)
+SKIP-LEN kYJLrfun-ORB-Laboratory-v1-0-12 :: DominicFerri :: 1209 lines
+SKIP-LEN VFP7QkqV :: DNSE :: 389 lines
+DONE     9o35mG93-PDH-PDL-Break-0DTE :: samirdave1992 :: screened OUT (unconfirmed_htf, always-on entry gate)
+DONE     jd1KSVn7 :: newton61 :: admitted (deprioritized, 12 params)
+DONE     jyhTizLX-Fair-Value-Gap-Strategy-with-Break-of-Structure-Confirmation :: AIScripts :: admitted
+DONE     wgsvzsT3-TRADLEWARE-HODL :: cs_lev :: admitted (single-trade buy&hold benchmark -- flag for campaign discussion, not directly comparable under pnl_p permutation test)
+DONE     OmrCq7H3-TRADLEWARE-DCA :: cs_lev :: admitted (deprioritized, 10 params; buy-only benchmark, same flag as HODL)
+SKIP-2PA 71yKm18B-TRADLEWARE-Ichimoku-TK-Cross-MFI-SOL :: cs_lev :: 3rd by this author
+SKIP-LEN U2DYOXw6 :: zqzmvtonjz2567 :: 886 lines
+SKIP-LEN fgESdFcb :: zqzmvtonjz2567 :: 886 lines
+SKIP-2PA 6QxmcfIk :: zqzmvtonjz2567 :: 3rd by this author
+DONE     diZ8Oes6-EMA-Fib-Confluence-with-3-Targets-Trailing-v6 :: alanshospitality :: admitted (deprioritized, 11 params)
+SKIP-LEN lfk6Inrw-Cash-Account-Portfolio-Trend-System-v2 :: junseok_bong :: 345 lines
+DONE     qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing :: ipuneet :: screened OUT (unconfirmed_htf, always-on entry gate); collection needed 3 rounds to fix a transcription bug that dropped 4 double-blank-line separators, see SESSION_NOTES
+DONE     xx3enmiW-Cloud-Pro-Ichimoku-Confluence :: blitz_locked :: 2nd for this author, still within cap; screened OUT (unconfirmed_htf, HTF filter defaults on and gates every entry)
+
+# Yield note: unlike the Editors' picks frame (2 tradeable candidates out of 23),
+# every entry here carries strategy() entries and exits by construction. The binding
+# constraint in this frame is collection cost, not candidacy.

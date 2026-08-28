@@ -31,6 +31,7 @@ import datetime
 import time
 import pandas as pd
 import schwabdev
+from schwab_auth import preflight
 from dotenv import load_dotenv
 
 from symbol_universe import get_broad_universe
@@ -153,6 +154,8 @@ def fetch_quotes(client, symbols: list[str]) -> pd.DataFrame:
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    preflight()
 
     client = schwabdev.Client(
         app_key=API_KEY,

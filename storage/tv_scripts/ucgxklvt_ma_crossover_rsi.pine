@@ -1,0 +1,45 @@
+//@version=6
+strategy("MA Crossover + RSI Strategy", overlay=true,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     initial_capital=10000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05)
+
+fastLen  = input.int(9,  title="Fast MA Length")
+slowLen  = input.int(21, title="Slow MA Length")
+rsiLen   = input.int(14, title="RSI Length")
+rsiOB    = input.int(70, title="RSI Overbought")
+rsiOS    = input.int(30, title="RSI Oversold")
+useSL    = input.bool(true, title="Use Stop Loss?")
+slPerc   = input.float(2.0, title="Stop Loss %")
+useTP    = input.bool(true, title="Use Take Profit?")
+tpPerc   = input.float(4.0, title="Take Profit %")
+
+fastMA = ta.ema(close, fastLen)
+slowMA = ta.ema(close, slowLen)
+rsiVal = ta.rsi(close, rsiLen)
+
+bullCross = ta.crossover(fastMA, slowMA)
+bearCross = ta.crossunder(fastMA, slowMA)
+
+buySignal  = bullCross and rsiVal < rsiOB
+sellSignal = bearCross and rsiVal > rsiOS
+
+plot(fastMA, color=color.blue,   title="Fast MA")
+plot(slowMA, color=color.orange, title="Slow MA")
+
+if buySignal
+    strategy.entry("Long", strategy.long)
+
+if sellSignal
+    strategy.close("Long")
+
+if strategy.position_size > 0
+    entryPrice = strategy.position_avg_price
+    slPrice = useSL ? entryPrice * (1 - slPerc / 100) : na
+    tpPrice = useTP ? entryPrice * (1 + tpPerc / 100) : na
+    strategy.exit("Exit", from_entry="Long", stop=slPrice, limit=tpPrice)
+
+alertcondition(buySignal,  title="Buy Signal",  message="Buy signal on {{ticker}} at {{close}}")
+alertcondition(sellSignal, title="Sell Signal", message="Sell signal on {{ticker}} at {{close}}")

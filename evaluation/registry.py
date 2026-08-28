@@ -22,9 +22,18 @@ REG_PATH = os.path.join("storage", "eval_registry", "results.parquet")
 COLUMNS = [
     "run_id", "input_name", "input_type", "evaluation", "horizon",
     "statistic", "value", "n", "universe_hash", "date_range", "created_at",
+    "execution_hash",
 ]
 
 _KEY = ["input_name", "evaluation", "horizon", "statistic"]
+
+#: Rows written before `execution_hash` existed (W1 Step B, 2026-08-17). They
+#: are labeled "unknown" rather than "legacy" ON PURPOSE: most predate any cost
+#: model, but the tv_strategy_catalog_stage3 rows were produced net of 10 bps a
+#: side via a monkeypatch, so a blanket "legacy" would be a false claim about
+#: history. Anything comparing execution semantics across the registry must
+#: treat "unknown" as missing data, not as a value.
+UNKNOWN_EXECUTION = "unknown"
 
 
 def universe_hash(symbols) -> str:
@@ -38,6 +47,12 @@ def new_run_id() -> str:
 
 
 def _normalize(rows: pd.DataFrame) -> pd.DataFrame:
+    rows = rows.copy()
+    if "execution_hash" not in rows.columns:
+        # Added in W1 Step B. Defaulted rather than required so every existing
+        # caller keeps working; callers that know their ExecutionConfig should
+        # pass evaluation.execution.config_hash(cfg) explicitly.
+        rows["execution_hash"] = UNKNOWN_EXECUTION
     missing = [c for c in COLUMNS if c not in rows.columns]
     if missing:
         raise ValueError(f"registry rows missing columns: {missing}")
@@ -54,7 +69,11 @@ def _normalize(rows: pd.DataFrame) -> pd.DataFrame:
 def load(path: str = REG_PATH) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame(columns=COLUMNS)
-    return pd.read_parquet(path)
+    df = pd.read_parquet(path)
+    if "execution_hash" not in df.columns:
+        # Registry files written before W1 Step B. See UNKNOWN_EXECUTION.
+        df["execution_hash"] = UNKNOWN_EXECUTION
+    return df
 
 
 def append(rows: pd.DataFrame, path: str = REG_PATH) -> int:

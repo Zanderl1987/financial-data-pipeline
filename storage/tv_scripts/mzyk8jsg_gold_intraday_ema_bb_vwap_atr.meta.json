@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content rows, chunked)",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "suri14373",
+  "tv_boosts": 1000,
+  "tv_script_name": "Gold Intraday EMA/BB/VWAP + ATR SL/TP + Session/Weekday Filter",
+  "tv_url": "https://www.tradingview.com/script/mZYK8jsg-Gold-Intraday-EMA-BB-VWAP-ATR-SL-TP-Session-Weekday-Filter/",
+  "tv_views": 11956
+}

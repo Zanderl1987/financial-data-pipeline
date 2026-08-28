@@ -204,9 +204,15 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
     },
     "schwab_options": {
-        "required":    ["symbol", "put_call", "expiration_date", "strike"],
-        "critical_nn": ["symbol", "expiration_date", "strike"],
-        "date_col":    "expiration_date",
+        "required":    ["symbol", "put_call", "expiration_date", "strike", "snapshot_date"],
+        "critical_nn": ["symbol", "expiration_date", "strike", "snapshot_date"],
+        # date_col drives the future-date check, so it has to be a column that
+        # should never exceed today. expiration_date was the opposite: an option
+        # is future-dated by definition, so that check warned on ~100% of rows
+        # every run and carried no information. snapshot_date is an observation
+        # date -- past it, and something is genuinely wrong (clock skew, or the
+        # market-time conversion in schwab_options_pipeline.py misbehaving).
+        "date_col":    "snapshot_date",
     },
     "news_sentiment": {
         "required":    ["symbol", "sentiment", "score"],
@@ -233,6 +239,11 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
     },
     "bls_ppi": {
+        "required":    ["series_id", "date", "value"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+    },
+    "bls_avg_price": {
         "required":    ["series_id", "date", "value"],
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
@@ -342,6 +353,18 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["country", "commodity", "obs_year", "value"],
         "critical_nn": ["country", "commodity", "value"],
         "date_col":    None,
+    },
+    # ── Plastics production (OWID) ─────────────────────────────────────────────
+    "plastics_production": {
+        "required":    ["country", "obs_year", "value", "unit"],
+        "critical_nn": ["country", "obs_year", "value"],
+        "date_col":    None,
+    },
+    # ── CFPB consumer complaints ────────────────────────────────────────────────
+    "cfpb_complaints": {
+        "required":    ["complaint_id", "date_received", "product", "company"],
+        "critical_nn": ["complaint_id", "date_received"],
+        "date_col":    "date_received",
     },
     # ── World Bank Pink Sheet commodity prices ────────────────────────────────
     "wb_commodities": {
@@ -475,6 +498,18 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "table_title", "period", "value"],
         "date_col":    None,
     },
+    # ── USGS MCS helium (+ rare gases) annual releases ────────────────────────
+    "usgs_mcs_helium": {
+        "required":    ["obs_year", "series", "commodity", "country", "value", "unit", "fetched_at"],
+        "critical_nn": ["obs_year", "series", "commodity", "value"],
+        "date_col":    None,
+    },
+    # ── USGS DS-140 helium historical statistics ───────────────────────────────
+    "usgs_ds140_helium": {
+        "required":    ["obs_year", "metric", "value", "unit", "fetched_at"],
+        "critical_nn": ["obs_year", "metric", "value"],
+        "date_col":    None,
+    },
     # Unwired 2026-07-26 (not in CATALOG): requires OMKAR_API_KEY, never set.
     # "omkar_commodity": {
     #     "required":    ["commodity", "price_usd", "fetched_at"],
@@ -557,6 +592,37 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["hs_code", "obs_year", "flow"],
         "date_col":    None,
         "value_ranges": {"trade_value_usd": (0, 5e12)},
+    },
+    # ── GEM tracker summary tables (biannual Google Sheets exports) ───────────
+    "gem_coal_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_coal_mine_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_steel_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_cement_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_oilgas_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
+    },
+    "gem_lng_summary": {
+        "required":    ["tracker_sheet", "indicator", "country_or_region", "column_label", "value", "fetched_at"],
+        "critical_nn": ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+        "date_col":    None,
     },
     # ── Open-Meteo daily weather ──────────────────────────────────────────────
     "open_meteo_weather": {
@@ -779,10 +845,20 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
     },
-    "shipping_gscpi": {
-        "required":    ["date", "gscpi", "fetched_at"],
-        "critical_nn": ["date", "gscpi"],
-        "date_col":    "date",
+    # ── Piracy incidents ─────────────────────────────────────────────────────
+    # incident_year is nullable (~2% of IMB pins carry no parseable year);
+    # day-level dating lives in somali_hijackings.incident_date.
+    "piracy_incidents": {
+        "required":    ["incident_id", "lat", "lng", "region", "source", "fetched_at"],
+        "critical_nn": ["incident_id", "lat", "lng", "region"],
+        "date_col":    None,
+        "value_ranges": {"lat": (-90, 90), "lng": (-180, 180)},
+    },
+    "somali_hijackings": {
+        "required":    ["vessel_name", "section_year", "hijack_status", "source", "fetched_at"],
+        "critical_nn": ["vessel_name", "section_year"],
+        "date_col":    None,
+        "value_ranges": {"section_year": (1990, 2030)},
     },
     # ── TSA checkpoint travel volumes ─────────────────────────────────────────
     "tsa_checkpoint": {
@@ -795,6 +871,12 @@ SCHEMAS: dict[str, dict] = {
     "market_history": {
         "required":    ["symbol", "name", "asset_class", "date", "close", "fetched_at"],
         "critical_nn": ["symbol", "date", "close"],
+        "date_col":    "date",
+    },
+    # ── Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV) ─────
+    "yfinance_universe_prices": {
+        "required":    ["symbol", "date", "close", "adj_close", "fetched_at"],
+        "critical_nn": ["symbol", "date", "close", "adj_close"],
         "date_col":    "date",
     },
     # ── TradingView technical-rating snapshots ────────────────────────────────
@@ -1165,11 +1247,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['symbol'],
         "date_col":    "fetched_at",
     },
-    "finnhub_congressional_trading": {
-        "required":    ['symbol', 'member_name', 'transaction_date', 'fetched_at'],
-        "critical_nn": ['symbol', 'member_name', 'transaction_date'],
-        "date_col":    "transaction_date",
-    },
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading": {
+    #     "required":    ['symbol', 'member_name', 'transaction_date', 'fetched_at'],
+    #     "critical_nn": ['symbol', 'member_name', 'transaction_date'],
+    #     "date_col":    "transaction_date",
+    # },
     "finnhub_supply_chain": {
         "required":    ['symbol', 'side', 'fetched_at'],
         "critical_nn": ['symbol', 'side'],
@@ -1196,14 +1279,17 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "fetched_at",
     },
     "finnhub_lobbying": {
-        "required":    ['symbol', 'start_date', 'lobbying_firm', 'fetched_at'],
-        "critical_nn": ['symbol', 'start_date', 'lobbying_firm'],
-        "date_col":    "start_date",
+        # Finnhub's /stock/lobbying never populates a real per-filing date
+        # (its own "date" field is blank on every row, verified 2026-08-22);
+        # only year/period are reliable, so fetched_at is the date_col here.
+        "required":    ['symbol', 'client_name', 'year', 'period', 'fetched_at'],
+        "critical_nn": ['symbol', 'client_name'],
+        "date_col":    "fetched_at",
     },
     "finnhub_usa_spending": {
-        "required":    ['symbol', 'start_date', 'awarding_agency', 'fetched_at'],
-        "critical_nn": ['symbol', 'start_date', 'awarding_agency'],
-        "date_col":    "start_date",
+        "required":    ['symbol', 'action_date', 'awarding_agency', 'fetched_at'],
+        "critical_nn": ['symbol', 'action_date', 'awarding_agency'],
+        "date_col":    "action_date",
     },
     "finnhub_uspto_patents": {
         "required":    ['symbol', 'fetched_at'],
@@ -1218,6 +1304,43 @@ SCHEMAS: dict[str, dict] = {
     "finnhub_economic_calendar": {
         "required":    ['fetched_at'],
         "critical_nn": [],
+        "date_col":    "fetched_at",
+    },
+    # USAspending federal contracts (keyless replacement for finnhub_usa_spending)
+    "usaspending_award_counts": {
+        "required":    ['window_start', 'window_end', 'award_type_code', 'award_count', 'fetched_at'],
+        "critical_nn": ['window_start', 'award_type_code', 'award_count'],
+        "date_col":    "window_end",
+    },
+    "usaspending_top_awards": {
+        # date_col is window_end, NOT start_date: USAspending award-level rows
+        # carry the original award start (can be decades old or even future-
+        # dated for planned awards); only the query window bounds freshness.
+        "required":    ['recipient_name', 'award_amount', 'awarding_agency', 'fetched_at'],
+        "critical_nn": ['recipient_name', 'awarding_agency', 'award_amount'],
+        "date_col":    "window_end",
+    },
+    # Senate LDA lobbying filings (keyless replacement for finnhub_lobbying)
+    "lda_lobbying_filings": {
+        "required":    ['filing_uuid', 'registrant_name', 'fetched_at'],
+        "critical_nn": ['filing_uuid', 'registrant_name'],
+        # dt_posted can be null on amended filings; fetched_at is the safe date_col
+        "date_col":    "fetched_at",
+    },
+    # DeFi protocol fundamentals (snapshot-only, run daily to accumulate history)
+    "defillama_protocols": {
+        "required":    ['protocol_id', 'name', 'tvl', 'fetched_at'],
+        "critical_nn": ['protocol_id', 'name'],
+        "date_col":    "fetched_at",
+    },
+    "defillama_fees": {
+        "required":    ['protocol_id', 'name', 'total_24h', 'fetched_at'],
+        "critical_nn": ['protocol_id', 'name'],
+        "date_col":    "fetched_at",
+    },
+    "defillama_stablecoins": {
+        "required":    ['stablecoin_id', 'name', 'symbol', 'circulating', 'fetched_at'],
+        "critical_nn": ['stablecoin_id', 'name', 'symbol'],
         "date_col":    "fetched_at",
     },
     "finnhub_earnings_history": {

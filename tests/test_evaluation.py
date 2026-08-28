@@ -252,6 +252,32 @@ class TestTier1:
         d = ev_stats.daily_ic(p, "value", "fwd_1d")
         assert d["ic_t_stat"] is None and "daily_reason" in d
 
+    def test_degenerate_sd_gate(self):
+        """The gate itself: zero, non-finite, and float-noise sds are all
+        degenerate; any real dispersion passes."""
+        assert ev_stats._degenerate_sd(0.0)
+        assert ev_stats._degenerate_sd(float("nan"))
+        assert ev_stats._degenerate_sd(float("inf"))
+        assert ev_stats._degenerate_sd(6e-19)      # constant-0.001 float noise
+        assert not ev_stats._degenerate_sd(1e-3)
+
+    def test_quantile_spread_float_noise_buckets_guarded(self):
+        """Both buckets constant (top=0.001s, bottom=0.0s): their sds land at
+        ~6e-19 / 0.0 -- the old `sd_t > 0 or sd_b > 0` gate ran Welch on that
+        noise and reported an astronomically large t for a 15 bps mean gap.
+        The SD_FLOOR gate must close it instead."""
+        rows = []
+        for d in pd.bdate_range("2023-01-02", periods=30):
+            for k in range(8):
+                rows.append({"symbol": f"S{k}", "date": d,
+                             "value": float(k),
+                             "fwd_1d": 0.001 if k >= 4 else 0.0})
+        p = pd.DataFrame(rows)
+        r = ev_stats.quantile_spread(p, "value", "fwd_1d")
+        assert r["spread_pct"] == pytest.approx(100 * 0.001)
+        assert r["spread_t"] is None
+        assert "both buckets" in r["spread_reason"]
+
     def test_t_to_p_two_sided(self):
         assert ev_stats.t_to_p(0.0) == pytest.approx(1.0)
         assert ev_stats.t_to_p(1.96) == pytest.approx(0.05, abs=0.01)
@@ -573,6 +599,13 @@ class TestTier2:
         assert "sharpe_reason" in ev_stats.bootstrap_sharpe(flat)
         short = pd.Series(rng.normal(size=10))
         assert "sharpe_reason" in ev_stats.bootstrap_sharpe(short)
+
+    def test_bootstrap_sharpe_float_noise_series_guarded(self):
+        """A constant 0.001 series has sd ~6e-19 in float64 -- the old bare
+        `sd > 0` gate let it through and reported a Sharpe near 2.4e16."""
+        r = ev_stats.bootstrap_sharpe(pd.Series([0.001] * 500))
+        assert r["sharpe"] is None
+        assert r["sharpe_reason"] == "zero return variance"
 
     def test_permutation_null_rule_not_significant(self):
         # a rule whose entries are RANDOM days on a random walk must not

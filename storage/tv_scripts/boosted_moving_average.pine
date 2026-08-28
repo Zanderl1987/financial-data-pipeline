@@ -1,0 +1,25 @@
+//@version=5
+indicator("Boosted Moving Average", overlay=true)
+
+// Boosted Moving Average Settings
+boost_len = input.int(43, "Boosted MA Length", group = "Boosted MA Settings")
+Boostfactor = input.float(1.5, "Boost factor", minval=0.1, step = 0.1, group = "Boosted MA Settings", tooltip="Higher sensitivity means the MA will respond more quickly to price changes.")
+src = input.source(close, "Source", group = "Boosted MA Settings")
+
+boosted_ma(src, len, sensitivity) =>
+    ema1 = ta.ema(src, len)
+    ema2 = ta.ema(src, len / 2)
+    boosted_value = ema2 + sensitivity * (ema2 - ema1)
+    smoothed_value = ta.ema(boosted_value, math.round(len / sensitivity))
+    smoothed_value
+
+boosted_ma_value = boosted_ma(src, boost_len, Boostfactor)
+
+bullish = boosted_ma_value > ta.wma(boosted_ma_value[1], int(math.round(Boostfactor)))
+bearish = boosted_ma_value < ta.wma(boosted_ma_value[1], int(math.round(Boostfactor)))
+
+plot(boosted_ma_value, color=bullish ? color.rgb(0, 255, 187) : color.rgb(255, 17, 0), linewidth=2, title="Smoothed MA with Sensitivity")
+
+// Alert
+alertcondition(bullish, title="Bullish Signal", message=" Boosted MA turned bullish")
+alertcondition(bearish, title="Bearish Signal", message=" Boosted MA turned bearish")

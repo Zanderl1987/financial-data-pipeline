@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import schwabdev
+from schwab_auth import preflight
 import datetime
 import time
 import os
@@ -17,7 +18,11 @@ TOKEN_PATH = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 METRICS_DIR = os.path.join("storage", "raw", "options", "metrics")
 CHAIN_DIR   = os.path.join("storage", "raw", "options", "chain")
 
-FALLBACK_SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"]
+FALLBACK_SYMBOLS = [
+    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
+    "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
+    "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
+]
 
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 60
@@ -26,13 +31,25 @@ REQUEST_INTERVAL = 0.5
 
 def get_dji_symbols():
     try:
-        df = pd.read_html(
+        tables = pd.read_html(
             "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
             storage_options={"User-Agent": "Mozilla/5.0"},
-        )[2]
-        symbols = df["Symbol"].tolist()
-        print(f"Fetched {len(symbols)} DJI symbols from Wikipedia.")
-        return symbols
+        )
+        for df in tables:
+            col = next(
+                (c for c in df.columns
+                 if str(c).strip().lower() in ("symbol", "ticker")),
+                None,
+            )
+            if col is not None and 25 <= len(df) <= 35:
+                symbols = (
+                    df[col].astype(str).str.strip().str.upper()
+                    .str.replace(r"\s+.*$", "", regex=True)
+                    .tolist()
+                )
+                print(f"Fetched {len(symbols)} DJI symbols from Wikipedia.")
+                return symbols
+        raise ValueError("no components table with a Symbol/Ticker column found")
     except Exception as e:
         print(f"Wikipedia fetch failed ({e}). Using fallback symbol list.")
         return FALLBACK_SYMBOLS
@@ -126,6 +143,8 @@ def capture_daily_metrics(symbol, client):
 def main():
     os.makedirs(METRICS_DIR, exist_ok=True)
     os.makedirs(CHAIN_DIR, exist_ok=True)
+    preflight()
+
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-18
 **Status:** Approved (brainstorming session, Claude Fable 5)
-**Session notes:** `SESSION_NOTES_2026-07-18-eval-framework.md`
+**Session notes:** `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-18-eval-framework.md`
 
 ## Purpose
 

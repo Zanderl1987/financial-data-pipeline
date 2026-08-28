@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/vX4g2EH0-Dual-Bollinger-Band-Cross-Strategy-v6/",
+  "tv_author": "deependrasrivastavalko",
+  "tv_script_name": "Dual Bollinger Band Cross Strategy v6",
+  "tv_boosts": 18,
+  "tv_views": 795,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Author's doc: 'can be used on any time frame but for best output do not use below 30min timeframe' -- a floor, not a ceiling, so daily bars are compatible. Very simple mechanism: fast (5,1) vs slow (10,2) Bollinger midline cross for entry (fastMid > slowMid and close > fastMid), exit on close < slowMid. Long-only. 39 lines, 4 params."
+}

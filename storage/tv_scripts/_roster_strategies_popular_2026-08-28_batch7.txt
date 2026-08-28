@@ -1,0 +1,62 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 7 (URL /scripts/page-7/?script_type=strategies), enumerated 2026-08-28 to
+# continue the campaign toward the pre-registered 30-50 close after page 6 was
+# fully triaged (43 collected as of the end of batch6). Same sampling frame
+# priority 1 per pre-registration amendment 2026-08-11 (b). "Open-source only"
+# toggle confirmed ON via aria-pressed check before enumerating.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE          = .pine + .meta.json in this directory
+#         SKIP-2PA      = author already at the 2-per-author cap
+#         SKIP-LEN      = too large to collect through the two-channel workaround
+#         SKIP-INTRADAY = strategy is explicitly designed/documented for intraday
+#                         timeframes -- cannot be honestly tested against this
+#                         campaign's daily-bar price panel (yfinance_universe_prices)
+#         SKIP-DOMAIN   = strategy logic is fundamentally tied to a non-equity
+#                         instrument's mechanics/doesn't fit the TradeRule contract
+#         SKIP-TEMPLATE = not a real strategy -- infrastructure/shell/tool
+#         SKIP-NOEXIT   = collected/inspected then Stage 1 screen_source() rejected
+#                         (EXCLUDE:no_exit / unconfirmed_htf / intrabar_recalc / etc.)
+#         TODO          = next to collect / not yet evaluated
+#
+SKIP-DOMAIN  lnBGmMLT-ATOM-RSI-Strategy-3Commas :: 3Commas :: DCA/grid-bot family, confirmed mechanism-level exclusion (see batch6). Not opened.
+SKIP-DOMAIN  7cAVZopZ-FIL-Grid-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  0wggzSk5-JUP-RSI-Long-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  YBB12317-POL-RSI-Long-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  dU643vz2-BCH-RSI-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  tgRchEEL-TRX-Grid-Long-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-2PA     MI47rsio-Trend-Persistence-Analysis-Framework :: AIScripts :: author already at cap (jyhTizLX, xSLyyOwI already collected). Not opened.
+SKIP-LEN     Hrc7Gfqe-McGinley-T3-Flow-Campaign-NICK789-v-1 :: NICK789 :: 731 lines -- far beyond the manual two-channel extraction workaround's practical limit. Otherwise a promising candidate (adaptive McGinley/T3 + ATR signal trail, no explicit timeframe restriction, real TP-based exits). Not collected.
+SKIP-INTRADAY 7T0JUDc6-Tomukas-Quantum-Scalper-PRO-1H-Trend-Engine :: Tomukasss :: title says "Scalper" and "1H" explicitly. Not opened further.
+SKIP-INTRADAY f4y3p5r8-New-York-VWAP-Momentum-Strategy :: Danish7421 :: VWAP-anchored + explicit "New York" session in title. Not opened further.
+SKIP-INTRADAY sk6MVZEb-Scam-or-Slam-Day-Trading-Rauf-Strategy :: MrWickTrading :: "Day Trading" explicit in title. Not opened further.
+SKIP-INTRADAY zpIyp7KB-Initial-Balance-BO-Strategy :: MIKMani :: "Initial Balance" (Market Profile first-hour range breakout) is an inherently intraday session concept. Not opened further.
+DONE         Obv27ppz-RSI-Divergence-EMA-Filter-Proozac :: Proozac98 :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see rsi_divergence_ema_filter.pine. RSI/price pivot divergence + 200-EMA trend gate, ATR trailing stop as default exit. Author's soft "5m" preference, but also says it works "in stocks and almost in any index" -- no hard restriction. 109 lines, ~12 params.
+SKIP-LEN     IoYIfKqo-Multi-MA-Slope-ADX :: hkbayram :: 361 lines. No explicit timeframe restriction and a real mechanism (selectable MA type + slope-acceleration filter + ADX trend-strength gate + ATR trailing stop), but deprioritized on size given other shorter candidates were available and the campaign is close to its 50 ceiling. Not collected.
+SKIP-LEN     0c6h7eQy-BOX-Structure-Strategy-v1-72-Stage2-BO-BD :: cm28689_monkey :: 917 lines. 1D equity chart, Weinstein-style stage-analysis box breakout/breakdown -- otherwise a plausible candidate, but far beyond the manual extraction workaround's limit. Not collected.
+SKIP-NOEXIT  nRklAGPI-3-max-drawdown-Performs-just-as-good-as-Nasdaq :: finnick1111 :: 3rd entry from this author, whose other 2 entries this campaign were both rejected on the same request.security("SYM","D",...) unconfirmed_htf pattern. Not opened, treated consistently.
+SKIP-INTRADAY bN8jxMy5-Momentum-Squeeze-Breakout-Engine :: Pridarasx :: author's own doc: "Intended Timeframe: Optimized for the 1-Hour (1H) chart." Confirmed via page text, not collected as source.
+SKIP-INTRADAY MfA2wCw6-NEFTALI-CRT-H3-Zonas-Vela-0-CHoCH :: neftalir92 :: author's own doc: "sweep of the high or low in h3 [3-hour], and then change of character in m2 [2-minute]." Both sub-daily. Confirmed via page text, not collected as source.
+SKIP-INTRADAY pb6y6oVM-BB-KC-Squeeze-Breakout :: Pedjata :: same author as batch6's rejected Reverse-BB-KC (source had "Lower TF"=1m/"Higher TF"=15m squeeze-filter defaults); same "BB/KC Squeeze" naming pattern from the same author. Not opened separately.
+SKIP-INTRADAY 9Mjjh7tc-Ombanyu-Perang-Benua :: ardani17 :: "Gold Continent War -- NY vs. Asia/London strategy session. Last hour low NY = key level." Session-based on Gold. Confirmed via page text, not collected as source.
+SKIP-LEN     ATF5bdhc-ALMA-Slope-ADX-Cross-System :: hkbayram :: same author/family as the 361-line IoYIfKqo (skipped on size); very likely similarly large. Not opened.
+DONE         IFSv46kK-Tomukas-Daily-Scale-In :: Tomukasss :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see tomukas_sweep_reclaim_scalein.pine. Internal title "Tomukas Sweep Reclaim Scale-In Strategy" -- swing-sweep + reclaim entry (EMA200 bias), up to 5 tiered scale-in adds (10/10/20/40/80% equity), fixed-% TP from average entry (always active). "The Daily timeframe is where this framework makes the most sense." 2nd/2 for author -- now at cap. 162 lines.
+SKIP-INTRADAY cQHGfHEW-10-Tech-Indexes-Score-System-Proozac :: Proozac98 :: title says "Scalping"; author's own doc: "Timeframes: 5m-15m - Sessions: London & New York overlap recommended", plus an explicit session filter. Confirmed via page text, not collected as source.
+
+# Session summary (2026-08-28): page 7 (23 entries) fully triaged. 2 admitted
+# (both ADMIT/hybrid): rsi_divergence_ema_filter (Proozac98, RSI/price pivot
+# divergence + 200-EMA gate + default ATR trailing stop), tomukas_sweep_reclaim_
+# scalein (Tomukasss, liquidity-sweep-and-reclaim entry + 5-tier scale-in + fixed-%
+# TP, 2nd/2 for author -- now at cap). 6 SKIP-DOMAIN (3Commas grid/DCA family, all
+# skipped without opening given the batch6 mechanism-level precedent) + 1 SKIP-2PA
+# (author cap). 3 SKIP-LEN (731/361/917 lines -- all otherwise plausible candidates,
+# deprioritized purely on manual-extraction cost given the campaign is close to its
+# ceiling; the 361-line one's same-author pair skipped on the same reasoning without
+# a separate visit). 3 more SKIP-NOEXIT/-INTRADAY resolved by pattern-matching
+# against already-rejected same-author/same-family scripts without opening them
+# (finnick1111's 3rd request.security-based entry, Pedjata's 2nd BB/KC-squeeze
+# entry). 8 SKIP-INTRADAY confirmed via page text or source (VWAP/session/Scalper
+# titles, explicit 5m-15m or 1H recommendations, "Initial Balance" and "H3/M2"
+# session concepts). Running total: 45 .pine files campaign-wide (was 43 at the end
+# of batch6), 5 short of the pre-registered 50 ceiling. Targeted suite: 87 passed,
+# zero regressions.

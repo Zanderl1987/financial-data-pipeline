@@ -5,7 +5,7 @@ Retail Investor Sentiment Pipeline — Stocktwits API.
 Fetches bullish/bearish sentiment data from Stocktwits' public API for a
 configurable watchlist of tickers. No API key required for basic reads.
 
-API: https://api.stocktwits.com/api/2/streams/symbols/{symbol}.json
+API: https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json
 
 Returns per-ticker:
   - Message volume (retail discussion activity)
@@ -33,7 +33,7 @@ from storage_utils import write_partitioned
 load_dotenv()
 
 OUTPUT_DIR = os.path.join("storage", "raw", "retail_sentiment")
-BASE_URL = "https://api.stocktwits.com/api/2/streams/symbols/{symbol}.json"
+BASE_URL = "https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
 REQUEST_INTERVAL = 1.5
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 60
@@ -49,10 +49,13 @@ WATCHLIST = [
 MAX_MESSAGES = 30
 
 
+HEADERS = {"User-Agent": "Mozilla/5.0"}  # bare python-requests UA gets a Cloudflare challenge page
+
+
 def _get_with_backoff(url: str) -> requests.Response | None:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            r = requests.get(url, timeout=30)
+            r = requests.get(url, headers=HEADERS, timeout=30)
             if r.status_code == 200:
                 return r
             if r.status_code == 429:

@@ -1,0 +1,92 @@
+//@version=6
+// ============================================================
+// 1) OPENING RANGE BREAKOUT (ORB)
+// The most academically validated daytrading strategy
+// (Zarattini & Aziz, SSRN 2023). Buy a break of the first
+// N-minute range high, short a break of the low. ATR or
+// range-based stop, R-multiple target, always flat by EOD.
+// Recommended chart: 5-min, ES/NQ/MES/MNQ
+// ============================================================
+strategy("1 — Opening Range Breakout (ORB)", shorttitle="ORB",
+     overlay=true, initial_capital=25000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=2.50,
+     slippage=1, margin_long=0, margin_short=0)
+
+// ── Inputs ──────────────────────────────────────────────
+orMinutes   = input.int(15, "Opening range length (minutes)", minval=1, maxval=120)
+sessionStr  = input.session("0930-1600", "Trading session")
+flatStr     = input.session("1555-1600", "Force-flat window")
+tz          = input.string("America/New_York", "Session timezone")
+useAtrStop  = input.bool(true, "ATR stop (off = opposite side of range)")
+atrLen      = input.int(14, "ATR length")
+atrMult     = input.float(1.5, "ATR stop multiple", step=0.1)
+rrMult      = input.float(2.0, "Take-profit (R multiple)", step=0.1)
+maxTrades   = input.int(2, "Max entries per day", minval=1)
+allowShorts = input.bool(true, "Allow shorts")
+
+// ── Session / opening range ─────────────────────────────
+inSession = not na(time(timeframe.period, sessionStr, tz))
+inFlat    = not na(time(timeframe.period, flatStr, tz))
+newDay    = inSession and not inSession[1]
+
+var float orHigh      = na
+var float orLow       = na
+var int   sessStart   = na
+var int   tradesToday = 0
+
+if newDay
+    orHigh      := high
+    orLow       := low
+    sessStart   := time
+    tradesToday := 0
+
+orActive = inSession and not na(sessStart) and time < sessStart + orMinutes * 60000
+if orActive and not newDay
+    orHigh := math.max(orHigh, high)
+    orLow  := math.min(orLow, low)
+
+orDone = inSession and not na(sessStart) and time >= sessStart + orMinutes * 60000
+atr = ta.atr(atrLen)
+
+// ── Entries (stop orders at range extremes) ─────────────
+justEntered = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justEntered
+    tradesToday += 1
+
+canTrade = orDone and not inFlat and tradesToday < maxTrades and strategy.position_size == 0
+if canTrade
+    strategy.entry("Long", strategy.long, stop=orHigh)
+    if allowShorts
+        strategy.entry("Short", strategy.short, stop=orLow)
+else if strategy.position_size == 0
+    strategy.cancel_all()
+
+// Once filled, cancel the opposite stop-entry so it can't reverse us
+if strategy.position_size > 0
+    strategy.cancel("Short")
+if strategy.position_size < 0
+    strategy.cancel("Long")
+
+// ── Stops / targets (frozen at entry) ───────────────────
+var float stopPrice = na
+if justEntered
+    stopPrice := strategy.position_size > 0 ?
+         (useAtrStop ? strategy.position_avg_price - atr * atrMult : orLow) :
+         (useAtrStop ? strategy.position_avg_price + atr * atrMult : orHigh)
+
+if strategy.position_size > 0
+    riskL = strategy.position_avg_price - stopPrice
+    strategy.exit("XL", "Long", stop=stopPrice, limit=strategy.position_avg_price + riskL * rrMult)
+if strategy.position_size < 0
+    riskS = stopPrice - strategy.position_avg_price
+    strategy.exit("XS", "Short", stop=stopPrice, limit=strategy.position_avg_price - riskS * rrMult)
+
+// ── End-of-day flat ─────────────────────────────────────
+if inFlat or not inSession
+    strategy.cancel_all()
+    strategy.close_all(comment="EOD flat")
+
+// ── Plots ───────────────────────────────────────────────
+plot(orDone ? orHigh : na, "OR High", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(orDone ? orLow : na,  "OR Low",  color=color.new(color.red, 0),   style=plot.style_linebr)

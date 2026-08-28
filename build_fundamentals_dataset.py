@@ -358,6 +358,24 @@ def _write_readme(snapshot_dir: str, counts: dict):
         "latest-filing-wins: the most recently filed accession per (symbol, period_end)",
         "restatement versions remain in `facts.parquet`.",
         "",
+        "## Engineering & data quality",
+        "",
+        "- **Atomic revisions**: every snapshot is pushed to HF as one commit covering all",
+        "  6 files, so a revision is never internally inconsistent (facts and the pivoted",
+        "  wide tables always come from the same build).",
+        "- **Additive-only schema**: new fields are added as nullable columns, never renamed",
+        "  or dropped, so code written against an older revision keeps working.",
+        "- **Round-trip verification**: `facts`, `financials_annual_latest`, and",
+        "  `financials_quarterly_latest` are checked for emptiness and null primary keys",
+        "  before every push, not after.",
+        "- **Latest-filing-wins dedup**: the wide tables resolve amendments/restatements by",
+        "  filing recency per (symbol, period_end); every version (including superseded",
+        "  restatements) still exists in `facts.parquet` for anyone who needs filing history",
+        "  rather than the current-best-known value.",
+        "",
+        "Full source: https://github.com/Zanderl1987/financial-data-pipeline"
+        " (`fundamentals_pipeline.py`, `curated.py`, `build_fundamentals_dataset.py`)",
+        "",
     ]
     with open(os.path.join(snapshot_dir, "README.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

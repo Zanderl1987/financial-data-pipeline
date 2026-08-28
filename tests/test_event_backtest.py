@@ -118,6 +118,29 @@ class TestEventStudy:
         assert (stopped["days_held"] <= 21).all()
         assert set(sc.trades["exit_reason"]) <= {"stop", "target", "time"}
 
+    def test_scenario_spread_and_slippage_increase_cost(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        baseline = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1)
+        costly = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                             cost_bps=10, spread_bps=20, slippage_model="sqrt_impact")
+        base_rets = baseline.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        costly_rets = costly.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        assert (costly_rets <= base_rets + 1e-9).all()
+        assert (costly_rets < base_rets).any()
+
+    def test_scenario_atr_stop_does_not_crash_and_produces_trades(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        sc = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                         atr_stop_mult=2.0)
+        assert len(sc.trades) == 4
+        assert set(sc.trades["exit_reason"]) <= {"stop", "target", "time"}
+
+    def test_scenario_metrics_include_new_risk_stats(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        sc = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1)
+        for key in ("sortino", "calmar", "var_95_pct", "max_drawdown_pct"):
+            assert key in sc.metrics
+
 
 class TestEventGenerators:
     def test_price_move_events_declusters(self, monkeypatch):

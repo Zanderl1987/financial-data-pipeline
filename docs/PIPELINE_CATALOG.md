@@ -8,7 +8,7 @@ this doc is the narrative version.
 Legend: **Key** = required `.env` variable (blank = no key needed, either a
 fully public API or a scrape). "Snapshot-only" = the source has no history
 endpoint — the table only grows if the pipeline runs regularly (see
-`EXPERT_BRIEF.md` roadmap item 2 on accumulator continuity).
+`docs/EXPERT_BRIEF.md` roadmap item 2 on accumulator continuity).
 
 ## Equity prices & market history
 
@@ -109,6 +109,7 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `tsa_pipeline.py` | `tsa_checkpoint` | Daily TSA checkpoint traveler counts — leading indicator of travel demand | — |
 | `real_estate_pipeline.py` | `fhfa_hpi`, `zillow_zhvi`, `zillow_zori` | FHFA House Price Index (national/state/MSA) + Zillow home value/rent indices | — |
 | `shipping_pipeline.py` | `shipping_gscpi`, `shipping_freight_ppi` | NY Fed Global Supply Chain Pressure Index + FRED freight PPI series | `FRED_API_KEY` |
+| `piracy_pipeline.py` | `piracy_incidents`, `somali_hijackings` | ICC IMB live-piracy-map archive (global incident geo, 2012+, year-level) + Wikipedia Somali hijacking log (2005-2024, day-level dates, ransom/status) — event-study input vs `shipping.*` costs. UKMTO ruled out (Next.js SPA + Sitecore internal API, see CLAUDE.md dead ends); EU NAVFOR news scrape is the future upgrade path for dated current narratives | — |
 
 ## Macro — global
 
@@ -133,8 +134,11 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `omkar_commodity_pipeline.py` | `omkar_commodity` | CME/NYMEX commodity futures — 30 commodities incl. lumber (100 queries/month free) | `OMKAR_API_KEY` |
 | `fao_pipeline.py` | `fao_production`, `fao_prices` | Global crop production quantities/area + producer prices (major crops: wheat, maize, rice, soy, cotton, sugar) | — |
 | `usda_pipeline.py` | `usda_crops`, `usda_fertilizers` | US crop production statistics + fertilizer prices (QuickStats API) | `USDA_NASS_API_KEY` (**currently 401ing, needs fresh key**) |
-| `usgs_minerals_pipeline.py` | `usgs_minerals` | Monthly/annual import-export volumes and production for cobalt, manganese, lithium, graphite, nickel, rare earths, silicon | — |
-| `comtrade_pipeline.py` | `comtrade_trade` | US imports/exports of battery-materials & advanced-manufacturing HS codes | `COMTRADE_API_KEY` (optional, extends history to 1988) |
+| `usgs_minerals_pipeline.py` | `usgs_minerals` | Monthly/annual import-export volumes and production for cobalt, manganese, lithium, graphite, nickel, rare earths, iron & steel, helium | — |
+| `usgs_helium_mcs_pipeline.py` | `usgs_mcs_helium` | USGS Mineral Commodity Summaries HELIUM (+ rare gases in 2026) annual data releases via ScienceBase (tidy: obs_year x series x commodity; releases 2022-2025 per-commodity items + 2026 combined release) | — |
+| `usgs_ds140_pipeline.py` | `usgs_ds140_helium` | USGS Data Series 140 helium historical statistics 1935+ (static XLSX, SHA-256-gated skip) | — |
+| `gem_trackers_pipeline.py` | `gem_coal_summary`, `gem_coal_mine_summary`, `gem_steel_summary`, `gem_cement_summary`, `gem_oilgas_summary`, `gem_lng_summary` | Global Energy Monitor tracker summary tables via public Google Sheets gviz CSV exports (6 trackers: coal plants, coal mines, iron & steel, cement, oil & gas extraction, LNG/pipelines; biannual snapshots; live page parsing with per-tab gid forwarding and fallback sheet IDs) | — |
+| `comtrade_pipeline.py` | `comtrade_trade` | US imports/exports of battery-materials & advanced-manufacturing HS codes (incl. HS 280429 helium) | `COMTRADE_API_KEY` (optional, extends history to 1988) |
 | `trade_pipeline.py` | `us_imports_hs`, `us_exports_hs` | Monthly US agricultural imports/exports by HTS chapter (cereals, oilseeds, fats/oils, feed) | `CENSUS_API_KEY` |
 | `noaa_climate_pipeline.py` | `noaa_climate` | Monthly weather summaries for US agricultural regions (NCEI GSOM) | — |
 | `open_meteo_pipeline.py` | `open_meteo_weather` | Daily weather history (temp, precip, wind, solar, degree-days) for 25 economically significant locations, batched 5-at-a-time | — |
@@ -176,7 +180,7 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 ## Known-broken / dead ends
 
 Don't re-attempt these without a genuinely new access path — see
-`CLAUDE.md` and `EXPERT_BRIEF.md` for the full reasoning:
+`CLAUDE.md` and `docs/EXPERT_BRIEF.md` for the full reasoning:
 
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything.
 - `usda_pipeline.py` — `USDA_NASS_API_KEY` returns 401 (needs a fresh key); `CENSUS_API_KEY` not set.

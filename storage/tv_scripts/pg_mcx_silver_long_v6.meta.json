@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "reindent(page_text, js_indent_array); flat text validated against DOM non-whitespace char counts per line after an initial transcription dropped 4 double-blank-line separators",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "ipuneet",
+  "tv_boosts": 9,
+  "tv_script_name": "PG MCX Silver Long V6 - MTF Momentum + Profit Trailing",
+  "tv_url": "https://www.tradingview.com/script/qHftEnad-PG-MCX-Silver-Long-V6-MTF-Momentum-Profit-Trailing/",
+  "tv_views": 239
+}

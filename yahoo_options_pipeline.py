@@ -22,6 +22,7 @@ Outputs
               date, open, high, low, close, volume, fetched_at
 
 Usage
+  python yahoo_options_pipeline.py                    # DEFAULT_SYMBOLS
   python yahoo_options_pipeline.py --symbols PLTR
   python yahoo_options_pipeline.py --symbols PLTR,AAPL,MSFT --range 2y
   python yahoo_options_pipeline.py --symbols PLTR --skip-history
@@ -60,6 +61,12 @@ _BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0
 
 TMP_DIR     = os.path.join("storage", "tmp")
 HISTORY_DIR = os.path.join("storage", "raw", "options_history")
+
+# Underlyings pulled when --symbols is omitted. These are the four already in
+# options_history -- this pipeline is deliberately NOT run over the ~505-symbol
+# broad universe, because Phase 2 fetches one request per contract and a single
+# large chain is already thousands of requests.
+DEFAULT_SYMBOLS = ["NVDA", "PLTR", "MSFT", "AAPL"]
 
 REQUEST_INTERVAL = 0.25   # seconds between requests
 MAX_RETRIES      = 3
@@ -328,10 +335,13 @@ def main():
     p = argparse.ArgumentParser(
         description="Fetch Yahoo Finance options chain and per-contract daily OHLCV history."
     )
-    src = p.add_mutually_exclusive_group(required=True)
+    src = p.add_mutually_exclusive_group()
     src.add_argument(
         "--symbols", type=str,
-        help="Comma-separated underlying tickers, e.g. PLTR,AAPL,MSFT",
+        help=(
+            "Comma-separated underlying tickers, e.g. PLTR,AAPL,MSFT. "
+            f"Default: {','.join(DEFAULT_SYMBOLS)}"
+        ),
     )
     src.add_argument(
         "--resume", type=str, metavar="CSV_PATH",
@@ -380,7 +390,8 @@ def main():
             "To capture the full available history for each contract, rerun with --range max."
         )
 
-    symbols = [s.strip().upper() for s in args.symbols.split(",")]
+    symbols = ([s.strip().upper() for s in args.symbols.split(",")]
+               if args.symbols else list(DEFAULT_SYMBOLS))
     for symbol in symbols:
         print(f"\n{'='*60}\n[{symbol}]")
 

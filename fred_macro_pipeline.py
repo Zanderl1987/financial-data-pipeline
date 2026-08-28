@@ -63,14 +63,19 @@ SERIES = {
     "MICH":            ("U Mich 1-Year Inflation Expectation",        "monthly",  "Percent",             "sentiment"),
     "MICH5Y":          ("U Mich 5-Year Inflation Expectation",        "monthly",  "Percent",             "sentiment"),
 
-    # ── Industrial Production ──────────────────────────────────────────────
+    # ── Industrial Production & ISM ─────────────────────────────────────────
     "INDPRO":          ("Industrial Production Index",                "monthly",  "Index (2017=100)",    "industrial"),
     "TCU":             ("Capacity Utilization Rate",                  "monthly",  "Percent",             "industrial"),
+    "MANEMP":          ("ISM Manufacturing Employment",               "monthly",  "Index",               "industrial"),
+    "NAPMNOI":         ("ISM New Orders Index",                       "monthly",  "Index",               "industrial"),
+    "NAPMII":          ("ISM Inventories Index",                      "monthly",  "Index",               "industrial"),
+    "RIGS":            ("Baker Hughes US Oil Rig Count",              "weekly",   "Count",               "industrial"),
 
-    # ── Retail Sales ───────────────────────────────────────────────────────
+    # ── Retail Sales & Consumer ─────────────────────────────────────────────
     "RSAFS":           ("Advance Retail Sales: Total",                "monthly",  "Millions of USD",     "consumer"),
     "RSXFS":           ("Advance Retail Sales: Ex Auto",              "monthly",  "Millions of USD",     "consumer"),
     "MRTSSM44100USS":  ("Retail Trade: Motor Vehicle & Parts Dealers","monthly",  "Millions of USD",     "consumer"),
+    "GASREGW":         ("US Regular Gasoline Price",                  "weekly",   "USD/gallon",          "consumer"),
 
     # ── Personal Income / Spending ─────────────────────────────────────────
     "PI":              ("Personal Income",                            "monthly",  "Billions of USD",     "consumer"),
@@ -83,9 +88,10 @@ SERIES = {
     "PCEPILFE":        ("PCE Price Index (Core, Ex Food & Energy)",   "monthly",  "Index (2017=100)",    "consumer"),
     "PCETRIM12M159SFRBDAL": ("Dallas Fed Trimmed Mean PCE",           "monthly",  "Percent",             "consumer"),
 
-    # ── Trade Balance ──────────────────────────────────────────────────────
+    # ── Trade Balance & Logistics ──────────────────────────────────────────
     "BOPGSTB":         ("Trade Balance: Goods & Services",            "monthly",  "Millions of USD",     "trade"),
     "BOPGTB":          ("Trade Balance: Goods",                       "monthly",  "Millions of USD",     "trade"),
+    "DBDI":            ("Baltic Dry Index",                           "daily",    "Index",               "trade"),
 
     # ── Consumer Credit ────────────────────────────────────────────────────
     "TOTALSL":         ("Total Consumer Credit",                      "monthly",  "Billions of USD",     "consumer"),

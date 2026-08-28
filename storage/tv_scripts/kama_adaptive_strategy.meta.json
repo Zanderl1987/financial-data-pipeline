@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/qgTc4zie-Kaufman-Moving-Average-Adaptive-Strategy-by-MKB/",
+  "tv_author": "muratkbesiroglu",
+  "tv_script_name": "Kaufman Moving Average Adaptive Strategy by MKB",
+  "tv_boosts": 6,
+  "tv_views": 810,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Classic Kaufman Adaptive Moving Average (KAMA, hand-computed efficiency-ratio smoothing constant) with a standard-deviation upper band; long-only entry on price crossing above KAMA+stdev band, exit on price crossing back below KAMA. Author's doc: 'the strategy works best on the daily timeframe... Designed primarily for daily charts', tested on crypto but no domain lock in the mechanism itself (pure price-derived MA). 111 lines, ~6 params."
+}

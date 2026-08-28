@@ -13,7 +13,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 import query as q
-from evaluation.universe import exchange_listed_symbols, point_in_time_eligible
+from evaluation.universe import (
+    clean_symbols, exchange_listed_symbols, flag_price_jumps, point_in_time_eligible,
+)
 
 
 class TestExchangeListedSymbols:
@@ -85,3 +87,52 @@ class TestPointInTimeEligible:
         out = point_in_time_eligible([], min_dollar_volume=1_000_000)
         assert out.empty
         assert list(out.columns) == ["symbol", "date", "eligible"]
+
+
+class TestFlagPriceJumps:
+    def _register(self, con, name, df):
+        con.register(name, df)
+        return name
+
+    def test_flags_unadjusted_split_style_jump(self):
+        con = q._con()
+        dates = pd.bdate_range("2024-01-02", periods=10)
+        # CLEAN behaves normally; JUMPY has a >3x single-day ratio (like an
+        # unadjusted split), GRADUAL drifts a lot but never jumps in one day.
+        df = pd.concat([
+            pd.DataFrame({"symbol": "CLEAN", "date": dates.strftime("%Y-%m-%d"),
+                         "close": [10 + 0.1 * i for i in range(10)]}),
+            pd.DataFrame({"symbol": "JUMPY", "date": dates.strftime("%Y-%m-%d"),
+                         "close": [10, 10.5, 11, 400, 405, 410, 415, 420, 425, 430]}),
+            pd.DataFrame({"symbol": "GRADUAL", "date": dates.strftime("%Y-%m-%d"),
+                         "close": [10 * (1.15 ** i) for i in range(10)]}),
+        ], ignore_index=True)
+        name = "test_price_jumps"
+        self._register(con, name, df)
+        try:
+            flagged = flag_price_jumps(["CLEAN", "JUMPY", "GRADUAL"], price_table=name)
+        finally:
+            con.unregister(name)
+        assert set(flagged["symbol"]) == {"JUMPY"}
+
+    def test_clean_symbols_excludes_flagged(self):
+        con = q._con()
+        dates = pd.bdate_range("2024-01-02", periods=5)
+        df = pd.concat([
+            pd.DataFrame({"symbol": "CLEAN", "date": dates.strftime("%Y-%m-%d"),
+                         "close": [10, 10.1, 10.2, 10.3, 10.4]}),
+            pd.DataFrame({"symbol": "JUMPY", "date": dates.strftime("%Y-%m-%d"),
+                         "close": [10, 10.5, 500, 505, 510]}),
+        ], ignore_index=True)
+        name = "test_clean_symbols"
+        self._register(con, name, df)
+        try:
+            out = clean_symbols(["CLEAN", "JUMPY"], price_table=name)
+        finally:
+            con.unregister(name)
+        assert out == ["CLEAN"]
+
+    def test_empty_symbols_returns_empty_frame(self):
+        out = flag_price_jumps([], price_table="prices")
+        assert out.empty
+        assert list(out.columns) == ["symbol", "max_abs_log_ret", "min_close"]

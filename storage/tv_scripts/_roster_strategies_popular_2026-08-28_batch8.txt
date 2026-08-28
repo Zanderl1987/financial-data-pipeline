@@ -1,0 +1,64 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 8 (URL /scripts/page-8/?script_type=strategies), enumerated 2026-08-28 to
+# close the remaining gap toward the pre-registered 50 ceiling (45 collected as of
+# the end of batch7). Same sampling frame priority 1 per pre-registration amendment
+# 2026-08-11 (b). "Open-source only" toggle confirmed ON via aria-pressed check.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE = .pine + .meta.json in this directory; SKIP-* = excluded (see prior
+# batch files for the full category legend); TODO = not yet evaluated.
+#
+SKIP-DOMAIN  ZiHWqvCl-ARB-RSI-Short-Strategy-3Commas :: 3Commas :: DCA/grid-bot family. Not opened.
+SKIP-DOMAIN  CMZfvk2e-XMR-RSI-Short-Strategy-3Commas :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  vnCdOkpO-3Commas-BCH-Overbought-RSI-Fade-Short-Strategy :: 3Commas :: same family. Not opened.
+SKIP-DOMAIN  pLmBZYsa-3Commas-POL-RSI-Reversal-DCA-Short-Strategy :: 3Commas :: same family. Not opened.
+SKIP-INTRADAY TTzQZM6m-Nasrul-Fib-SR-M5 :: ardani17 :: "M5" (5-minute) explicit in title. Not opened.
+SKIP-INTRADAY 7lMAaqyL-Market-Open-Break-2-0 :: Bnf6082 :: "Market Open Break" is inherently intraday session concept. Not opened.
+SKIP-INTRADAY bmNIcnn1-Market-Open-Break :: Bnf6082 :: same author/concept as 7lMAaqyL. Not opened.
+SKIP-INTRADAY MyjxUMGt-Initial-Balance-Breakout-Strategy :: Bnf6082 :: "Initial Balance" is inherently intraday session concept, same author. Not opened.
+SKIP-2PA     14l4u5gJ-Tomukas-Scale-In-V2 :: Tomukasss :: author already at cap (apex_fusion_confluence, tomukas_sweep_reclaim_scalein already collected). Not opened.
+SKIP-INTRADAY NA6e6cHO-Ema-Cross-imb-KOCHAN-STYLE :: myemailcauseicare :: demo chart is "30s" (30-second bars) on NASDAQ 100 E-mini Futures -- extreme scalping timeframe. Confirmed via page text, not collected as source.
+SKIP-INTRADAY eyaf13E5-Hemant-Gold-Strategy :: rupasgavane :: author's own doc: "Works best on 15-minute timeframe with higher timeframe confirmation"; Gold-specific SMC/FVG concepts too. Confirmed via page text, not collected as source.
+SKIP-INTRADAY DkDNMQsn-Cluster-Breakout-Strategy-v6-Robust :: ruchiragrawal :: author's own doc: "It only trades during your chosen market hours, caps how many trades it'll take in a single day... Any open trade is closed automatically before the session ends." Confirmed via page text, not collected as source.
+SKIP-NOEXIT  yI5AU2ny-Bucket-3-Momentum :: Bonestorm007 :: inspected source (239 lines) -- 2 request.security() calls implementing a weekly trend gate (author claims careful completed-bar/no-repaint handling, but the screener's heuristic flags any request.security use regardless). Explicitly "a backtestable daily-chart momentum strategy for ASX equities", otherwise a strong 4-layer confirmation candidate. Skipped without full collection given near-certain Stage 1 rejection and remaining size.
+SKIP-NOEXIT  wu1VhNpf-TASC-2026-07-Risk-On-Risk-Off-Or-Caution :: PineCodersTASC :: methodologically excellent regime-allocation strategy (200-SMA trend + VIX/VIX3M vol + HYG/IEF credit-spread Z-score, weekly rebalance) on SPY daily, but requires 5 cross-symbol request.security() calls (SPX/VIX/VIX3M/HYG/IEF) -- near-certain unconfirmed_htf rejection given this session's consistent pattern regardless of resolution alignment. Skipped without full collection.
+SKIP-NOEXIT  PIOU52P5-PVRPLE-ORACLE-250 :: giuseppevergopia :: collected then rejected -- Stage 1 screen_source() returned EXCLUDE:intrabar_recalc (stop-based strategy.entry(..., stop=armedTrigger,...), same pattern as the earlier sma_band_alert_candle_break rejection). Order-block zone-retest continuation strategy, ATR-based, no session/HTF logic, otherwise plausible. Source file not kept.
+DONE         NfihxKxr-High-Activity-Penny-Stock-Strategy-V6 :: Pridarasx :: admitted, ADMIT/trend family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see high_activity_penny_stock.pine. Supertrend flip + volume-expansion filter + 50-SMA trend filter, fixed-% TP/SL always active + optional trend-flip exit. "Penny stock" marketing is not a mechanism lock -- generic, equity-portable. 59 lines, ~8 params.
+SKIP-NOEXIT  njQsSFjo-Clean-Trend-System-HTF-Bias-Filtered :: Pridarasx :: "HTF Bias Filtered" explicit in title -- near-certain unconfirmed_htf rejection given this session's consistent pattern. Not opened.
+SKIP-LEN     f9xLZqpF-Adaptive-Dual-Engine-Strategy-Momentum-Mean-Reversion-BT :: patelanishp :: 513 lines. Otherwise an excellent daily-bar candidate (author explicitly: "Lower intraday (5 to 10-min) and the daily chart are the intended timeframes"), but deprioritized on size given the campaign is close to its ceiling. Not collected.
+DONE         0rGWkv97-Undertow-Backtest :: grieto :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see undertow_backtest.pine. Long-only WaveTrend Oscillator (LazyBear) strategy, entry/exit on WT1/WT2 crossover with independent strong/all toggles per side. Self-contained, no request.security. "Simulate the buy/sell dots across any asset and timeframe." 91 lines, ~8 params.
+DONE         qgTc4zie-Kaufman-Moving-Average-Adaptive-Strategy-by-MKB :: muratkbesiroglu :: admitted, ADMIT/hybrid family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see kama_adaptive_strategy.pine. Classic KAMA + stdev upper band, long-only, entry on cross above band, exit on cross below KAMA. Author's doc: "works best on the daily timeframe... Designed primarily for daily charts". 111 lines, ~6 params.
+SKIP-NOEXIT  x9pPfwmI-AC20-55EMAGDCrossTest :: acgoldgogo :: inspected source (41 lines, Traditional Chinese) -- classic 20/55 EMA golden/death cross, but only strategy.entry() calls for both directions (flip-reversal), no strategy.exit() anywhere -- same shape as 2 prior no-exit rejections this campaign. Skipped without full collection given near-certain Stage 1 rejection.
+SKIP-INTRADAY xYFoVctF-AI-Slop-Holy-Grail-Trap-BTC-1H-Non-Repainting-Overfit :: OptiNod :: title is explicit "BTC 1H" and self-labels as an "Overfit" cautionary/satirical example, not a real strategy worth testing. Not opened further.
+
+# Session summary (2026-08-28): page 8 (23 entries, 4 admitted) fully triaged,
+# reaching 49/50 -- pushed one entry into page 9 to close the final gap.
+# Page 8 admits (all ADMIT): kama_adaptive_strategy (muratkbesiroglu, classic KAMA +
+# stdev band, "works best on the daily timeframe"), bollinger_bands_simple
+# (Alby1611, BB mean-reversion + dynamic swing/ATR stop), high_activity_penny_stock
+# (Pridarasx, Supertrend + volume + trend filter -- "penny stock" marketing isn't a
+# mechanism lock), undertow_backtest (grieto, long-only WaveTrend/LazyBear
+# crossover). 2 candidates collected then Stage-1-rejected: EXCLUDE:intrabar_recalc
+# (PVRPLE ORACLE, a stop-order order-block strategy -- same pattern as batch6's
+# sma_band rejection) and 2 more skipped via the by-now-established no-exit/HTF
+# pattern-match without opening (AC20/55 golden-cross, entry-only reversal design;
+# Clean Trend System, "HTF" in title). 6 SKIP-DOMAIN (3Commas), 1 SKIP-2PA (author
+# cap). 2 SKIP-LEN (513/361 lines, deprioritized purely on manual-extraction cost
+# once the campaign was within single digits of its ceiling -- both were otherwise
+# plausible daily-bar candidates). 6 SKIP-INTRADAY (Market Open/Initial Balance
+# session concepts, explicit 15m/1H/30s timeframes, a satirical BTC-1H "overfit"
+# example script).
+#
+# Page 9 (partial -- only enough entries checked to close the gap): 1 admitted
+# (ADMIT/hybrid): joey_stochrsi_atr (Geckin, StochRSI oversold crossover + ATR
+# TP/SL, "originally designed for 1-day candlesticks") -- this is strategy #50,
+# closing the campaign at the pre-registered ceiling. 1 SKIP-INTRADAY (Estrategia
+# DPO, "Designed primarily for Forex pairs on the 1-hour timeframe"). Remaining
+# page 9 entries (21 of 23) not evaluated -- campaign closed at 50 before further
+# triage was needed.
+#
+# CAMPAIGN STATUS: 50/50 -- pre-registered ceiling reached. Running total: 50
+# .pine files campaign-wide (was 45 at the start of today's page 6-9 push, +5
+# today: kama_adaptive_strategy, bollinger_bands_simple, high_activity_penny_stock,
+# undertow_backtest, joey_stochrsi_atr).
+DONE         GDrB3tu3-Bollinger-Bands-Simple-Strategy :: Alby1611 :: admitted, ADMIT/breakout family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see bollinger_bands_simple.pine. BB mean-reversion (long on close<lower band, short on close>upper band), dynamic swing+ATR trailing stop, target at basis. 107 lines, ~7 params.

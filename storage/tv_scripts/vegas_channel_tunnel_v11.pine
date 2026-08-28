@@ -1,0 +1,225 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © yubinzhang802
+
+//@version=6
+// Vegas Channel / Tunnel system for Gold futures (1H) - v1.1
+// Tunnel = fast/slow EMA pair (trading channel)
+// Macro = fast/slow EMA pair (trend filter, classic 576/676 = 4x tunnel)
+// Trigger = short EMA
+// Long : price above the macro band; price AND trigger break the tunnel UPPER band,
+// then price retraces to the upper boundary WITHOUT closing back inside -> long.
+// Short: mirror image on the tunnel LOWER band.
+// v1.1 adds: (a) tuned max-return EMA defaults, (b) partial TP / breakeven / ATR trailing
+// drawdown controls, and (c) an ADX + macro-slope regime filter that stands aside
+// from counter-trend setups in strong trends and lets with-trend winners ride.
+strategy('Vegas Channel Tunnel Strategy v1.1', shorttitle = 'Vegas Tunnel v1.1', overlay = true, margin_long = 0, margin_short = 0, default_qty_type = strategy.fixed, default_qty_value = 1, initial_capital = 100000, pyramiding = 0, calc_on_every_tick = false, commission_type = strategy.commission.cash_per_order, commission_value = 4.0, slippage = 1)
+
+// ---------------------------------------------------------------- Inputs: EMAs (tuned defaults)
+grpEma = 'EMA Lengths'
+len12 = input.int(8, 'Trigger EMA', minval = 1, group = grpEma, tooltip = 'Fast trigger that must break the tunnel with price. Classic Vegas = 12; 8 tested marginally stronger.')
+len144 = input.int(55, 'Tunnel fast EMA', minval = 1, group = grpEma, tooltip = 'Fast leg of the trading tunnel. Classic Vegas = 144 (12^2); 55 tested as the max-return variant.')
+len169 = input.int(89, 'Tunnel slow EMA', minval = 1, group = grpEma, tooltip = 'Slow leg of the trading tunnel. Classic Vegas = 169 (13^2); 89 tested as the max-return variant.')
+len576 = input.int(576, 'Macro fast EMA', minval = 1, group = grpEma, tooltip = 'Fast leg of the macro trend band. Classic Vegas = 576 (144*4) - tested optimal, keep it.')
+len676 = input.int(676, 'Macro slow EMA', minval = 1, group = grpEma, tooltip = 'Slow leg of the macro trend band. Classic Vegas = 676 (169*4) - tested optimal, keep it.')
+
+grpSig = 'Signal Logic'
+useMacroFilter = input.bool(true, 'Require macro trend filter', group = grpSig)
+retraceTol = input.float(0.0, 'Retrace tolerance (ATR mult)', minval = 0.0, step = 0.05, group = grpSig, tooltip = 'How close price must get to the tunnel boundary to count as a retrace touch. 0 = must wick into the boundary.')
+
+grpRisk = 'Risk Management'
+rrRatio = input.float(3.0, 'Risk : Reward', minval = 0.1, step = 0.1, group = grpRisk)
+slMethod = input.string('ATR', 'Stop-loss method', options = ['Tunnel', 'ATR'], group = grpRisk, tooltip = 'Tunnel: stop just beyond the opposite tunnel band. ATR: stop at entry -/+ ATR*mult.')
+atrLen = input.int(14, 'ATR length', minval = 1, group = grpRisk)
+atrSlMult = input.float(2.0, 'ATR stop multiplier', minval = 0.1, step = 0.1, group = grpRisk)
+tunnelBuf = input.float(0.25, 'Tunnel stop buffer (ATR mult)', minval = 0.0, step = 0.05, group = grpRisk, tooltip = 'Extra ATR-based buffer beyond the opposite tunnel band when using the Tunnel stop.')
+
+// ---------------------------------------------------------------- Inputs: Trade management (b)
+grpMgmt = 'Trade Management'
+usePartial = input.bool(true, 'Scale out at TP1', group = grpMgmt, tooltip = 'Close part of the position at a first target, let the rest run to the full RR target. Disabled automatically on with-trend \'ride\' trades.')
+scaleOutPct = input.float(50.0, 'TP1 scale-out %', minval = 1.0, maxval = 99.0, step = 5.0, group = grpMgmt)
+tp1R = input.float(1.5, 'TP1 distance (R multiple)', minval = 0.1, step = 0.1, group = grpMgmt, tooltip = 'First target as a multiple of the initial risk (R). Should be < Risk:Reward.')
+useBreakeven = input.bool(true, 'Move stop to breakeven after TP1', group = grpMgmt)
+useTrail = input.bool(true, 'ATR trailing stop after TP1', group = grpMgmt)
+trailAtrMult = input.float(3.0, 'Trailing stop (ATR mult)', minval = 0.1, step = 0.1, group = grpMgmt)
+barsCooldown = input.int(0, 'Cooldown bars after a trade closes', minval = 0, group = grpMgmt, tooltip = 'Minimum bars to wait after a position closes before a new entry is allowed. 0 = off (recommended — testing showed the \'800+ trades\' are a scale-out accounting artifact, not overtrading, so a cooldown mostly removes good trades and lowers returns).')
+
+// ---------------------------------------------------------------- Inputs: Regime filter (c)
+grpReg = 'Regime Filter'
+regimeFilter = input.bool(true, 'Enable regime filter', group = grpReg, tooltip = 'Uses ADX + macro slope. In strong trends: skip counter-trend setups and let with-trend winners RIDE (no fixed cap) to capture the whole move.')
+adxLen = input.int(14, 'ADX length', minval = 1, group = grpReg)
+adxTh = input.float(25.0, 'Strong-trend ADX threshold', minval = 1.0, step = 1.0, group = grpReg)
+slopeLen = input.int(20, 'Macro slope lookback', minval = 1, group = grpReg)
+showRegime = input.bool(true, 'Shade strong-trend regime', group = grpReg)
+
+grpViz = 'Visuals'
+showEmas = input.bool(true, 'Plot EMAs', group = grpViz)
+showTunnel = input.bool(true, 'Shade tunnel & macro band', group = grpViz)
+
+// ---------------------------------------------------------------- EMAs
+ema12 = ta.ema(close, len12)
+ema144 = ta.ema(close, len144)
+ema169 = ta.ema(close, len169)
+ema576 = ta.ema(close, len576)
+ema676 = ta.ema(close, len676)
+
+tunnelUpper = math.max(ema144, ema169)
+tunnelLower = math.min(ema144, ema169)
+macroUpper = math.max(ema576, ema676)
+macroLower = math.min(ema576, ema676)
+
+atr = ta.atr(atrLen)
+tol = retraceTol * atr
+
+// ---------------------------------------------------------------- Regime (c)
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+macroRising = ema576 > ema576[slopeLen]
+strongTrend = adxVal >= adxTh
+strongUp = strongTrend and macroRising
+strongDown = strongTrend and not macroRising
+
+// Stand aside from counter-trend setups when a strong trend is running.
+allowLong = not regimeFilter or not strongDown
+allowShort = not regimeFilter or not strongUp
+
+// ---------------------------------------------------------------- Signal conditions
+trendUp = not useMacroFilter or close > macroUpper
+trendDown = not useMacroFilter or close < macroLower
+
+brokeUp = close > tunnelUpper and ema12 > tunnelUpper
+brokeDown = close < tunnelLower and ema12 < tunnelLower
+
+var int longState = 0
+var int shortState = 0
+
+longRetrace = longState == 1 and low <= tunnelUpper + tol and close > tunnelUpper and trendUp
+shortRebound = shortState == 1 and high >= tunnelLower - tol and close < tunnelLower and trendDown
+
+if longRetrace
+    longState := 0
+    longState
+if shortRebound
+    shortState := 0
+    shortState
+
+if longState == 1 and (not trendUp or close < tunnelUpper)
+    longState := 0
+    longState
+if shortState == 1 and (not trendDown or close > tunnelLower)
+    shortState := 0
+    shortState
+
+if trendUp and brokeUp
+    longState := 1
+    longState
+if trendDown and brokeDown
+    shortState := 1
+    shortState
+
+// ---------------------------------------------------------------- Per-trade state
+var float eRef = na
+var float rDist = na
+var int eDir = 0
+var bool tp1Hit = false
+var bool ride = false
+var float rStop = na
+
+qty = math.max(1, math.floor(strategy.default_entry_qty(close / syminfo.pointvalue)))
+
+// Cooldown: block new entries for a number of bars after the position goes flat.
+// Sentinel start (large negative) so the very first entry is always allowed.
+var int lastFlatBar = -100000
+if strategy.position_size == 0 and nz(strategy.position_size[1], 0) != 0
+    lastFlatBar := bar_index
+    lastFlatBar
+cooldownOk = barsCooldown == 0 or bar_index - lastFlatBar >= barsCooldown
+
+// ---------------------------------------------------------------- Entries
+if longRetrace and allowLong and cooldownOk and strategy.position_size <= 0
+    slp = slMethod == 'ATR' ? close - atr * atrSlMult : tunnelLower - atr * tunnelBuf
+    risk = close - slp
+    if risk > 0
+        eRef := close
+        rDist := risk
+        eDir := 1
+        tp1Hit := false
+        rStop := slp
+        ride := regimeFilter and strongUp
+        strategy.entry('Long', strategy.long, qty = qty)
+
+if shortRebound and allowShort and cooldownOk and strategy.position_size >= 0
+    slp = slMethod == 'ATR' ? close + atr * atrSlMult : tunnelUpper + atr * tunnelBuf
+    risk = slp - close
+    if risk > 0
+        eRef := close
+        rDist := risk
+        eDir := -1
+        tp1Hit := false
+        rStop := slp
+        ride := regimeFilter and strongDown
+        strategy.entry('Short', strategy.short, qty = qty)
+
+// ---------------------------------------------------------------- Exits / trade management (b + c)
+// 'ride' trades (with-trend in a strong regime) run the full position on a trailing stop with
+// no fixed target so they can capture the whole trend leg; everyone else scales out + caps at RR.
+doPartial = usePartial and not ride
+trailEff = useTrail or ride
+
+if strategy.position_size > 0 and eDir == 1
+    tp1L = eRef + tp1R * rDist
+    finalL = eRef + rrRatio * rDist
+    if high >= tp1L
+        tp1Hit := true
+        tp1Hit
+    if useBreakeven and tp1Hit
+        rStop := math.max(rStop, eRef)
+        rStop
+    if trailEff and tp1Hit
+        rStop := math.max(rStop, close - atr * trailAtrMult)
+        rStop
+    if doPartial
+        strategy.exit('L Scale', from_entry = 'Long', qty_percent = scaleOutPct, limit = tp1L, stop = rStop)
+        strategy.exit('L Run', from_entry = 'Long', limit = finalL, stop = rStop)
+    else if ride
+        strategy.exit('L Run', from_entry = 'Long', stop = rStop)
+    else
+        strategy.exit('L Run', from_entry = 'Long', limit = finalL, stop = rStop)
+
+if strategy.position_size < 0 and eDir == -1
+    tp1S = eRef - tp1R * rDist
+    finalS = eRef - rrRatio * rDist
+    if low <= tp1S
+        tp1Hit := true
+        tp1Hit
+    if useBreakeven and tp1Hit
+        rStop := math.min(rStop, eRef)
+        rStop
+    if trailEff and tp1Hit
+        rStop := math.min(rStop, close + atr * trailAtrMult)
+        rStop
+    if doPartial
+        strategy.exit('S Scale', from_entry = 'Short', qty_percent = scaleOutPct, limit = tp1S, stop = rStop)
+        strategy.exit('S Run', from_entry = 'Short', limit = finalS, stop = rStop)
+    else if ride
+        strategy.exit('S Run', from_entry = 'Short', stop = rStop)
+    else
+        strategy.exit('S Run', from_entry = 'Short', limit = finalS, stop = rStop)
+
+// ---------------------------------------------------------------- Plots
+plot(showEmas ? ema12 : na, 'Trigger EMA', color = color.new(color.yellow, 0), linewidth = 1)
+p144 = plot(showEmas ? ema144 : na, 'Tunnel fast', color = color.new(color.aqua, 0), linewidth = 1)
+p169 = plot(showEmas ? ema169 : na, 'Tunnel slow', color = color.new(color.blue, 0), linewidth = 1)
+p576 = plot(showEmas ? ema576 : na, 'Macro fast', color = color.new(color.orange, 0), linewidth = 2)
+p676 = plot(showEmas ? ema676 : na, 'Macro slow', color = color.new(color.red, 0), linewidth = 2)
+
+fill(p144, p169, color = showTunnel ? color.new(color.blue, 80) : na, title = 'Tunnel band')
+fill(p576, p676, color = showTunnel ? color.new(color.orange, 85) : na, title = 'Macro band')
+
+bgcolor(showRegime and regimeFilter and strongUp ? color.new(color.green, 90) : na, title = 'Strong up-trend')
+bgcolor(showRegime and regimeFilter and strongDown ? color.new(color.red, 90) : na, title = 'Strong down-trend')
+
+plotshape(longRetrace and allowLong, 'Long entry', shape.triangleup, location.belowbar, color.new(color.green, 0), text = 'L', textcolor = color.white, size = size.tiny)
+plotshape(shortRebound and allowShort, 'Short entry', shape.triangledown, location.abovebar, color.new(color.red, 0), text = 'S', textcolor = color.white, size = size.tiny)
+
+// ---------------------------------------------------------------- Alerts
+alertcondition(longRetrace and allowLong, 'Vegas v1.1 Long Entry', 'Vegas tunnel long entry (upper-band retrace hold)')
+alertcondition(shortRebound and allowShort, 'Vegas v1.1 Short Entry', 'Vegas tunnel short entry (lower-band rebound rejection)')

@@ -7,6 +7,7 @@ No real network calls: HfApi/login are replaced with no-op doubles.
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -16,15 +17,32 @@ sys.path.insert(0, REPO_ROOT)
 import upload_huggingface
 
 
-class _FakeApi:
-    def __init__(self, *args, **kwargs):
-        pass
+def _fake_api(existing_private=True, settings_calls=None):
+    """
+    Build an HfApi double. `existing_private` is the visibility the repo
+    already has on the hub -- create_repo(exist_ok=True) silently ignores its
+    `private` argument on a repo that already exists, so main() has to read
+    the current setting back and correct it.
+    """
 
-    def create_repo(self, *args, **kwargs):
-        pass
+    class _FakeApi:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    def upload_folder(self, *args, **kwargs):
-        pass
+        def create_repo(self, *args, **kwargs):
+            pass
+
+        def dataset_info(self, repo_id):
+            return SimpleNamespace(private=existing_private)
+
+        def update_repo_settings(self, **kwargs):
+            if settings_calls is not None:
+                settings_calls.append(kwargs)
+
+        def upload_folder(self, *args, **kwargs):
+            pass
+
+    return _FakeApi
 
 
 class _AssertNotCalledApi:
@@ -35,6 +53,14 @@ class _AssertNotCalledApi:
 
     def create_repo(self, *args, **kwargs):
         raise AssertionError("create_repo should not be called when there are no parquet files")
+
+    def dataset_info(self, *args, **kwargs):
+        raise AssertionError("dataset_info should not be called when there are no parquet files")
+
+    def update_repo_settings(self, *args, **kwargs):
+        raise AssertionError(
+            "update_repo_settings should not be called when there are no parquet files"
+        )
 
     def upload_folder(self, *args, **kwargs):
         raise AssertionError("upload_folder should not be called when there are no parquet files")
@@ -55,8 +81,9 @@ def test_main_returns_stats_dict(tmp_path, monkeypatch):
     }))
 
     monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
-    monkeypatch.setattr(upload_huggingface, "HfApi", _FakeApi)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
     monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
     monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
 
     result = upload_huggingface.main(repo_name="test-repo", private=True)
@@ -66,6 +93,51 @@ def test_main_returns_stats_dict(tmp_path, monkeypatch):
     assert result["rows"] == 3  # 2 prices rows + 1 macro row
     assert result["size_mb"] > 0
     assert set(result["files"]) == {"prices/prices.parquet", "macro/macro.parquet"}
+
+
+def test_private_is_enforced_on_an_already_public_repo(tmp_path, monkeypatch):
+    """
+    The 2026-08-10 incident: create_repo(private=True, exist_ok=True) against an
+    existing PUBLIC repo no-ops on `private`, so the run printed "private=True"
+    and published publicly anyway. main() must correct the visibility, and must
+    do it before any upload.
+    """
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    calls = []
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        upload_huggingface, "HfApi",
+        _fake_api(existing_private=False, settings_calls=calls),
+    )
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert calls, "an already-public repo was left public despite private=True"
+    assert calls[0]["private"] is True
+    assert calls[0]["repo_type"] == "dataset"
+
+
+def test_matching_visibility_is_left_alone(tmp_path, monkeypatch):
+    """No settings write when the repo already has the requested visibility."""
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    calls = []
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        upload_huggingface, "HfApi",
+        _fake_api(existing_private=True, settings_calls=calls),
+    )
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(upload_huggingface, "remote_row_counts", lambda repo_id, token: {})
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert calls == []
 
 
 def test_main_returns_none_without_token(tmp_path, monkeypatch):
@@ -93,3 +165,70 @@ def test_main_returns_none_when_curated_folder_has_no_parquet_files(tmp_path, mo
     result = upload_huggingface.main(repo_name="test-repo", private=True)
 
     assert result is None
+
+
+def test_publish_blocked_when_a_table_would_regress(tmp_path, monkeypatch):
+    """
+    The 2026-08-10 vessels incident: a stale local snapshot published over
+    fresher remote data, dropping one table's row count 56% while the rising
+    aggregate total masked it. main() must compare per-table and refuse to
+    publish (no upload_folder call) unless --force is passed.
+    """
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    class _FailIfUploaded(_fake_api(existing_private=True)):
+        def upload_folder(self, *args, **kwargs):
+            raise AssertionError("upload_folder should not be called when a table regressed")
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _FailIfUploaded)
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 100},  # remote has 100 rows, local only has 1
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert result is None
+
+
+def test_publish_proceeds_with_force_despite_regression(tmp_path, monkeypatch):
+    """--force overrides the regression guard for an expected shrink."""
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({"symbol": ["AAPL"], "close": [1.0]}))
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 100},
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True, force=True)
+
+    assert result is not None
+    assert result["rows"] == 1
+
+
+def test_publish_proceeds_when_no_table_regresses(tmp_path, monkeypatch):
+    """A table missing from the remote (brand new) or growing is not a regression."""
+    _write_fake_table(tmp_path, "prices", pd.DataFrame({
+        "symbol": ["AAPL", "MSFT"], "close": [1.0, 2.0],
+    }))
+
+    monkeypatch.setattr(upload_huggingface, "STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(upload_huggingface, "HfApi", _fake_api(existing_private=True))
+    monkeypatch.setattr(upload_huggingface, "login", lambda token: None)
+    monkeypatch.setattr(
+        upload_huggingface, "remote_row_counts",
+        lambda repo_id, token: {"prices": 1},  # local grew from 1 -> 2, not a regression
+    )
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+
+    result = upload_huggingface.main(repo_name="test-repo", private=True)
+
+    assert result is not None
+    assert result["rows"] == 2

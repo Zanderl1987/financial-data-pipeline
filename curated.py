@@ -70,6 +70,42 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
         ).dt.strftime("%Y-%m-%d")
     return df
 
+
+# Tables whose snapshot_date was introduced after data had already accumulated.
+# Raw parquet is append-only history and never gets rewritten, so those earlier
+# files stay on the old schema forever. Derive the column from fetched_at when
+# it is missing, otherwise _dedup_subset() would see an incomplete key on every
+# rebuild and silently drop back to full-row dedup for the whole table.
+_SNAPSHOT_DATE_FROM_FETCHED_AT = {"schwab_options"}
+
+
+def _backfill_snapshot_date(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fill snapshot_date from fetched_at for rows written before the column existed.
+
+    Safe for the schwab_options backfill specifically: every pre-existing
+    snapshot was taken by the 09:00 ET scheduled job (13:00 UTC), so the UTC
+    date and the market date are the same day. That equivalence does NOT hold
+    in general -- a post-20:00 ET fetch is already tomorrow in UTC -- which is
+    why the pipeline stamps market time at write time rather than relying on
+    this. This only ever repairs history that is already on disk.
+    """
+    if table not in _SNAPSHOT_DATE_FROM_FETCHED_AT or "fetched_at" not in df.columns:
+        return df
+    if "snapshot_date" in df.columns and df["snapshot_date"].notna().all():
+        return df
+
+    df = df.copy()
+    derived = pd.to_datetime(
+        df["fetched_at"], errors="coerce", format="mixed"
+    ).dt.strftime("%Y-%m-%d")
+    if "snapshot_date" in df.columns:
+        df["snapshot_date"] = df["snapshot_date"].fillna(derived)
+    else:
+        df["snapshot_date"] = derived
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Natural-key registry
 # ---------------------------------------------------------------------------
@@ -81,6 +117,10 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
 KEYS: dict[str, list[str]] = {
     # Fed SOMA holdings — one row per security per weekly report
     "fed_soma":               ["as_of_date", "cusip"],
+    # USDA NASS — one value per commodity/series/date/period, some series
+    # further split by sub-domain (e.g. corn-for-fuel-alcohol dry vs wet mill)
+    "usda_crops":             ["commodity", "description", "date", "period", "domaincat_desc"],
+    "usda_fertilizers":       ["commodity", "description", "date", "period", "domaincat_desc"],
     # Equity / ETF prices — one bar per symbol per day
     "prices":                 ["symbol", "date"],
     "tiingo_prices":          ["symbol", "date"],
@@ -127,6 +167,13 @@ KEYS: dict[str, list[str]] = {
     # rather than doing a snapshot-aware Iceberg read; needs dedup like everything else)
     "shipping_gscpi":         ["date"],
     "shipping_freight_ppi":   ["date", "series_id"],
+    # Piracy incidents. IMB markers reappear on multiple year-maps; incident_id
+    # ("004-24" or "marker_<id>") collapses cross-map duplicates within a
+    # snapshot. Wikipedia rows are keyed positionally within their year section:
+    # same-ship repeat attacks in one year stay distinct, and any mid-list edit
+    # by editors simply re-dedupes to the newest snapshot.
+    "piracy_incidents":        ["incident_id"],
+    "somali_hijackings":       ["section_year", "row_num"],
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],
@@ -144,8 +191,29 @@ KEYS: dict[str, list[str]] = {
     # EIA refinery activity / crude trade
     "eia_refinery_activity":  ["series_id", "date"],
     "eia_crude_trade":        ["series_id", "date"],
+    # USGS helium tables. MCS releases restate earlier stat years (the 2023
+    # release re-covers 2018-2022), so the newest fetched snapshot per key
+    # wins; country is part of the key because world production/reserves rows
+    # differ only by it.
+    "usgs_mcs_helium":         ["obs_year", "series", "commodity", "country"],
+    "usgs_ds140_helium":       ["obs_year", "metric"],
+    # GEM biannual releases restate the same by-year/by-stage series; newest
+    # fetch wins per sheet/indicator/row/column.
+    "gem_coal_summary":        ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_coal_mine_summary":   ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_steel_summary":       ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_cement_summary":      ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_oilgas_summary":      ["tracker_sheet", "indicator", "country_or_region", "column_label"],
+    "gem_lng_summary":         ["tracker_sheet", "indicator", "country_or_region", "column_label"],
     # TSA checkpoint travel volumes
     "tsa_checkpoint":         ["date"],
+    # Daily weather — one observation per location per day. Without this entry
+    # the table fell back to full-row dedup, which only drops byte-identical
+    # re-fetches: the 2-year incremental window re-pulls the same days every
+    # run, and Open-Meteo revises recent values (ERA5T preliminary data is
+    # restated within ~5 days), so a revised day survived as a second row.
+    # Found 2026-08-09 (2026-08-02 held 50 rows for 25 locations).
+    "open_meteo_weather":     ["location", "date"],
     "fred_macro_housing":     ['series_id', 'date'],
     "fred_macro_sentiment":   ['series_id', 'date'],
     "fred_macro_industrial":  ['series_id', 'date'],
@@ -161,6 +229,7 @@ KEYS: dict[str, list[str]] = {
     "fred_rates_gdp_markets":         ['series_id', 'date'],
     "fred_rates_gdp_federal_debt":    ['series_id', 'date'],
     "fred_rates_gdp_labor":           ['series_id', 'date'],
+    "shiller_cape":                   ['date'],
     "alpha_vantage_overview":              ['Symbol', 'fetched_at'],
     "alpha_vantage_income_statement":      ['ticker', 'fiscalDateEnding', 'report_type'],
     "alpha_vantage_balance_sheet":         ['ticker', 'fiscalDateEnding', 'report_type'],
@@ -203,8 +272,12 @@ KEYS: dict[str, list[str]] = {
     "eia_natural_gas_production":   ['date', 'series_code'],
     "eia_lng_flows":                ['date', 'region_code'],
     "eia_hourly_grid":              ['region_code', 'metric_type', 'timestamp_utc'],
+    "defillama_protocols":            ['protocol_id', 'fetched_at'],
+    "defillama_fees":                 ['protocol_id', 'fetched_at'],
+    "defillama_stablecoins":          ['stablecoin_id', 'fetched_at'],
     "finnhub_esg":                    ['symbol', 'fetched_at'],
-    "finnhub_congressional_trading":  ['symbol', 'member_name', 'transaction_date', 'asset_description', 'amount'],
+    # Unwired 2026-08-28: free-tier 403, superseded by congressional_trades
+    # "finnhub_congressional_trading":  ['symbol', 'member_name', 'transaction_date', 'asset_description', 'amount'],
     "finnhub_supply_chain":           ['symbol', 'side', 'fetched_at'],
     "finnhub_insider_sentiment":      ['symbol', 'obs_year', 'obs_month'],
     "finnhub_social_sentiment":       ['symbol', 'timestamp'],
@@ -231,6 +304,13 @@ KEYS: dict[str, list[str]] = {
     "tiingo_fundamentals_daily":       ['symbol', 'date'],
     "tiingo_fundamentals_statements":  ['symbol', 'date', 'statement_type', 'data_code', 'as_reported'],
     "treasury_debt_to_penny":          ['record_date'],
+    "usaspending_award_counts":        ['window_start', 'award_type_code'],
+    "usaspending_top_awards":          ['award_id'],
+    "lda_lobbying_filings":            ['filing_uuid'],
+    # Congressional PTRs: (chamber, doc_id, row_index) is an exact key --
+    # a filing can legitimately repeat the same ticker/date/amount twice.
+    "congressional_trades":            ['chamber', 'doc_id', 'row_index'],
+    "treasury_yield_curve":            ['date'],
     "treasury_avg_interest_rates":     ['record_date', 'security_desc'],
     "treasury_interest_expense":       ['record_date', 'expense_catg_desc', 'expense_type_desc'],
     "treasury_auctions_detail":        ['cusip', 'auction_date'],
@@ -252,6 +332,28 @@ KEYS: dict[str, list[str]] = {
     "indeed_job_postings_national":    ['date', 'variable'],
     "indeed_job_postings_sector":      ['date', 'sector', 'variable'],
     "indeed_job_postings_state":       ['date', 'state'],
+    # Schwab serves NO options history -- this table's entire history exists
+    # because the daily job appends one snapshot per session, so snapshot_date
+    # is not decoration, it is what makes each day a distinct fact. Without it
+    # in the key the four contract identifiers alone would collapse every day
+    # ever captured into a single row per contract.
+    #
+    # Before 2026-08-11 there was no key here at all and the full-row fallback
+    # was carrying this table. It worked -- verified zero collapsed contracts
+    # across the 7 snapshots taken 08-02..08-08 -- but only because
+    # days_to_expiration and the quote fields happen to move daily. That is an
+    # accident, not a guarantee, and the fallback path is also unsupported by
+    # _compact_large_table(), which this table will need: ~93k rows/day is
+    # ~23M/year. Keyed now, while it is small enough that the transition is free.
+    "schwab_options":                  ['symbol', 'expiration_date', 'strike',
+                                        'put_call', 'snapshot_date'],
+    # Every run re-downloads CFPB's full current snapshot (~17M rows), so
+    # complaint_id alone is the natural key -- _sort_recency keeps the
+    # newest fetched_at version of a complaint if its status/response fields
+    # changed between runs. In _LARGE_TABLES from the start (unlike
+    # schwab_options above): this is already far past the ~23M/year
+    # threshold that forced that table's transition.
+    "cfpb_complaints":                 ['complaint_id'],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw
@@ -272,7 +374,7 @@ def _curated_path(table: str) -> str:
 # materializing + drop_duplicates-ing the whole thing in memory every run --
 # minutes of dead time on every `curated.py` invocation, not just the rare
 # full-backfill case `prices` was added for.
-_LARGE_TABLES = {"prices", "fed_soma"}
+_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints"}
 
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
@@ -363,6 +465,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _normalize_period_end(table, df)
+    df = _backfill_snapshot_date(table, df)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)

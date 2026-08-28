@@ -1,0 +1,129 @@
+//@version=6
+// POLYMR desk signal — Supertrend trigger + MACD confirm + 1H EMA regime
+// Wire alert to: https://<your-funnel-host>/tv
+// Strategy IDs must match runtime.coinbase.yaml allowlist (e.g. btc_trusted_v1).
+strategy(
+     title             = "POLYMR Supertrend+MACD v1",
+     shorttitle        = "POLYMR ST+MACD",
+     overlay           = true,
+     pyramiding        = 0,
+     process_orders_on_close = true,
+     calc_on_every_tick = false,
+     initial_capital   = 150,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 10,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.1
+ )
+
+// ── Desk / webhook fields ───────────────────────────────────────────
+string i_secret     = input.string("", "TV_WEBHOOK_SECRET", group = "POLYMR webhook", tooltip = "Paste from ~/poly-bot/data/coinbase/TV_WEBHOOK_SECRET.local — never commit charts with this saved publicly.")
+string i_symbol     = input.string("BTCUSDT", "Alert symbol", group = "POLYMR webhook")
+string i_asset      = input.string("crypto", "asset_class", group = "POLYMR webhook")
+string i_strategy   = input.string("btc_trusted_v1", "strategy id", group = "POLYMR webhook")
+float  i_confidence = input.float(0.75, "confidence", minval = 0.0, maxval = 1.0, step = 0.01, group = "POLYMR webhook")
+string i_timeframe  = input.string("15", "timeframe label", group = "POLYMR webhook", tooltip = "Must match chart TF allowlist (use 15 on a 15m chart).")
+
+// ── Supertrend ──────────────────────────────────────────────────────
+int   i_atrLen   = input.int(10, "ATR Period", minval = 1, group = "Supertrend")
+float i_atrMult  = input.float(3.0, "ATR Multiplier", minval = 0.1, step = 0.1, group = "Supertrend")
+bool  i_changeATR = input.bool(true, "Use RMA ATR (vs SMA TR)", group = "Supertrend")
+src = input.source(hl2, "Supertrend source", group = "Supertrend")
+
+// ── MACD confirm ────────────────────────────────────────────────────
+bool  i_useMacd   = input.bool(true, "Require MACD hist confirm", group = "MACD confirm")
+int   i_fast      = input.int(12, "Fast length", minval = 1, group = "MACD confirm")
+int   i_slow      = input.int(26, "Slow length", minval = 1, group = "MACD confirm")
+int   i_sig       = input.int(9, "Signal length", minval = 1, group = "MACD confirm")
+bool  i_macdFlip  = input.bool(false, "Require hist zero-line flip (stricter)", group = "MACD confirm")
+
+// ── 1H regime filter ────────────────────────────────────────────────
+bool i_useHtf   = input.bool(true, "Require 1H EMA regime", group = "1H regime")
+int  i_emaFast  = input.int(21, "1H EMA fast", minval = 1, group = "1H regime")
+int  i_emaSlow  = input.int(50, "1H EMA slow", minval = 1, group = "1H regime")
+string i_htf    = input.timeframe("60", "Higher timeframe", group = "1H regime")
+
+// ── Supertrend core (ported from your v4 script) ────────────────────
+float atr2 = ta.sma(ta.tr(true), i_atrLen)
+float atr  = i_changeATR ? ta.atr(i_atrLen) : atr2
+float up   = src - i_atrMult * atr
+float dn   = src + i_atrMult * atr
+float up1  = nz(up[1], up)
+float dn1  = nz(dn[1], dn)
+up := close[1] > up1 ? math.max(up, up1) : up
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+
+var int trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+bool stBuy  = trend == 1 and trend[1] == -1
+bool stSell = trend == -1 and trend[1] == 1
+
+plot(trend == 1 ? up : na, "ST Up", color.green, 2, plot.style_linebr)
+plot(trend == -1 ? dn : na, "ST Down", color.red, 2, plot.style_linebr)
+plotshape(stBuy,  "ST Buy raw",  shape.circle, location.belowbar, color.green, size = size.tiny)
+plotshape(stSell, "ST Sell raw", shape.circle, location.abovebar, color.red, size = size.tiny)
+
+// ── MACD ────────────────────────────────────────────────────────────
+float maFast = ta.ema(close, i_fast)
+float maSlow = ta.ema(close, i_slow)
+float macd   = maFast - maSlow
+float signal = ta.ema(macd, i_sig)
+float hist   = macd - signal
+
+bool macdBuyOk  = not i_useMacd or (i_macdFlip ? (hist[1] <= 0 and hist > 0) : (hist > 0 and hist >= hist[1]))
+bool macdSellOk = not i_useMacd or (i_macdFlip ? (hist[1] >= 0 and hist < 0) : (hist < 0 and hist <= hist[1]))
+
+// ── 1H EMA regime ───────────────────────────────────────────────────
+float htfEmaF = request.security(syminfo.tickerid, i_htf, ta.ema(close, i_emaFast), barmerge.gaps_off, barmerge.lookahead_off)
+float htfEmaS = request.security(syminfo.tickerid, i_htf, ta.ema(close, i_emaSlow), barmerge.gaps_off, barmerge.lookahead_off)
+bool  regimeUp   = htfEmaF > htfEmaS
+bool  regimeDown = htfEmaF < htfEmaS
+bool  htfBuyOk   = not i_useHtf or regimeUp
+bool  htfSellOk  = not i_useHtf or regimeDown
+
+plot(i_useHtf ? htfEmaF : na, "1H EMA fast", color.new(color.teal, 30), 1)
+plot(i_useHtf ? htfEmaS : na, "1H EMA slow", color.new(color.orange, 30), 1)
+
+// ── Combined entries (spot: sell = flatten) ──────────────────────────
+bool longSignal  = stBuy and macdBuyOk and htfBuyOk
+bool shortSignal = stSell and macdSellOk and htfSellOk   // used as exit / flat for spot desk
+
+plotshape(longSignal,  "POLYMR Buy",  shape.labelup,   location.belowbar, color.green, text = "BUY",  textcolor = color.white, size = size.small)
+plotshape(shortSignal, "POLYMR Sell", shape.labeldown, location.abovebar, color.red,   text = "SELL", textcolor = color.white, size = size.small)
+
+if longSignal
+    strategy.entry("Long", strategy.long)
+if shortSignal
+    strategy.close("Long")
+
+// ATR% for bot sizing
+float atrPct = close > 0 ? ta.atr(14) / close : na
+string regimeStr = regimeUp ? "trend_up" : regimeDown ? "trend_down" : "range"
+
+f_alertJson(string action, int confirm) =>
+    string atrPart = na(atrPct) ? "null" : str.tostring(atrPct, "#.######")
+    "{" +
+     "\"secret\":\"" + i_secret + "\"," +
+     "\"action\":\"" + action + "\"," +
+     "\"symbol\":\"" + i_symbol + "\"," +
+     "\"asset_class\":\"" + i_asset + "\"," +
+     "\"price\":" + str.tostring(close, "#.####") + "," +
+     "\"confidence\":" + str.tostring(i_confidence, "#.##") + "," +
+     "\"timeframe\":\"" + i_timeframe + "\"," +
+     "\"strategy\":\"" + i_strategy + "\"," +
+     "\"regime\":\"" + regimeStr + "\"," +
+     "\"atr_pct\":" + atrPart + "," +
+     "\"confirm\":" + str.tostring(confirm) +
+     "}"
+
+// Fire webhook-ready JSON (create alert: "Any alert() function call")
+if longSignal and barstate.isconfirmed
+    alert(f_alertJson("buy", 1), alert.freq_once_per_bar_close)
+if shortSignal and barstate.isconfirmed
+    alert(f_alertJson("sell", 1), alert.freq_once_per_bar_close)
+
+// Optional alertcondition fallbacks (if you prefer classic alert UI)
+alertcondition(longSignal,  "POLYMR Buy",  "POLYMR Buy — use alert() webhook instead of this message")
+alertcondition(shortSignal, "POLYMR Sell", "POLYMR Sell — use alert() webhook instead of this message")

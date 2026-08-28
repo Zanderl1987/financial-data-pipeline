@@ -1,7 +1,7 @@
 """Manually (re)build the pilot Iceberg tables from the curated snapshots.
 
 Usage:
-    C:\\ProgramData\\anaconda3\\python.exe migrate_pilot.py            # all 4 tables
+    C:\\ProgramData\\anaconda3\\python.exe migrate_pilot.py            # all pilot tables
     C:\\ProgramData\\anaconda3\\python.exe migrate_pilot.py --only macro,prices
 
 Each pilot table is mirrored (full replace) from

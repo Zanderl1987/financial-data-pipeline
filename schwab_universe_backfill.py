@@ -11,14 +11,19 @@ across ~29k symbols would produce 100M+ rows, too large to hold in memory
 or write in one pass.
 
 CLI:
-  python schwab_universe_backfill.py              # resume/continue
+  python schwab_universe_backfill.py              # resume/continue full history
   python schwab_universe_backfill.py --chunk-size 250
+  python schwab_universe_backfill.py --incremental --days 14   # catch-up to today
+  python schwab_universe_backfill.py --incremental --days 14 --skip-empty-from schwab_universe_backfill_progress.json
 
 Progress state: schwab_universe_backfill_progress.json (symbols already
-written are skipped on restart).
+written are skipped on restart). --incremental uses a date-stamped progress
+file (schwab_universe_incremental_YYYY-MM-DD.json) so nightly catch-up runs
+don't collide with the one-shot full backfill state.
 
 Output:
-  storage/raw/prices/year=YYYY/month=MM/prices_universe_batch###_*.parquet
+  storage/raw/prices/year=YYYY/month=MM/prices_universe_batch###_*.parquet   (full)
+  storage/raw/prices/year=YYYY/month=MM/prices_universe_incr###_*.parquet    (incremental)
 """
 
 import argparse
@@ -45,9 +50,11 @@ TOKEN_PATH = os.environ.get("SCHWAB_TOKEN_PATH", "tokens.db")
 OUTPUT_DIR = os.path.join("storage", "raw", "prices")
 UNIVERSE_FILE = "symbol_universe.csv"
 PROGRESS_FILE = "schwab_universe_backfill_progress.json"
+INCREMENTAL_PROGRESS_FILE = "schwab_universe_incremental_progress.json"
 
 REQUEST_INTERVAL = 0.55
 DEFAULT_CHUNK_SIZE = 250
+DEFAULT_INCREMENTAL_DAYS = 14
 
 
 def load_progress(progress_file):
@@ -62,13 +69,24 @@ def save_progress(progress, progress_file):
         json.dump(progress, f, indent=2)
 
 
-def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE, progress_file=PROGRESS_FILE):
+def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE,
+         progress_file=PROGRESS_FILE, incremental=False, days=None,
+         skip_empty_from=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     universe = pd.read_csv(universe_file)
     all_symbols = universe["symbol"].tolist()
     progress = load_progress(progress_file)
     already_handled = set(progress["done"]) | set(progress["empty"]) | set(progress["failed"])
+
+    if skip_empty_from:
+        seed = load_progress(skip_empty_from)
+        seeded_empty = set(seed["empty"])
+        if seeded_empty:
+            print(f"Seeding {len(seeded_empty)} known-empty symbols from "
+                  f"{skip_empty_from} (skipped, not re-fetched).")
+            already_handled |= seeded_empty
+
     remaining = [s for s in all_symbols if s not in already_handled]
 
     print(f"Universe: {len(all_symbols)} symbols total, {len(already_handled)} already "
@@ -83,9 +101,18 @@ def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE, progress_fi
         callback_url=CALLBACK_URL, tokens_db=TOKEN_PATH,
     )
 
-    start_ms = int(datetime.datetime(1970, 1, 2).timestamp() * 1000)
-    end_ms = int(datetime.datetime.utcnow().timestamp() * 1000)
-    today = datetime.datetime.utcnow().strftime("%Y%m%d")
+    now = datetime.datetime.utcnow()
+    end_ms = int(now.timestamp() * 1000)
+    if incremental:
+        lookback = (days or DEFAULT_INCREMENTAL_DAYS)
+        start_dt = now - datetime.timedelta(days=lookback)
+        start_ms = int(start_dt.timestamp() * 1000)
+        print(f"Mode: INCREMENTAL (last {lookback} days, {start_dt.date()} -> "
+              f"{now.date()}); daily bars only.")
+    else:
+        start_ms = int(datetime.datetime(1970, 1, 2).timestamp() * 1000)
+        print("Mode: FULL HISTORY (from 1970 -- Schwab returns all it has).")
+    today = now.strftime("%Y%m%d")
 
     for chunk_start in range(0, len(remaining), chunk_size):
         chunk = remaining[chunk_start:chunk_start + chunk_size]
@@ -114,7 +141,8 @@ def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE, progress_fi
         if results:
             combined = pd.concat(results, ignore_index=True)
             progress["batch_num"] += 1
-            filename = f"prices_universe_batch{progress['batch_num']:04d}_{today}.parquet"
+            tag = "incr" if incremental else "universe"
+            filename = f"prices_{tag}_batch{progress['batch_num']:04d}_{today}.parquet"
             write_partitioned(combined, OUTPUT_DIR, filename)
             print(f"  batch {progress['batch_num']}: {len(combined)} rows, "
                   f"{len(results)}/{len(chunk)} symbols -> {filename}")
@@ -139,5 +167,21 @@ if __name__ == "__main__":
                          help=f"CSV with a 'symbol' column (default {UNIVERSE_FILE})")
     parser.add_argument("--progress-file", default=PROGRESS_FILE,
                          help=f"Progress state JSON (default {PROGRESS_FILE})")
+    parser.add_argument("--incremental", action="store_true",
+                         help="Fetch only a trailing window (last --days) instead of full history. "
+                              "Uses a date-stamped progress file so nightly runs don't collide with "
+                              "the one-shot full backfill state.")
+    parser.add_argument("--days", type=int, default=DEFAULT_INCREMENTAL_DAYS,
+                         help=f"Trailing window in days for --incremental "
+                              f"(default {DEFAULT_INCREMENTAL_DAYS})")
+    parser.add_argument("--skip-empty-from", default=None,
+                         help="Progress JSON whose 'empty' list is seeded as already-handled "
+                              "(avoids re-fetching ~1.6k dead symbols on incremental runs).")
     args = parser.parse_args()
-    main(chunk_size=args.chunk_size, universe_file=args.universe_file, progress_file=args.progress_file)
+    progress_file = args.progress_file
+    if args.incremental:
+        today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        progress_file = f"schwab_universe_incremental_{today}.json"
+    main(chunk_size=args.chunk_size, universe_file=args.universe_file,
+         progress_file=progress_file, incremental=args.incremental,
+         days=args.days, skip_empty_from=args.skip_empty_from)

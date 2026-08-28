@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/NfihxKxr-High-Activity-Penny-Stock-Strategy-V6/",
+  "tv_author": "Pridarasx",
+  "tv_script_name": "High Activity Penny Stock Strategy V6",
+  "tv_boosts": 139,
+  "tv_views": 2345,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Supertrend flip (long+short) gated by a volume-expansion filter (vs 20-bar average) and a 50-SMA trend filter, fixed-% TP/SL (10%/5% default) always active plus an optional trend-flip exit. No session/HTF logic, no request.security. Author markets it toward penny/small-cap stocks but the mechanism itself is generic and equity-portable (not domain-locked); 1h demo chart but no hard timeframe restriction stated. 59 lines, ~8 params."
+}

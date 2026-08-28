@@ -1,0 +1,11 @@
+{
+  "collected_at": "2026-08-12",
+  "indentation_source": "reindent(page_text, js_indent_array); flat text checksummed against DOM non-whitespace char counts per line before reindenting",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "tv_author": "blitz_locked",
+  "tv_boosts": 238,
+  "tv_script_name": "Cloud Pro | Ichimoku Confluence",
+  "tv_url": "https://www.tradingview.com/script/xx3enmiW-Cloud-Pro-Ichimoku-Confluence/",
+  "tv_views": 2696
+}

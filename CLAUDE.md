@@ -7,6 +7,19 @@ default branch `master`).
 **148 PASS / 80 NO DATA CATALOG tables, 466 tests passing** as of 2026-07-26. Verify with the
 commands below rather than trusting this line if it looks stale.
 
+
+## Session notes and task list live in a separate repo
+
+Session notes and the task list for this project are NOT in this repo. They live in the
+private `work-notes` repo, cloned as a sibling, at `work-notes/financial-data-pipeline/`:
+
+    C:\Users\zande\PycharmProjects\work-notes\financial-data-pipeline\
+
+When Zander asks to update session notes or the task list, edit the files there, not here.
+This repo keeps only durable documentation (this file, `docs/`), so it can be public
+without a visitor scrolling through a working log. See `work-notes/CLAUDE.md` for the
+convention.
+
 ## Environment
 
 - Python: `C:\ProgramData\anaconda3\python.exe` — ALWAYS use this full path. Bare `python`
@@ -23,7 +36,7 @@ commands below rather than trusting this line if it looks stale.
   origin has moved). Happened 2026-07-30: a session pushed 2 commits (ETF holdings
   pipeline) while this clone was mid-session; the next session's `git status` looked like
   a clean "ahead 1" until `git push` was rejected. Merged fine (no file overlap) once
-  caught — see SESSION_NOTES_2026-07-30.md.
+  caught — see work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-30.md.
 
 ## Commands
 
@@ -79,7 +92,7 @@ regenerable state, not git-synced**, matching `storage/raw/`.
 **Why**: a table's `location` is baked into its metadata at creation time as an
 absolute path. This machine has two clones of this repo (`PycharmProjects\
 financial-data-pipeline`, canonical, and a stale `C:\Users\zande\financial-data-
-pipeline`, see PROJECT_NOTES.md). `etf_holdings` was first created/populated from
+pipeline`, see docs/PROJECT_NOTES.md). `etf_holdings` was first created/populated from
 the other clone, then its small metadata files got git-committed and merged into
 this one — but the actual parquet data (gitignored, same as any raw table) never
 followed. The result: this clone's catalog *looked* fully populated (readable
@@ -90,7 +103,7 @@ into this clone, recreated the table here, then gitignored metadata everywhere s
 this failure mode can't recur). If you ever see an Iceberg table with real-looking
 snapshot history but `query.py`/`validate.py` reads zero rows, check
 `table.location()` via pyiceberg against the clone you're actually in before
-assuming the data is gone — see `SESSION_NOTES_2026-07-30.md` session 2 for the
+assuming the data is gone — see `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-30.md` session 2 for the
 full diagnostic trail.
 
 **Practical implications:**
@@ -159,7 +172,23 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 - **Raw store ≠ deduped.** Incremental pipelines re-fetch overlapping windows; raw globs
   were once 42% duplicate rows. Always analyze via `query.py` (curated), never raw globs.
 - **Schwab**: `schwabdev` 3.0.4 uses `tokens_db=` (SQLite `tokens.db`), not `tokens_file=`.
-  OAuth is interactive — Zander must run it in a real terminal (auth code expires ~30s).
+  OAuth re-auth: use `scripts\schwab_reauth.py` — it binds an HTTPS listener on the
+  callback URL (127.0.0.1:8182), captures the browser redirect in-process well inside the
+  ~30s code window, so Zander just logs in (no paste), then proves the stored refresh
+  token actually advanced and spends one live quote call confirming it works. Persistent
+   cert under `%LOCALAPPDATA%\schwab_reauth\` is already trusted in CurrentUser\Root, so no
+   TLS warning; if the script reports it regenerated the cert (they expire), re-run the
+   `certutil -addstore` line it prints or the warning comes back mid-window. CAVEAT
+   (cost two failed attempts on 2026-08-20): default browser is FIREFOX, which ignores
+   CurrentUser\Root entirely — its "Potential Security Risk Ahead" page must be clicked
+   through (Advanced -> Accept the Risk) or the redirect never reaches the listener and
+   the pasted code dies in the ~30s window. Also: kill any waiting reauth process before
+   a `--callback-url` exchange — schwabdev holds tokens.db locked while awaiting the
+   redirect, and a second process just hits `database is locked`. Since the bash
+  tool kills child trees on timeout, launch via Task Scheduler (`schtasks /create` +
+  `/run`, wrapper .bat captures logs) — see work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md. Fallbacks:
+  `--paste` (prompt) and `--callback-url "<url>"` (non-interactive, for agent sessions
+  where a stdin prompt hits EOF). Tests: `tests/test_schwab_reauth.py`.
   App has Market Data API only; Trader API (positions/transactions) 401s until enabled at
   developer.schwab.com. Schwab has NO historical options — chains are snapshot-only.
 - **`validate.py` printed row counts** (fixed 2026-07-26) now spot-check the
@@ -202,21 +231,34 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   corporate actions add-on entitlement" for every symbol (confirmed 2026-08-01). The
   sibling `/distributions-yield` (no add-on gate) still works fine — that's the only
   live sub-table of `tiingo_corporate_actions_*`.
-- Congressional trades (`congressional_trades_pipeline.py`) — both House and Senate
-  disclosure aggregator endpoints 403 (confirmed again 2026-08-01, same as 07-23);
-  looks like anti-bot hardening on the source site, not a URL/param bug.
+- ~~Congressional trades -- both House and Senate disclosure aggregator endpoints
+  403~~ **RESOLVED 2026-08-28.** The community `senate-stock-watcher` /
+  `house-stock-watcher` S3 aggregators are permanently dead, but they were only
+  ever scraping the official sources, which work keyless:
+  `congressional_trades_pipeline.py` now reads the House Clerk archive
+  (`{YYYY}FD.ZIP` index -> `ptr-pdfs/{YYYY}/{DocID}.pdf`) and Senate eFD
+  (`efdsearch.senate.gov`, CSRF + `prohibition_agreement=1` POST, then
+  `/search/report/data/`). **General lesson: when a community data aggregator
+  dies, check what it was aggregating before writing the data off.**
+- **UKMTO incident reports** (`www.ukmto.org/recent-incidents`) — Next.js SPA whose
+  `/_next/data/...` route returns only an empty Sitecore layout shell; real incidents
+  load from a deeper internal API. Would need a headless browser — ruled out
+  2026-08-23 during piracy-pipeline vetting. Somali incident dating instead comes
+  from Wikipedia (backfill) + ICC IMB markers (`piracy_pipeline.py`); EU NAVFOR
+  news pages are server-rendered and remain the upgrade path for dated current
+  narratives.
 
 ## Where deeper knowledge lives
 
-- `EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
+- `docs/EXPERT_BRIEF.md` — the judgment layer: prioritized roadmap with reasoning, strategic
   traps, cross-repo synergy. **Read it before planning any substantial work here.**
-- `PROJECT_NOTES.md` — living project-state reference, updated in place (not
+- `docs/PROJECT_NOTES.md` — living project-state reference, updated in place (not
   append-only): active automations, verified hard API constraints/quotas, cross-repo
   dependencies. Check this before assuming a constraint is still true.
-- `CLAUDE_SESSION_NOTES.md` + `SESSION_NOTES_2026-07-03.md` — running session log with
+- `work-notes/financial-data-pipeline/CLAUDE_SESSION_NOTES.md` + `work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-03.md` — running session log with
   per-pipeline API quirks (SimFin v3 codes, EDGAR 13F parsing, Pink Sheet URL rotation…).
-- `docs/` — source research notes. `FinancialDataPipeline_Future_Improvements.md` — roadmap.
-- `SHORT_INTEREST_SOURCES.md` — short-interest source comparison.
+- `docs/` — source research notes. `docs/FinancialDataPipeline_Future_Improvements.md` — roadmap.
+- `docs/SHORT_INTEREST_SOURCES.md` — short-interest source comparison.
 
 ## Open work (as of 2026-07-06)
 
@@ -237,7 +279,7 @@ latter after `curated.py` to refresh the mirrors (manual by design):
 - Sentiment evaluation IN PROGRESS (2026-07-06 session 2, uncommitted): `sentiment_eval.py`
   (PIT-safe IC/spread harness) + `finnhub_pipeline.py --news-days N` (deep news backfill,
   5-day chunks). 365-day news pull was running when notes were written — see
-  SESSION_NOTES_2026-07-06.md session 2 for the remaining steps (score → curated → eval
+  work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-06.md session 2 for the remaining steps (score → curated → eval
   baseline → then decide FinBERT vs lexicon tuning).
 - Deep backfills pending: FDIC financials (1992+), Fed SOMA (~2002+, slow), Schwab full
   price history (deferred until storage sized).
@@ -249,4 +291,4 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   `options_history`; `iv_summary` sources `schwab_options` → `options_chain` with column
   normalizer. Both return empty gracefully when no data. `iv_summary` will return results
   once Schwab OAuth lands chain data with `implied_volatility`. See
-  SESSION_NOTES_2026-07-12.md (design) and SESSION_NOTES_2026-07-16.md (implementation).
+  work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-12.md (design) and work-notes/financial-data-pipeline/SESSION_NOTES_2026-07-16.md (implementation).

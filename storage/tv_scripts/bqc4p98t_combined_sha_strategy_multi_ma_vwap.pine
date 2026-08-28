@@ -1,0 +1,168 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  COMBINED SCRIPT
+//  1) Smoothed Heiken Ashi Strategy (entries/exits, plots, alerts)
+//  2) Multi SMA / EMA / VWAP + EMA Filled Band (indicator)
+//  3) 9 EMA and 20 MA with Fill (indicator)
+//
+//  NOTE: Since section 1 is a strategy (uses strategy.entry/close), the whole
+//  combined script must be declared with strategy(...) instead of indicator(...).
+//  A strategy() declaration can still plot everything an indicator can
+//  (plot, plotshape, plotcandle, fill, alertcondition), so sections 2 and 3
+//  work exactly as before — you'll just also see the Strategy Tester tab.
+//  All variable names have been prefixed per section (sha_ / msev_ / e920_)
+//  to avoid naming collisions.
+// ═══════════════════════════════════════════════════════════════════════════
+
+strategy("Combined: SHA Strategy + Multi MA/VWAP + EMA Band + 9/20 MA Fill",
+     shorttitle = "Combined SHA+MA+Band",
+     overlay = true,
+     initial_capital = 10000,
+     currency = currency.USD,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     slippage = 2,
+     process_orders_on_close = true)
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 1 — Smoothed Heiken Ashi Strategy
+// ═════════════════════════════════════════════════════════════════════════
+grpHA = "SHA: Smoothed Heiken Ashi"
+sha_len1   = input.int(10, "SHA Suavizado 1: EMA sobre OHLC",   minval = 1, group = grpHA)
+sha_len2   = input.int(10, "SHA Suavizado 2: EMA sobre las HA", minval = 1, group = grpHA)
+sha_showHA = input.bool(true, "SHA: Dibujar velas Heiken Ashi suavizadas", group = grpHA)
+
+grpSig = "SHA: Señales"
+sha_confirmBars = input.int(2, "SHA Velas de confirmación para ENTRAR", minval = 1, group = grpSig)
+sha_exitFirst   = input.bool(true, "SHA SALIR con la primera vela contraria", group = grpSig)
+sha_allowLong   = input.bool(true, "SHA Permitir compras", group = grpSig)
+sha_allowShort  = input.bool(true, "SHA Permitir ventas",  group = grpSig)
+
+grpTime      = "SHA: Rango del backtest"
+sha_startDate = input.time(timestamp("1 Jan 2024 00:00 +0000"), "Inicio", group = grpTime)
+sha_endDate   = input.time(timestamp("31 Dec 2027 23:59 +0000"), "Fin",   group = grpTime)
+
+sha_oS = ta.ema(open,  sha_len1)
+sha_hS = ta.ema(high,  sha_len1)
+sha_lS = ta.ema(low,   sha_len1)
+sha_cS = ta.ema(close, sha_len1)
+
+sha_haC = (sha_oS + sha_hS + sha_lS + sha_cS) / 4
+var float sha_haO = na
+sha_haO := na(sha_haO[1]) ? (sha_oS + sha_cS) / 2 : (sha_haO[1] + sha_haC[1]) / 2
+sha_haH = math.max(sha_hS, math.max(sha_haO, sha_haC))
+sha_haL = math.min(sha_lS, math.min(sha_haO, sha_haC))
+
+sha_o2 = ta.ema(sha_haO, sha_len2)
+sha_c2 = ta.ema(sha_haC, sha_len2)
+sha_h2 = ta.ema(sha_haH, sha_len2)
+sha_l2 = ta.ema(sha_haL, sha_len2)
+
+sha_isGreen = sha_c2 > sha_o2
+sha_isRed   = sha_c2 < sha_o2
+
+var int sha_gc = 0
+var int sha_rc = 0
+sha_gc := sha_isGreen ? sha_gc + 1 : 0
+sha_rc := sha_isRed   ? sha_rc + 1 : 0
+
+sha_inDate = time >= sha_startDate and time <= sha_endDate
+
+sha_longEntry  = sha_gc == sha_confirmBars and sha_allowLong  and sha_inDate
+sha_shortEntry = sha_rc == sha_confirmBars and sha_allowShort and sha_inDate
+sha_exitLong   = sha_exitFirst and sha_isRed   and strategy.position_size > 0
+sha_exitShort  = sha_exitFirst and sha_isGreen and strategy.position_size < 0
+
+if sha_exitLong
+    strategy.close("Long", comment = "1a vela roja")
+if sha_exitShort
+    strategy.close("Short", comment = "1a vela verde")
+
+if sha_longEntry
+    strategy.entry("Long", strategy.long)
+if sha_shortEntry
+    strategy.entry("Short", strategy.short)
+
+plotcandle(sha_showHA ? sha_o2 : na, sha_showHA ? sha_h2 : na, sha_showHA ? sha_l2 : na, sha_showHA ? sha_c2 : na,
+     "Smoothed HA",
+     color       = sha_isGreen ? color.new(color.green, 60) : color.new(color.red, 60),
+     wickcolor   = sha_isGreen ? color.new(color.green, 40) : color.new(color.red, 40),
+     bordercolor = sha_isGreen ? color.new(color.green, 40) : color.new(color.red, 40))
+
+plotshape(sha_longEntry,  "SHA Compra", shape.triangleup,   location.belowbar, color.green, size = size.small)
+plotshape(sha_shortEntry, "SHA Venta",  shape.triangledown, location.abovebar, color.red,   size = size.small)
+
+alertcondition(sha_longEntry,  "SHA: COMPRA",        "Smoothed HA: entrada en COMPRA")
+alertcondition(sha_shortEntry, "SHA: VENTA",         "Smoothed HA: entrada en VENTA")
+alertcondition(sha_exitLong,   "SHA: cerrar compra", "Smoothed HA: cerrar COMPRA (vela roja)")
+alertcondition(sha_exitShort,  "SHA: cerrar venta",  "Smoothed HA: cerrar VENTA (vela verde)")
+
+// ═════════════════════════════════════════════════════════════════════════
+// SECTION 2 — Multi SMA / EMA / VWAP + EMA Filled Band
+// ═════════════════════════════════════════════════════════════════════════
+
+// --- EMA ---
+msev_emaplot = input.bool(false, title = "Show EMA 1", group = "EMA")
+msev_len     = input.int(9, minval = 1, title = "EMA 1 Length", group = "EMA")
+msev_out     = ta.ema(close, msev_len)
+plot(msev_emaplot ? msev_out : na, title = "EMA 1", color = color.green, linewidth = 3)
+
+msev_emaplot1 = input.bool(true, title = "Show EMA 2", group = "EMA")
+msev_len1     = input.int(20, minval = 1, title = "EMA 2 Length", group = "EMA")
+msev_out1     = ta.ema(close, msev_len1)
+plot(msev_emaplot1 ? msev_out1 : na, title = "EMA 2", color = color.white, linewidth = 3)
+
+msev_emaplot2 = input.bool(false, title = "Show EMA 3", group = "EMA")
+msev_len2     = input.int(50, minval = 1, title = "EMA 3 Length", group = "EMA")
+msev_out2     = ta.ema(close, msev_len2)
+plot(msev_emaplot2 ? msev_out2 : na, title = "EMA 3", color = color.orange, linewidth = 3)
+
+msev_emaplot7 = input.bool(false, title = "Show EMA 4", group = "EMA")
+msev_len7     = input.int(200, minval = 1, title = "EMA 4 Length", group = "EMA")
+msev_out7     = ta.ema(close, msev_len7)
+plot(msev_emaplot7 ? msev_out7 : na, title = "EMA 4", color = color.rgb(128, 197, 253), linewidth = 3)
+
+// --- SMA ---
+msev_smaplot3 = input.bool(true, title = "Show SMA 1", group = "SMA")
+msev_len3     = input.int(50, minval = 1, title = "SMA 1 Length", group = "SMA")
+msev_out3     = ta.sma(close, msev_len3)
+plot(msev_smaplot3 ? msev_out3 : na, title = "SMA 1", color = color.yellow, linewidth = 3)
+
+msev_smaplot4 = input.bool(false, title = "Show SMA 2", group = "SMA")
+msev_len4     = input.int(100, minval = 1, title = "SMA 2 Length", group = "SMA")
+msev_out4     = ta.sma(close, msev_len4)
+plot(msev_smaplot4 ? msev_out4 : na, title = "SMA 2", color = color.blue, linewidth = 3)
+
+msev_smaplot5 = input.bool(false, title = "Show SMA 3", group = "SMA")
+msev_len5     = input.int(150, minval = 1, title = "SMA 3 Length", group = "SMA")
+msev_out5     = ta.sma(close, msev_len5)
+plot(msev_smaplot5 ? msev_out5 : na, title = "SMA 3", color = color.teal, linewidth = 3)
+
+msev_smaplot6 = input.bool(true, title = "Show SMA 4", group = "SMA")
+msev_len6     = input.int(200, minval = 1, title = "SMA 4 Length", group = "SMA")
+msev_out6     = ta.sma(close, msev_len6)
+plot(msev_smaplot6 ? msev_out6 : na, title = "SMA 4", color = color.rgb(125, 3, 3), linewidth = 3)
+
+msev_smaplot8 = input.bool(false, title = "Show SMA 5", group = "SMA")
+msev_len8     = input.int(600, minval = 1, title = "SMA 5 Length", group = "SMA")
+msev_out8     = ta.sma(close, msev_len8)
+plot(msev_smaplot8 ? msev_out8 : na, title = "SMA 5", color = color.fuchsia, linewidth = 3)
+
+// --- VWAP ---
+msev_vwapplot = input.bool(true, title = "Show VWAP", group = "VWAP")
+msev_vwap     = ta.vwap(hlc3)
+plot(msev_vwapplot ? msev_vwap : na, title = "VWAP", color = color.aqua)
+
+// --- EMA Fast/Slow Filled Band ---
+msev_emaFastLen = input.int(20, "Fast EMA Length", minval = 1, group = "EMA Band")
+msev_emaSlowLen = input.int(60, "Slow EMA Length", minval = 1, group = "EMA Band")
+
+msev_showFast = input.bool(true, "Show Fast EMA", group = "EMA Band")
+msev_showSlow = input.bool(true, "Show Slow EMA", group = "EMA Band")
+
+msev_fastColor = input.color(color.orange, "Fast EMA Color", group = "EMA Band")
+msev_slowColor = input.color(color.blue,   "Slow EMA Color", group = "EMA Band")
+
+msev_useTrendColors = input.bool(true, "Use different fill colors by trend", group = "EMA Band")
+
+msev_bullFillColor    = input.color(color.new(color.green, 80), "Bullish Fill Color", group = "EMA Band")

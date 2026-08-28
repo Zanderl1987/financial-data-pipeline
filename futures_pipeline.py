@@ -51,6 +51,13 @@ FUTURES = {
     "KC=F":  ("Coffee",                 "agriculture"),
     "SB=F":  ("Sugar",                  "agriculture"),
     "CT=F":  ("Cotton",                 "agriculture"),
+    "LE=F":  ("Live Cattle",            "agriculture"),
+    "GF=F":  ("Feeder Cattle",          "agriculture"),
+    "HE=F":  ("Lean Hogs",              "agriculture"),
+    "DC=F":  ("Class III Milk",         "agriculture"),
+    "OJ=F":  ("Orange Juice",           "agriculture"),
+    "CC=F":  ("Cocoa",                  "agriculture"),
+    "ZO=F":  ("Oats",                   "agriculture"),
     # Industrial materials
     "LBR=F":  ("Random Length Lumber",   "industrial"),
     "HRC=F":  ("HRC Steel",             "industrial"),
