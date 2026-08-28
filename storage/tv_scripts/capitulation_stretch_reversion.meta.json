@@ -1,0 +1,11 @@
+{
+  "tv_url": "https://www.tradingview.com/script/WWuTjyDx-Capitulation-Stretch-Reversion-Jayadev-Rana/",
+  "tv_author": "bluealgocapital",
+  "tv_script_name": "Capitulation Stretch Reversion [Jayadev Rana]",
+  "tv_boosts": 8,
+  "tv_views": 719,
+  "collected_at": "2026-08-28",
+  "license": "CC BY-NC-SA 4.0 (non-default -- script header states 'Attribution-NonCommercial-ShareAlike 4.0 International', NOT the TradingView-default MPL-2.0; noncommercial clause is consistent with this campaign's research/educational, non-commercial use)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark), grouped by span bounding-box top coordinate into lines (this page's DOM had no per-line wrapper element, unlike prior collections -- all 324 token spans sat flat under one container, so lines were reconstructed by clustering getBoundingClientRect().top)"
+}

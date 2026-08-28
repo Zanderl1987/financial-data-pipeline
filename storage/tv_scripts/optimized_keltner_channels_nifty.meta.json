@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/ek2aOo0g-Optimized-Keltner-Channels-Strategy-NIFTY/",
+  "tv_author": "sudhank_naincy",
+  "tv_script_name": "Optimized Keltner Channels Strategy [NIFTY]",
+  "tv_boosts": 20,
+  "tv_views": 749,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Keltner Channel breakout (stop-order entry above/below the band, canceled if price falls back inside before filling) with two optional, OFF-by-default add-ons: a 200-EMA trend filter and a session-hours filter ('0930-1445', Mon-Fri). Both filters are toggled false by default so neither gates entries in the base config. IMPORTANT for translation: with all optional exits (useAtrStop, exitOnMidBand) also OFF by default, the ONLY way a position closes at default settings is the opposite-side entry reversing it (Pine's implicit reversal since pyramiding=0) -- there is no active stop-loss/take-profit at defaults. Stage 1 screen_source() passed on ADMIT because the code textually contains strategy.exit()/strategy.close() calls (gated behind the disabled flags), not because the default configuration has a real exit. Translator should decide whether to enable useAtrStop/exitOnMidBand or keep the reversal-only default -- flagging this explicitly since it's a real risk-management gap, not a screening bug. NIFTY demo chart (5-min) but no explicit intraday-only restriction; mechanism is timeframe-portable. 150 lines."
+}

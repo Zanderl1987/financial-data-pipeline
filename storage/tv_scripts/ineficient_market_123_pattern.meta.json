@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/t578EfVb/",
+  "tv_author": "abib14bis",
+  "tv_script_name": "Ineficient market",
+  "tv_boosts": 44,
+  "tv_views": 1261,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Demo chart is POLUSDT Perpetual (Bybit, 2h) and default time-stop is 480 bars, but the mechanism (pivot-based 1-2-3 reversal pattern + ATR-compression volatility gate + fixed %TP / wide %SL / bar-count time-stop) is timeframe-agnostic price action with no crypto/perpetual-specific mechanics (no funding rate, no contract sizing) -- treated as equity-daily-bar portable, not a domain lock. 140 lines, ~8 params."
+}

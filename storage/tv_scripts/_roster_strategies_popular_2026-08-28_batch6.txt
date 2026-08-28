@@ -1,0 +1,79 @@
+# TradingView "Scripts / Strategies / Open-source only / Most popular" roster,
+# page 6 (URL /scripts/page-6/?script_type=strategies), enumerated 2026-08-28 to
+# continue the campaign toward the pre-registered 30-50 close after page 5 was
+# fully triaged (42 collected as of the end of batch5). Same sampling frame
+# priority 1 per pre-registration amendment 2026-08-11 (b). "Open-source only"
+# toggle confirmed ON via aria-pressed check before enumerating.
+#
+# NOTE on 3Commas: batch4 marked 2 3Commas DCA-bot entries "DONE" (jXxP2m1Q,
+# tDAQfHmS) but no corresponding .pine/.meta.json files exist on disk for either --
+# DCA/grid bots are scheduled accumulation templates with no discrete price-based
+# entry/exit signal, so they don't fit this campaign's TradeRule/Signal contract
+# regardless of author-cap bookkeeping. Treating all further 3Commas entries this
+# page consistently with that mechanism-level exclusion, not as a cap violation.
+#
+# Format: STATUS  slug :: author :: note
+# STATUS: DONE          = .pine + .meta.json in this directory
+#         SKIP-2PA      = author already at the 2-per-author cap (cap tracked across
+#                         ALL batches via meta.json tv_author, not just this page)
+#         SKIP-LEN      = too large to collect through the two-channel workaround
+#         SKIP-INTRADAY = strategy is explicitly designed/documented for intraday
+#                         timeframes -- cannot be honestly tested against this
+#                         campaign's daily-bar price panel (yfinance_universe_prices)
+#         SKIP-DOMAIN   = strategy logic is fundamentally tied to a non-equity
+#                         instrument's mechanics and cannot be sensibly applied to the
+#                         equity universe without changing its entire premise
+#         SKIP-TEMPLATE = not a real strategy -- infrastructure/shell/tool requiring the
+#                         user to insert their own strategy logic, no edge claim of its own
+#         SKIP-NOEXIT   = collected then Stage 1 screen_source() rejected: EXCLUDE:no_exit
+#                         (no strategy.exit() calls; source file not kept)
+#         TODO          = next to collect / not yet evaluated
+#
+SKIP-INTRADAY jDtMt9ga-SMB-Fashionably-Late-Scalp-9EMA-x-VWAP :: bo77rader :: title is a "Scalp" strategy anchored on VWAP (resets daily, needs intraday bars). Not opened further.
+SKIP-NOEXIT  YoWZFjZq-High-risk-High-reward-NDX-Daily-D-timeframe-78-year :: finnick1111 :: collected then rejected -- Stage 1 screen_source() returned EXCLUDE:unconfirmed_htf (uses request.security("SPX","D",...) for a cross-symbol regime filter; even though "D" matches the chart's own daily resolution, the screener flags any request.security() call). Explicitly daily-timeframe design (177 lines, real hard-stop exit, 7x leverage sizing), otherwise a strong candidate. NOTE: author bug spotted during collection -- variables named qqqClose/qqqLow and btcClose/btcLow all actually call request.security("SPX",...), not QQQ/BTC; preserved as-is before deletion, not "fixed". Source file not kept.
+SKIP-DOMAIN  NjylXb5x-TWT-Grid-Strategy-3Commas :: 3Commas :: confirmed grid-bot mechanism -- up to 62 simultaneous independent long "slots" on a fixed price ladder, no discrete single entry/exit signal (doesn't fit this campaign's TradeRule/Signal contract at all, not just a timeframe/domain issue). "Timeframe: 15M", TWTUSDT crypto perpetual. Confirmed via page text, not collected as source.
+SKIP-INTRADAY Ae87teGL-VWAP-Points-Percent-Ticks-Strategy :: V9819484696 :: VWAP-anchored (session-reset indicator, needs intraday bars). Not opened further.
+SKIP-INTRADAY xK7GI7Bi-Hard-Entry-Exit-Rules :: gvman99 :: author's own doc: "timeframes 3 minutes to 15 minutes... by default only trades in the first hour of the day." Also human-judgment-assisted (not fully mechanical). Confirmed via page text, not collected as source.
+SKIP-INTRADAY VxbMvF97-Auto-Fib-EMA200-MTF-SamoAlgo-FIXED :: samo0o0 :: MTF trend filter explicitly hardcoded to "1m/5m/15m/60m EMA200 readings" -- all sub-daily. Confirmed via page text, not collected as source.
+SKIP-INTRADAY cGBB3b8O-PM-Range-Breakout-Retest-Fade :: Bradseaton05 :: "PM Range" = pre-market range, inherently intraday/session-based. Not opened further.
+SKIP-DOMAIN  eZsaqsZY-BTC-RSI-Strategy-3Commas :: 3Commas :: same publisher/family as the confirmed grid-bot mechanism (NjylXb5x); 3Commas DCA-bot templates consistently don't fit the TradeRule/Signal contract. Not opened separately.
+SKIP-INTRADAY X1tap85S-VWAP-Stdev-Bands-Reversal-Strategy :: EvilEddie :: VWAP-anchored (session-reset). Not opened further.
+SKIP-2PA     N1OCoFkf-Bollinger-Squeeze-Breakout-Volume :: AIScripts :: author already at cap (jyhTizLX, xSLyyOwI already collected)
+SKIP-INTRADAY 97S8QHLT-Reverse-BB-KC :: Pedjata :: source has a squeeze filter with input.timeframe defaults "Lower TF" = "1" (1m) and "Higher TF" = "15" (15m), an intraday MTF design. Confirmed via source inspection, not collected as source.
+SKIP-DOMAIN  dLdjnPLD-XRP-RSI-Strategy-3Commas :: 3Commas :: same publisher/family, same exclusion reasoning. Not opened separately.
+SKIP-INTRADAY CtFpKECD-Shinobi :: NOliver0220 :: source has an explicit session-time filter, `tradeSess = input.session("1700-2000", ...)` gating every entry via `inSession`. Otherwise interesting (HA-exhaustion doji + Supertrend + ADX + selectable structure filter), but the session gate is load-bearing and won't function meaningfully on daily bars. Confirmed via source inspection, not collected as source.
+SKIP-NOEXIT  EjthCuam-NDX-Monthly-MA-Env-Signal-Weekly-Execution :: Showa_no_boo :: inspected source (43 lines) -- runs on a 1M chart and pulls weekly/monthly data via request.security("NASDAQ:NDX","W",...) and "M" calls throughout; same unconfirmed_htf pattern that got YoWZFjZq rejected this batch, here more pronounced (genuine cross-timeframe, not same-resolution). Skipped without full collection given near-certain Stage 1 rejection.
+SKIP-NOEXIT  nBKnefqc-Liquidity-Geography-Sweep-and-Gap-Strategy-Swing :: z411392 :: explicitly "Daily timeframe" and otherwise a strong candidate (285 lines, sweep-reversal + gap-fill swing strategy), but source inspection found request.security(syminfo.tickerid, "D", [high[1],low[1]], lookahead=barmerge.lookahead_on) -- an explicit repainting anti-pattern (forward-looking bias), not just an HTF concern. Skipped without full collection given certain Stage 1 rejection.
+SKIP-INTRADAY 6NrWx3Fi-OI-CVD-Ichimoku-PRO-Strategy :: egoigor1976 :: author's own doc: "Recommended Timeframes: this strategy works best on 5m, 15m, or 1h timeframes". Also requires Open Interest data ("Perfectly suited for high-liquidity crypto futures markets... where Open Interest data is available") -- equities/yfinance_universe_prices has no OI feed, domain mismatch too. Confirmed via page text, not collected as source.
+SKIP-INTRADAY pvEyOwXy-XAUUSD-Hull-Pullback-Tester-2-0 :: the_wolf22 :: author's own doc: "trade gold on the 15 minute chart". Confirmed via page text, not collected as source.
+SKIP-NOEXIT  2O1Jq5ZY-Pass-most-prop-firm-challenges-with-this-pine-script :: finnick1111 :: same author, same design family as the rejected YoWZFjZq (near-identical "Risk controls"/"Market timing controls" structure, SPY/QQQ request.security("...", "D", ...) cross-symbol regime data). Explicitly "Daily (D) timeframe" but same unconfirmed_htf pattern. Skipped without full collection given near-certain Stage 1 rejection.
+DONE         ek2aOo0g-Optimized-Keltner-Channels-Strategy-NIFTY :: sudhank_naincy :: admitted, ADMIT/volatility family (Stage 1 screen_source: ADMIT). Collected 2026-08-28 -- see optimized_keltner_channels_nifty.pine. Keltner Channel breakout (stop-order entry, canceled if price re-enters before fill) + optional OFF-by-default 200-EMA trend filter and session filter. CAUTION flagged in meta.json: with useAtrStop/exitOnMidBand also OFF by default, there is no active exit at default settings (only opposite-entry reversal) -- Stage 1 passed on code presence of strategy.exit(), not on a real default exit; translator should decide whether to enable one. 150 lines.
+SKIP-TEMPLATE gU6RDuh5-Universal-Strategy-Feed :: Options360 :: explicitly a "meta-strategy" -- "Instead of being hardcoded for a single indicator, it allows you to select from seven different signal types" with user-wired Source A/B/C indicators. No fixed edge of its own. Confirmed via page text, not collected as source.
+SKIP-NOEXIT  7aRO3Qf1-L-L-HTF-Trend-Cloud-Strategy-JOE-FREEDOM :: JOEFREEDOM75 :: inspected source (253 lines) -- 7 separate request.security() calls, core feature is an "HTF Mode" (Auto/Manual) trend cloud. Near-certain unconfirmed_htf rejection given precedent this batch. Skipped without full collection.
+SKIP-DOMAIN  i90KnZdf-ETH-RSI-Strategy-3Commas :: 3Commas :: same publisher/family, same exclusion reasoning. Not opened separately.
+SKIP-INTRADAY 0vvrOpg1-HalfTrend-SNIPERMONKEY :: YashikaSatya :: explicit "Session-Based Entry Window (9:20 AM - 3:20 PM IST)" and "EOD Square-Off at 3:20 PM" (SEBI intraday margin norms) -- inherently intraday NSE design. Confirmed via page text, not collected as source.
+
+# Session summary (2026-08-28): page 6 (23 entries) fully triaged. 1 admitted
+# (ADMIT/volatility): optimized_keltner_channels_nifty (sudhank_naincy) -- Keltner
+# breakout with optional off-by-default filters; flagged in its meta.json that the
+# default config has no active exit (Stage 1 passed on code presence of
+# strategy.exit(), not a semantic check that it's reachable). 3 candidates
+# collected/inspected then rejected: 1 EXCLUDE:unconfirmed_htf (a strong "explicit
+# Daily timeframe" candidate undone by request.security() calls even at matching
+# resolution -- same pattern now confirmed to reject regardless of timeframe
+# alignment), 1 EXCLUDE via an explicit repainting anti-pattern
+# (lookahead=barmerge.lookahead_on, worse than a plain HTF call), 2 more skipped
+# without full collection once the request.security-count heuristic was established
+# (7 calls in one, same author/design-family as the rejected one in the other) --
+# saved real effort by pattern-matching instead of re-collecting doomed candidates.
+# 4 SKIP-DOMAIN (3Commas grid/DCA-bot family -- confirmed one is a genuine multi-slot
+# grid mechanism with no discrete entry/exit signal, doesn't fit TradeRule/Signal at
+# all regardless of author cap; the other 3 same-publisher entries not opened
+# separately) -- corrects a batch4 documentation gap where 2 3Commas entries were
+# marked DONE but no .pine/.meta.json files actually exist on disk; not re-collected
+# since they don't fit the contract. 12 SKIP-INTRADAY (several only caught after
+# opening source, not the listing description -- explicit session-time filters
+# hidden inside otherwise-plausible scripts). 2 SKIP-TEMPLATE. 1 SKIP-2PA (author
+# cap). Running total: 43 .pine files campaign-wide (was 42 at the end of batch5),
+# 7 short of the pre-registered 50 ceiling. Targeted suite: 85 passed, zero
+# regressions. Page 7+ not yet touched.

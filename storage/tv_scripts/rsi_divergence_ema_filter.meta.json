@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/Obv27ppz-RSI-Divergence-EMA-Filter-Proozac/",
+  "tv_author": "Proozac98",
+  "tv_script_name": "RSI Divergence + EMA Filter [Proozac]",
+  "tv_boosts": 29,
+  "tv_views": 895,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "RSI/price pivot divergence (lower-low price + higher-low RSI = bullish, mirror for bearish) gated by a 200-EMA trend filter (on by default), with ATR-based trailing stop as the default exit (use_trail=true) and an optional fixed R:R stop/target (off by default). Author's soft preference is 5m ('that's my personal advice') but also states 'You will see good winrate in stocks and almost in any index' -- no hard timeframe restriction. 109 lines, ~12 params."
+}

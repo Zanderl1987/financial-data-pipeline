@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/CzLuDuzf-Optimized-Doji-Breakout-Strategy-Short-Only-V6/",
+  "tv_author": "deependrasrivastavalko",
+  "tv_script_name": "Optimized Doji Breakout Strategy (Short Only) V6",
+  "tv_boosts": 9,
+  "tv_views": 621,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Author's doc says 'based on 30 min time frame for Doji candle' (no explicit 'works on any timeframe' disclaimer, unlike the same author's dual_bollinger_band_cross), but doji-candle-shape detection (body/range ratio) plus red/green confirmation candles is a classic, timeframe-portable candlestick pattern mechanism -- no session/intrabar logic. 2nd collection from this author (now at the 2-per-author cap). Short-only, dynamic R:R (3.0 in high-vol regime vs 1.5 in low-vol, gated on ATR vs its 20-period average). 65 lines, 1 param."
+}

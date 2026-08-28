@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/0rGWkv97-Undertow-Backtest/",
+  "tv_author": "grieto",
+  "tv_script_name": "Undertow Backtest",
+  "tv_boosts": 15,
+  "tv_views": 873,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Long-only strategy version of the WaveTrend Oscillator (LazyBear concept) plus RSI framing. Entry on WT1/WT2 crossover (optionally gated to only 'strong' crosses beyond oversold/overbought bounds), exit on the opposite crossover (same strong/all toggle independently for each side). Self-contained calculation, no request.security, no session logic. Author's doc: 'Simulate the buy/sell dots across any asset and timeframe.' 91 lines, ~8 params."
+}

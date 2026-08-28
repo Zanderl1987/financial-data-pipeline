@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/NeEiwmDq-Donchian-Breakout-with-ATR-Trailing-Stop-Trend-Following/",
+  "tv_author": "raven_suurineru",
+  "tv_script_name": "Donchian Breakout with ATR Trailing Stop (Trend Following)",
+  "tv_boosts": 4,
+  "tv_views": 1616,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Published English description frames this as deliberately timeframe/instrument-robust ('held up on both an equity index (DAX/GER40, 1h) and Bitcoin (BTCUSD, 4h)'), but the script's own internal header comments (in Slovak) are much more specific: hardcoded strategy() title 'BTC BTCUSD - capital.com - Trailing v3 FINAL', explicit 'TIMEFRAME: 4 hodiny' (4 hours), and tuned commission/leverage/weekend-close defaults for that exact broker+instrument+timeframe combo. Mechanism itself (Donchian N-bar breakout + 200-EMA trend filter + ATR-multiple trailing stop, fixed-% risk sizing) is a classic, timeframe-portable construct (the original Turtle system ran on daily bars) with no session/intrabar-recalc logic -- the optional Friday weekend-close flatten is the only time-of-day logic and is a no-op-safe toggle, not a blocker. Treated as an ADMIT candidate on mechanism grounds despite the sub-daily demo/tuning; the discrepancy between the marketed framing and the actual hardcoded comments is noted here for the record."
+}

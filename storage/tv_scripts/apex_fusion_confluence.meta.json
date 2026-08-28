@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/qQUC1ncY-Apex-Fusion-AI-Smart-Trend-Engine/",
+  "tv_author": "Tomukasss",
+  "tv_script_name": "Apex Fusion AI| Smart Trend Engine",
+  "tv_boosts": 54,
+  "tv_views": 2094,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Despite the marketing name ('AI', 'Institutional POC Approximation'), the actual mechanism is a plain weighted-confluence scoring system over 6 conventional signals (200-EMA trend, Supertrend direction, volume spike vs 20-MA, MACD histogram slope, N-bar momentum, fractal-pivot break-of-structure, Fibonacci retracement zone, and a naive highest-volume-bar 'POC' proxy) -- enter when the weighted score crosses a threshold (default 80/100). No ML/AI code, no session or intrabar-recalc logic. Author's doc: 'Works on every timeframe, with particularly strong performance on the 1H chart' -- not intraday-exclusive. 139 lines, 9 params."
+}

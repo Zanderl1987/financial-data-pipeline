@@ -1,0 +1,12 @@
+{
+  "tv_url": "https://www.tradingview.com/script/GDrB3tu3-Bollinger-Bands-Simple-Strategy/",
+  "tv_author": "Alby1611",
+  "tv_script_name": "Bollinger Bands Simple Strategy",
+  "tv_boosts": 17,
+  "tv_views": 862,
+  "collected_at": "2026-08-28",
+  "license": "MPL-2.0 (TradingView default)",
+  "pine_version": 6,
+  "indentation_source": "direct DOM extraction (monaco-editor-tv-pine-dark content spans), grouped by bounding-box top coordinate into lines",
+  "notes": "Bollinger Band mean-reversion: long on close below lower band, short on close above upper band. Dynamic exit recalculated every bar: stop at recent swing low/high plus an ATR buffer (trails), target at the basis (20 SMA). No explicit timeframe restriction. 107 lines, ~7 params."
+}
