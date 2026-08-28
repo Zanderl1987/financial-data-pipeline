@@ -244,3 +244,51 @@ class TestRegistry:
     def test_unknown_slug_raises(self):
         with pytest.raises(KeyError):
             load_rule("does_not_exist")
+
+
+# ---------------------------------------------------------- every-port smoke
+
+def _smoke_frame(n: int = 500, seed: int = 7) -> pd.DataFrame:
+    """Generic random-walk OHLCV frame, long enough to clear a 200-bar SMA
+    warmup. Not engineered to fire any particular port's signal -- this only
+    checks that every registered port runs cleanly and returns
+    engine-shaped output, not that it trades on this data."""
+    rng = np.random.default_rng(seed)
+    close = 100 * np.cumprod(1 + rng.normal(0.0003, 0.02, n))
+    prev = np.concatenate(([close[0]], close[:-1]))
+    spread = rng.uniform(0.002, 0.02, n)
+    high = np.maximum(close, prev) * (1 + spread)
+    low = np.minimum(close, prev) * (1 - spread)
+    volume = rng.uniform(0.5e6, 1.5e6, n)
+    return pd.DataFrame(
+        {"open": prev, "high": high, "low": low, "close": close, "volume": volume},
+        index=pd.date_range("2015-01-01", periods=n, freq="B"))
+
+
+class TestEveryPortSmoke:
+    """Every registered port, run once against a generic frame: no crash,
+    boolean Series aligned to the frame's index, and the engine accepts the
+    resulting TradeRule without error. Catches wiring bugs (wrong dtype,
+    misaligned index, an unregistered helper) that a single hand-picked
+    scenario per port would not necessarily exercise."""
+
+    def test_all_ports_run_clean(self):
+        df = _smoke_frame()
+        for info in all_ports():
+            rule = load_rule(info.slug)
+            entries = rule.entries(df)
+            exits = rule.exits(df)
+            for name, flags in (("entries", entries), ("exits", exits)):
+                assert flags.dtype == bool, f"{info.slug}.{name}: not boolean"
+                assert flags.index.equals(df.index), \
+                    f"{info.slug}.{name}: index misaligned with input frame"
+            if rule.side == "both":
+                short_entries = rule.short_entries(df)
+                short_exits = rule.short_exits(df)
+                for name, flags in (("short_entries", short_entries),
+                                    ("short_exits", short_exits)):
+                    assert flags.dtype == bool, f"{info.slug}.{name}: not boolean"
+                    assert flags.index.equals(df.index), \
+                        f"{info.slug}.{name}: index misaligned with input frame"
+            trades_df = trades.simulate(rule, {"SYN": df})
+            assert isinstance(trades_df, pd.DataFrame)

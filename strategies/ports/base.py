@@ -196,6 +196,77 @@ def simulate_positions(entry_flags: pd.Series, close: pd.Series,
                         exits=pd.Series(out, index=close.index))
 
 
+@dataclass
+class PositionWalkBoth:
+    """Result of simulating a side='both' rule's MERGED position progression
+    -- one shared timeline, long and short mutually exclusive."""
+    entry_price_long: pd.Series
+    exits: pd.Series            # long exit flags
+    entry_price_short: pd.Series
+    short_exits: pd.Series      # short exit flags
+
+
+def simulate_positions_both(long_entries: pd.Series, short_entries: pd.Series,
+                            close: pd.Series,
+                            long_trigger: Callable[[int, float, pd.DataFrame], bool],
+                            short_trigger: Callable[[int, float, pd.DataFrame], bool],
+                            df: pd.DataFrame) -> PositionWalkBoth:
+    """
+    Like `simulate_positions`, but for side='both' rules whose exit levels
+    are anchored to the entry price on EITHER side.
+
+    evaluation.trades.simulate_symbol merges long and short entry signals
+    into one chronologically-sorted, mutually-exclusive timeline (one
+    `next_free` gate shared across both sides) -- a short signal is dropped
+    while a long position is open, and vice versa. Running `simulate_positions`
+    independently per side would miss that shared gate and could compute an
+    entry price/timing the real engine would never produce. This replays the
+    SAME merged-timeline logic as simulate_symbol.
+    """
+    n = len(close)
+    c = close.to_numpy(dtype=float)
+    long_flags = long_entries.fillna(False).to_numpy(dtype=bool)
+    short_flags = short_entries.fillna(False).to_numpy(dtype=bool)
+    ep_long = np.full(n, np.nan)
+    ep_short = np.full(n, np.nan)
+    out_long = np.zeros(n, dtype=bool)
+    out_short = np.zeros(n, dtype=bool)
+
+    entry_positions = sorted(
+        [(i, "long") for i in np.flatnonzero(long_flags)]
+        + [(i, "short") for i in np.flatnonzero(short_flags)]
+    )
+    next_free = 0
+    for sig_i, side in entry_positions:
+        if sig_i < next_free:
+            continue
+        entry_i = sig_i + 1
+        if entry_i >= n:
+            next_free = n
+            continue
+        price = c[entry_i]
+        if not np.isfinite(price) or price <= 0:
+            continue
+        trigger = long_trigger if side == "long" else short_trigger
+        (ep_long if side == "long" else ep_short)[entry_i] = price
+        hit_day = None
+        for j in range(entry_i + 1, n):
+            if trigger(j, price, df):
+                hit_day = j
+                break
+        if hit_day is None:
+            next_free = n
+            continue
+        (out_long if side == "long" else out_short)[hit_day] = True
+        next_free = hit_day + 2
+    return PositionWalkBoth(
+        entry_price_long=pd.Series(ep_long, index=close.index),
+        exits=pd.Series(out_long, index=close.index),
+        entry_price_short=pd.Series(ep_short, index=close.index),
+        short_exits=pd.Series(out_short, index=close.index),
+    )
+
+
 def level_exits(entry_price: pd.Series, high: pd.Series, low: pd.Series,
                 stop_pct: float, target_pcts: "list[float]",
                 side: str = "long") -> pd.Series:

@@ -86,13 +86,33 @@ MANUAL_OVERRIDE_ADMIT = {
     "jcysz6ni_mtf_sma_crossover_strategy",
 }
 
+# The inverse: screen_source() only pattern-matches Pine syntax, so it cannot
+# catch a domain mismatch (intraday session logic against this repo's daily-
+# bar equity panel) or a missing-provenance / engine-incompatible-mechanism
+# problem discovered by hand while writing a Stage 2 port. These 4 slugs
+# passed the automated screen but were excluded here, discovered during the
+# 2026-08-28 Stage 2 translation push -- see
+# storage/tv_scripts/STAGE2_TRANSLATION_EXCLUSIONS.md for the full reasoning
+# per slug. Treated the same as any other late-caught Stage 1 exclusion: not
+# counted toward the campaign's FDR family, since no TradeRule can honestly
+# represent them.
+MANUAL_OVERRIDE_EXCLUDE = {
+    "boosted_moving_average": "no_provenance",
+    "f2lbhqns_donchian_intraday_momentum_breakout": "intraday_domain_mismatch",
+    "ott3siyk_opening_range_breakout_orb": "intraday_domain_mismatch",
+    "tradleware_dca": "engine_incompatible_pyramiding",
+}
+
 
 def admitted_slugs() -> "dict[str, str]":
     """{slug: note} for every collected .pine file that is Stage-1 admitted,
-    either automatically (screen_source().admitted) or via MANUAL_OVERRIDE_ADMIT."""
+    either automatically (screen_source().admitted) or via MANUAL_OVERRIDE_ADMIT,
+    minus any MANUAL_OVERRIDE_EXCLUDE slug (see that dict's docstring)."""
     out: "dict[str, str]" = {}
     for path in sorted(glob.glob(os.path.join(TV_SCRIPTS_DIR, "*.pine"))):
         slug = os.path.splitext(os.path.basename(path))[0]
+        if slug in MANUAL_OVERRIDE_EXCLUDE:
+            continue
         with open(path, "r", encoding="utf-8") as f:
             result = screen_source(f.read(), script_name=slug)
         if result.admitted:

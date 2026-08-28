@@ -16,10 +16,12 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategies.stage3 import (  # noqa: E402
+    MANUAL_OVERRIDE_EXCLUDE,
     _is_holdout_symbol,
     _max_drawdown_pct,
     _profit_factor,
     _trade_sharpe,
+    admitted_slugs,
     dev_holdout_symbols,
     with_price_floor,
 )
@@ -51,6 +53,21 @@ def test_dev_holdout_symbols_roughly_quarter_holdout():
     dev, holdout = dev_holdout_symbols(symbols)
     frac = len(holdout) / len(symbols)
     assert 0.20 < frac < 0.30
+
+
+# ------------------------------------------------------------ admission list
+
+def test_manual_override_exclude_slugs_are_absent_from_admitted():
+    """screen_source() only pattern-matches Pine syntax and can't catch a
+    domain mismatch (session-gated intraday logic, missing provenance, an
+    engine-incompatible mechanism) -- see
+    storage/tv_scripts/STAGE2_TRANSLATION_EXCLUSIONS.md. These slugs must
+    never resurface in the campaign's authoritative admitted list, which
+    catalog.py and the FDR family size both depend on."""
+    admitted = admitted_slugs()
+    for slug in MANUAL_OVERRIDE_EXCLUDE:
+        assert slug not in admitted, \
+            f"{slug} should be excluded (reason: {MANUAL_OVERRIDE_EXCLUDE[slug]})"
 
 
 # ------------------------------------------------------------ price floor gate
