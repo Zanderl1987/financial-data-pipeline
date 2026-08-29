@@ -4,9 +4,9 @@
 guards, entry/exit vocabulary, mechanism-family keywords) -- it cannot catch a
 domain mismatch (session-gated intraday logic against this repo's daily-bar
 equity panel) or a problem only visible once someone actually sits down to
-write the `TradeRule` port. These 4 slugs collected a `.pine` file and passed
+write the `TradeRule` port. These 6 slugs collected a `.pine` file and passed
 the automated Stage 1 screen (`admitted_slugs()` would otherwise list them),
-but were excluded by hand during the 2026-08-28 Stage 2 translation push,
+but were excluded by hand during the 2026-08-28/29 Stage 2 translation push,
 before any port was written. `strategies/stage3.py`'s `MANUAL_OVERRIDE_EXCLUDE`
 enforces this in code so `admitted_slugs()` -- the function `catalog.py` and
 the campaign's FDR family size both depend on -- does not perpetually list
@@ -19,6 +19,7 @@ them as "admitted, awaiting Stage 2."
 | `ott3siyk_opening_range_breakout_orb` | `intraday_domain_mismatch` | Same collection batch as the entry above (both carry a `// N) STRATEGY NAME` numbered-header comment, part of a small set of day-trading strategies collected together). "Opening Range Breakout" is inherently an intraday concept -- it requires an intraday opening range, which a daily bar does not have. Same `input.session`/force-flat-window pattern. |
 | `tradleware_dca` | `engine_incompatible_pyramiding` | `pyramiding=500`: the strategy's entire mechanism is deploying fixed tranches across many stacked entries over time (dollar-cost averaging) until `initial_capital` is exhausted. This repo's `TradeRule` contract and `evaluation/trades.py` engine are built around ONE position at a time per symbol -- collapsing a DCA accumulation strategy to a single approximate entry would misrepresent the tested mechanism, not translate it. (Same class of contract mismatch as the 3Commas grid/DCA-bot family SKIP-DOMAIN'd during collection -- see `_roster_strategies_popular_2026-08-28_batch8.txt` and earlier rosters.) The author's own sibling script, `tradleware_hodl.pine` (a single buy-and-hold trade), fits the one-position engine fine and WAS ported (`strategies/ports/tradleware_hodl.py`) -- only the multi-entry DCA variant is excluded. |
 | `mzyk8jsg_gold_intraday_ema_bb_vwap_atr` | `intraday_domain_mismatch` | Title says "Gold Intraday"; uses `ta.vwap()` (resets per session, meaningless as a single daily-bar value) plus an explicit UTC-hour session filter (`sessionAsia`/`sessionLondon`/`sessionNY`, `hour(time, "UTC")`) and a per-weekday toggle. Both the VWAP concept and the session-hour gate require intrabar/session structure a daily OHLCV bar does not have. Found during the routine smallest-first pass over the remaining Stage 2 backlog (2026-08-29), before writing a port -- same pattern as the two intraday exclusions above, just collected later (2026-08-28 batch4-8) after the SKIP-INTRADAY collection convention already existed, so it should have been screened out at collection time and wasn't. |
+| `elite_hybrid_orb_artillery` | `intraday_domain_mismatch` | Session opening-range breakout (ORB). The entire trade lifecycle is clocked on intraday session structure: the ORB zone is built from the first `i_orbMin` minutes of the session (`newSess`/`inOrb`/`inTrading`/`atFlatten` on `hour(time,"America/New_York")`), entries only in the post-ORB trading window, session VWAP as context, max trades per session, and a flatten 15 minutes before session end. There is no daily-bar analogue -- an opening range is an intraday object. Same `input.session`-class mismatch as `ott3siyk_opening_range_breakout_orb` (which is the same mechanism), collected later (2026-08-12) and only caught when the smallest-first Stage 2 pass reached it (2026-08-29). |
 
 `tradleware_hodl` and `tradleware_dca` were both flagged back at collection
 time (2026-08-12 commit `eed8264`) as "barely testable under the pnl_p

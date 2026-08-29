@@ -89,7 +89,7 @@ MANUAL_OVERRIDE_ADMIT = {
 # The inverse: screen_source() only pattern-matches Pine syntax, so it cannot
 # catch a domain mismatch (intraday session logic against this repo's daily-
 # bar equity panel) or a missing-provenance / engine-incompatible-mechanism
-# problem discovered by hand while writing a Stage 2 port. These 4 slugs
+# problem discovered by hand while writing a Stage 2 port. These 5 slugs
 # passed the automated screen but were excluded here, discovered during the
 # 2026-08-28 Stage 2 translation push -- see
 # storage/tv_scripts/STAGE2_TRANSLATION_EXCLUSIONS.md for the full reasoning
@@ -102,6 +102,7 @@ MANUAL_OVERRIDE_EXCLUDE = {
     "ott3siyk_opening_range_breakout_orb": "intraday_domain_mismatch",
     "tradleware_dca": "engine_incompatible_pyramiding",
     "mzyk8jsg_gold_intraday_ema_bb_vwap_atr": "intraday_domain_mismatch",
+    "elite_hybrid_orb_artillery": "intraday_domain_mismatch",
 }
 
 

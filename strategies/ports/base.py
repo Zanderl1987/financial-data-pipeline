@@ -267,6 +267,70 @@ def simulate_positions_both(long_entries: pd.Series, short_entries: pd.Series,
     )
 
 
+def simulate_positions_both_indexed(long_entries: pd.Series, short_entries: pd.Series,
+                                    close: pd.Series,
+                                    long_trigger: Callable[[int, int, float, pd.DataFrame], bool],
+                                    short_trigger: Callable[[int, int, float, pd.DataFrame], bool],
+                                    df: pd.DataFrame) -> PositionWalkBoth:
+    """
+    Same shared, long/short mutually-exclusive timeline as
+    `simulate_positions_both`, but exit triggers receive the SIGNAL bar index
+    as a second argument:
+
+        long_trigger(j, sig_i, price, frame)
+
+    where `price` is still the engine's next-close fill (close[sig_i + 1]) and
+    `sig_i` is the bar whose close generated the entry. Pine scripts that
+    compute their stop/take levels inside the `if entryCond` block (e.g.
+    `stop = close - atr * mult`) evaluate those levels on the SIGNAL bar, so a
+    trigger anchored to such a level must index bar `sig_i`, not the fill bar
+    -- which entry-price-anchored triggers using the `price` argument cannot
+    see.
+    """
+    n = len(close)
+    c = close.to_numpy(dtype=float)
+    long_flags = long_entries.fillna(False).to_numpy(dtype=bool)
+    short_flags = short_entries.fillna(False).to_numpy(dtype=bool)
+    ep_long = np.full(n, np.nan)
+    ep_short = np.full(n, np.nan)
+    out_long = np.zeros(n, dtype=bool)
+    out_short = np.zeros(n, dtype=bool)
+
+    entry_positions = sorted(
+        [(i, "long") for i in np.flatnonzero(long_flags)]
+        + [(i, "short") for i in np.flatnonzero(short_flags)]
+    )
+    next_free = 0
+    for sig_i, side in entry_positions:
+        if sig_i < next_free:
+            continue
+        entry_i = sig_i + 1
+        if entry_i >= n:
+            next_free = n
+            continue
+        price = c[entry_i]
+        if not np.isfinite(price) or price <= 0:
+            continue
+        trigger = long_trigger if side == "long" else short_trigger
+        (ep_long if side == "long" else ep_short)[entry_i] = price
+        hit_day = None
+        for j in range(entry_i + 1, n):
+            if trigger(j, sig_i, price, df):
+                hit_day = j
+                break
+        if hit_day is None:
+            next_free = n
+            continue
+        (out_long if side == "long" else out_short)[hit_day] = True
+        next_free = hit_day + 2
+    return PositionWalkBoth(
+        entry_price_long=pd.Series(ep_long, index=close.index),
+        exits=pd.Series(out_long, index=close.index),
+        entry_price_short=pd.Series(ep_short, index=close.index),
+        short_exits=pd.Series(out_short, index=close.index),
+    )
+
+
 def level_exits(entry_price: pd.Series, high: pd.Series, low: pd.Series,
                 stop_pct: float, target_pcts: "list[float]",
                 side: str = "long") -> pd.Series:
