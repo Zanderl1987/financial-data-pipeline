@@ -101,6 +101,7 @@ MANUAL_OVERRIDE_EXCLUDE = {
     "f2lbhqns_donchian_intraday_momentum_breakout": "intraday_domain_mismatch",
     "ott3siyk_opening_range_breakout_orb": "intraday_domain_mismatch",
     "tradleware_dca": "engine_incompatible_pyramiding",
+    "mzyk8jsg_gold_intraday_ema_bb_vwap_atr": "intraday_domain_mismatch",
 }
 
 
