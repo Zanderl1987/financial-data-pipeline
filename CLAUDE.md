@@ -208,6 +208,37 @@ latter after `curated.py` to refresh the mirrors (manual by design):
   (checks if a chunk's output file exists before re-fetching) specifically so a paused/interrupted
   backfill doesn't lose completed work — just re-run the same command later.
 
+- **`upload_huggingface.py` ignores `HF_DATASET_REPO`.** It builds
+  `repo_id = f"ZanderL1337/{repo_name}"` from `--repo-name` (default
+  `financial-data-pipeline`). `.env`'s `HF_DATASET_REPO` points at
+  `ZanderL1337/financial-fundamentals` — a *different, older* dataset that
+  `fundamentals_pipeline.py` reads from. Don't assume the env var is the publish target.
+- **`--private` is load-bearing in BOTH directions.** Since the 2026-08-10 fix the script
+  enforces the requested visibility via `update_repo_settings` *before* uploading. That
+  closed the "silently stayed public" hole but opened its mirror: running with no flag
+  against a currently-private repo will **make it public**. Confirm the repo's actual
+  current visibility before running, not just the flag you meant to pass. (As of
+  2026-08-28 every pipeline dataset is public; only `trading-strategies-data` is private.)
+  The per-table regression guard is what makes a publish safe when another machine may
+  have written the dataset more recently — never `--force` past it.
+- **`prices` contains impossible values** (found 2026-08-28): 536 symbols with
+  `close <= 0` (32,436 rows), 501 with `inf` daily returns, 5,076 with >500% single-day
+  moves, 867k rows under $0.001, plus reverse-split artifacts (BINI 7.48e19). Almost all
+  OTC/shell tickers — AAPL's max daily move is 15.33%, so the liquid universe is fine.
+  Consequence: **`event_study()`'s `baseline_pct`/`edge_pct` are meaningless over a wide
+  universe**, because `event_backtest.py:274` builds the baseline from the
+  cross-sectional mean daily return across every symbol in the close matrix and one
+  broken series explodes it (observed: 3.36e+22). `mean_pct`/`t_stat`/date-level stats
+  are unaffected — they read only `res.car`/`res.events`. `validate.py` has no `close > 0`
+  rule yet.
+- **`event_backtest` does not scale to wide universes.** `load_close()` probes every
+  price table per symbol and keeps the longest series — fine for a handful of symbols,
+  but a 2,935-symbol study issues ~22,000 DuckDB queries against a 47M-row table (90+
+  min, CPU-busy, looks hung but isn't). Mitigate by pinning `price_table=` and running a
+  single study with a side/group column instead of one call per group; see
+  `experiments/congressional_disclosure_event_study.py`. Real fix would be a batched
+  `load_close_matrix()`.
+
 ## Known-broken / dead ends (don't re-attempt without a new angle)
 
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything; needs a replacement source.
