@@ -192,8 +192,54 @@ def bootstrap_sharpe(returns, block_len: int = 21, n_boot: int = 1000,
             "sharpe_ci_hi": round(float(hi), 2), "n_boot": int(len(sharpes))}
 
 
+def _perm_null_totals(flags_chunk: list, perm_seed: int, notional: float,
+                      config) -> tuple:
+    """One permutation over a symbol subset -> (sum pnl, n_trades, n_wins).
+
+    Each symbol draws from its OWN stream seeded deterministically from the
+    (permutation, symbol) pair, so a symbol's entry permutation does not
+    depend on which other symbols precede it -- the null is therefore
+    byte-identical whether it runs on the full symbol list or on any shard.
+    The two draws per symbol (long entries first, then short entries, the
+    historical order) consume only that symbol's stream.
+    """
+    from evaluation import trades as tr        # local import (no cycles)
+    pnl = 0.0
+    n_trades = 0
+    n_wins = 0
+    for sym_idx, sym, index, close, le, lx, se, sx in flags_chunk:
+        n = len(index)
+        rng = np.random.default_rng((int(perm_seed), int(sym_idx)))
+        ple = np.zeros(n, dtype=bool)
+        k = int(le.sum())
+        if k:
+            ple[rng.choice(n, size=k, replace=False)] = True
+        pse = np.zeros(n, dtype=bool)
+        k = int(se.sum())
+        if k:
+            pse[rng.choice(n, size=k, replace=False)] = True
+        for row in tr.simulate_symbol(index, close, ple, lx, pse, sx, sym,
+                                      notional, config=config):
+            pnl += row["pnl_dollars"]
+            n_trades += 1
+            if row["pnl_dollars"] > 0:
+                n_wins += 1
+    return pnl, n_trades, n_wins
+
+
+def _perm_worker(task) -> dict:
+    """multiprocessing task: aggregate every permutation in `perm_ranges`
+    over one symbol subset. Each worker's per-perm sub-totals are summed by
+    the parent, so the merging is exact regardless of partitioning."""
+    flags_chunk, perm_ranges, notional, config = task
+    out = {}
+    for perm_i, perm_seed in perm_ranges:
+        out[perm_i] = _perm_null_totals(flags_chunk, perm_seed, notional, config)
+    return out
+
+
 def permutation_trades(rule, cache: dict, n_perm: int = 200,
-                       seed: int = 0, *, config=None) -> dict:
+                       seed: int = 0, *, config=None, workers: int = 0) -> dict:
     """
     Permutation null for a trade system: within each symbol, relocate the
     same NUMBER of entry signals to uniformly random days (exit rule kept
@@ -204,6 +250,15 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
     to every permutation -- the null must pay the same costs and obey the same
     stops as the strategy, or the comparison is rigged in the strategy's favor.
     None means LEGACY.
+
+    `workers` (default 0 = the classic single-process loop): run the null
+    across `workers` processes, splitting SYMBOLS -- every worker simulates all
+    `n_perm` permutations on its subset and returns per-perm sub-totals. Each
+    symbol's permutation draws come from a stream seeded deterministically from
+    the (permutation, symbol) pair, so the result is byte-identical to
+    workers=0 and across any worker count. Not used when the config requires
+    the capital/concurrency portfolio pass (that pass couples symbols, so the
+    classic loop always handles it).
     """
     from evaluation import trades as tr        # local import (no cycles)
     from evaluation import execution as ev_execution
@@ -218,42 +273,98 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
     obs_pnl = float(obs["pnl_dollars"].sum())
     obs_wr = float((obs["pnl_dollars"] > 0).mean())
     rng = np.random.default_rng(seed)
-    flags = {}
-    for sym, df in cache.items():
+    params = {}                        # legacy dict shape (index, close, (le,lx,se,sx))
+    flags_list = []                    # flat shape for worker sharding
+    for sym_idx, (sym, df) in enumerate(cache.items()):
         if df.empty or "close" not in df.columns:
             continue
-        flags[sym] = (df.index, df["close"].to_numpy(dtype=float),
-                      tr.rule_flags(rule, df))
-    pnl_ge = wr_ge = n_done = 0
-    for _ in range(n_perm):
-        rows = []
-        for sym, (index, close, (le, lx, se, sx)) in flags.items():
-            n = len(index)
-            ple = np.zeros(n, dtype=bool)
-            k = int(le.sum())
-            if k:
-                ple[rng.choice(n, size=k, replace=False)] = True
-            pse = np.zeros(n, dtype=bool)
-            k = int(se.sum())
-            if k:
-                pse[rng.choice(n, size=k, replace=False)] = True
-            rows.extend(tr.simulate_symbol(index, close, ple, lx, pse, sx,
-                                           sym, rule.notional, config=config))
-        if _perm_needs_portfolio and rows:
-            # The null must face the SAME capital budget and concurrency cap as
-            # the observed run. Skipping this would let the null take every
-            # trade while the strategy is rationed -- an unconstrained null is
-            # a harder bar, so the test would be conservative rather than
-            # anti-conservative, but it would no longer be the stated null.
-            rows = tr._portfolio_pass(rows, _cfg)
-        perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
-        if perm.empty:
-            continue
-        n_done += 1
-        if float(perm["pnl_dollars"].sum()) >= obs_pnl:
-            pnl_ge += 1
-        if float((perm["pnl_dollars"] > 0).mean()) >= obs_wr:
-            wr_ge += 1
+        close = df["close"].to_numpy(dtype=float)
+        le, lx, se, sx = tr.rule_flags(rule, df)
+        params[sym] = (df.index, close, (le, lx, se, sx))
+        # sym_idx is the symbol's GLOBAL position in cache order -- the 
+        # per-symbol seed is derived from it so a shard reproduces the full run.
+        flags_list.append((sym_idx, sym, df.index, close, le, lx, se, sx))
+
+    if _perm_needs_portfolio:
+        # Configs that budget capital or cap concurrency couple symbols (the
+        # portfolio pass), so the classic single-process loop runs unchanged
+        # -- same sequential stream, same DataFrame aggregation.
+        pnl_ge = wr_ge = n_done = 0
+        for _ in range(n_perm):
+            rows = []
+            for sym, (index, close, (le, lx, se, sx)) in params.items():
+                n = len(index)
+                ple = np.zeros(n, dtype=bool)
+                k = int(le.sum())
+                if k:
+                    ple[rng.choice(n, size=k, replace=False)] = True
+                pse = np.zeros(n, dtype=bool)
+                k = int(se.sum())
+                if k:
+                    pse[rng.choice(n, size=k, replace=False)] = True
+                rows.extend(tr.simulate_symbol(index, close, ple, lx, pse, sx,
+                                               sym, rule.notional, config=config))
+            if rows:
+                # The null must face the SAME capital budget and concurrency cap
+                # as the observed run. Skipping this would let the null take
+                # every trade while the strategy is rationed.
+                rows = tr._portfolio_pass(rows, _cfg)
+            perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
+            if perm.empty:
+                continue
+            n_done += 1
+            if float(perm["pnl_dollars"].sum()) >= obs_pnl:
+                pnl_ge += 1
+            if float((perm["pnl_dollars"] > 0).mean()) >= obs_wr:
+                wr_ge += 1
+    else:
+        # Per-(permutation, symbol) streams derived deterministically from
+        # `seed`. This replaces the old single sequential stream: same seed =>
+        # same null, and the null can be sharded across workers without
+        # changing the draws.
+        perm_seeds = rng.integers(0, 2**31 - 1, size=n_perm)
+        if workers > 1 and len(flags_list) > 1:
+            n_w = min(workers, len(flags_list))
+            base, extra = divmod(len(flags_list), n_w)
+            chunks, i0 = [], 0
+            for w in range(n_w):
+                size = base + (1 if w < extra else 0)
+                chunks.append(flags_list[i0:i0 + size])
+                i0 += size
+            tasks = [(chunk, [(i, int(s)) for i, s in enumerate(perm_seeds)],
+                      rule.notional, config) for chunk in chunks]
+            from concurrent.futures import ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=n_w) as ex:
+                results = list(ex.map(_perm_worker, tasks))
+            merged: "dict[int, tuple]" = {}
+            for res in results:
+                for perm_i, (pnl, nt, nw) in res.items():
+                    cp, ct, cw = merged.get(perm_i, (0.0, 0, 0))
+                    merged[perm_i] = (cp + pnl, ct + nt, cw + nw)
+            pnl_ge = wr_ge = n_done = 0
+            for perm_i in range(n_perm):
+                if perm_i not in merged:
+                    continue
+                pnl, nt, nw = merged[perm_i]
+                if nt == 0:
+                    continue
+                n_done += 1
+                if pnl >= obs_pnl:
+                    pnl_ge += 1
+                if (nw / nt) >= obs_wr:
+                    wr_ge += 1
+        else:
+            pnl_ge = wr_ge = n_done = 0
+            for perm_seed in perm_seeds:
+                pnl, nt, nw = _perm_null_totals(flags_list, int(perm_seed),
+                                                rule.notional, config)
+                if nt == 0:
+                    continue
+                n_done += 1
+                if pnl >= obs_pnl:
+                    pnl_ge += 1
+                if (nw / nt) >= obs_wr:
+                    wr_ge += 1
     if n_done < max(20, n_perm // 4):
         return {"pnl_p": None, "win_rate_p": None,
                 "perm_reason": f"only {n_done} permutations produced trades"}

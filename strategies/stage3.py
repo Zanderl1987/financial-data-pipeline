@@ -75,23 +75,22 @@ SENSITIVITY_COST_BPS = (5.0, 20.0)
 # -> supertrend_entry_tp123.pine) -- so admission is determined by re-running
 # strategies.screen.screen_source() directly against each collected file, not
 # by parsing roster slugs. The automated screener's only known false positives
-# are these 3 unconfirmed_htf hand-overrides, confirmed safe and logged in
+# are these 2 unconfirmed_htf hand-overrides, confirmed safe and logged in
 # work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-12_tv-catalog.md sessions 3-4 (verified again here by
 # grepping the roster notes verbatim -- each says "manual override... no
 # repaint risk"). Every other screen_source() exclusion matches a roster note
 # that says "screened OUT" for the same reason, so it is not relitigated here.
 MANUAL_OVERRIDE_ADMIT = {
     "ras16l2w_bvol_early_entry",
-    "xslyyowi_sector_rotation_momentum_framework",
     "jcysz6ni_mtf_sma_crossover_strategy",
 }
 
 # The inverse: screen_source() only pattern-matches Pine syntax, so it cannot
 # catch a domain mismatch (intraday session logic against this repo's daily-
 # bar equity panel) or a missing-provenance / engine-incompatible-mechanism
-# problem discovered by hand while writing a Stage 2 port. These 5 slugs
+# problem discovered by hand while writing a Stage 2 port. These 7 slugs
 # passed the automated screen but were excluded here, discovered during the
-# 2026-08-28 Stage 2 translation push -- see
+# 2026-08-28/29 Stage 2 translation push -- see
 # storage/tv_scripts/STAGE2_TRANSLATION_EXCLUSIONS.md for the full reasoning
 # per slug. Treated the same as any other late-caught Stage 1 exclusion: not
 # counted toward the campaign's FDR family, since no TradeRule can honestly
@@ -103,6 +102,7 @@ MANUAL_OVERRIDE_EXCLUDE = {
     "tradleware_dca": "engine_incompatible_pyramiding",
     "mzyk8jsg_gold_intraday_ema_bb_vwap_atr": "intraday_domain_mismatch",
     "elite_hybrid_orb_artillery": "intraday_domain_mismatch",
+    "xslyyowi_sector_rotation_momentum_framework": "cross_symbol_benchmark_join",
 }
 
 
@@ -260,7 +260,7 @@ def _max_drawdown_pct(trades: pd.DataFrame):
 # --------------------------------------------------------------- per-strategy run
 
 def run_strategy(slug: str, meta: dict, roster_note: str, cache: dict,
-                 n_perm: int = N_PERM, seed: int = SEED) -> dict:
+                 n_perm: int = N_PERM, seed: int = SEED, workers: int = 0) -> dict:
     rule, translation_verified = load_rule_for(slug)
     rule = with_price_floor(rule)
 
@@ -272,12 +272,13 @@ def run_strategy(slug: str, meta: dict, roster_note: str, cache: dict,
     trades_df = ev_trades.simulate(rule, cache, config=primary_cfg)
     summary = ev_trades.trade_summary(trades_df)
     perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed,
-                                       config=primary_cfg)
+                                       config=primary_cfg, workers=workers)
 
     perm_sens = {}
     for bps in SENSITIVITY_COST_BPS:
         perm_sens[bps] = ev_stats.permutation_trades(
-            rule, cache, n_perm=n_perm, seed=seed, config=cost_config(bps))
+            rule, cache, n_perm=n_perm, seed=seed, config=cost_config(bps),
+            workers=workers)
 
     pnl_p = perm.get("pnl_p")
     pnl_p_5 = perm_sens[5.0].get("pnl_p")
@@ -356,7 +357,7 @@ def registry_rows_for(row: dict, run_id: str, universe_hash: str, date_range: st
 # --------------------------------------------------------------- main
 
 def run_all(n_perm: int = N_PERM, seed: int = SEED, write_registry: bool = True,
-           limit: "int | None" = None) -> pd.DataFrame:
+           limit: "int | None" = None, workers: int = 0) -> pd.DataFrame:
     slugs = admitted_slugs()
     cache = dev_cache()
     uhash = ev_registry.universe_hash(cache.keys())
@@ -378,7 +379,8 @@ def run_all(n_perm: int = N_PERM, seed: int = SEED, write_registry: bool = True,
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
         try:
-            row = run_strategy(slug, meta, note, cache, n_perm=n_perm, seed=seed)
+            row = run_strategy(slug, meta, note, cache, n_perm=n_perm, seed=seed,
+                               workers=workers)
         except Exception as e:
             row = {"strategy_id": slug, "stage": "stage3", "error": f"{type(e).__name__}: {e}"}
         rows.append(row)
@@ -397,12 +399,19 @@ def run_all(n_perm: int = N_PERM, seed: int = SEED, write_registry: bool = True,
 
 
 if __name__ == "__main__":
+    import multiprocessing as _mp
+    _mp.freeze_support()   # Windows spawn guard for the --workers permutation path
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--no-registry", action="store_true")
     ap.add_argument("--n-perm", type=int, default=N_PERM)
+    ap.add_argument("--workers", type=int, default=0,
+                    help="parallel processes for the permutation null (0 = "
+                         "classic single-process loop; results are "
+                         "byte-identical either way)")
     args = ap.parse_args()
-    out = run_all(n_perm=args.n_perm, write_registry=not args.no_registry, limit=args.limit)
+    out = run_all(n_perm=args.n_perm, write_registry=not args.no_registry,
+                  limit=args.limit, workers=args.workers)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.width", 200)
     cols = [c for c in ["strategy_id", "translation_verified", "n_trades",

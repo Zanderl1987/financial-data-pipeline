@@ -636,6 +636,73 @@ class TestTier2:
         r = ev_stats.permutation_trades(rule, cache, n_perm=20, seed=0)
         assert r["pnl_p"] is None and "no realized trades" in r["perm_reason"]
 
+    def test_permutation_parallel_matches_sequential_and_deterministic(self):
+        rng = np.random.default_rng(11)
+        idx = pd.bdate_range("2019-01-02", periods=300)
+        cache = {}
+        for sym in ("AAA", "BBB", "CCC", "DDD", "EEE"):
+            close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, size=300)))
+            ent = np.zeros(300, dtype=bool)
+            ent[rng.choice(300, size=15, replace=False)] = True
+            ex = np.zeros(300, dtype=bool)
+            ex[rng.choice(300, size=40, replace=False)] = True
+            cache[sym] = pd.DataFrame({"close": close, "ent": ent, "ex": ex},
+                                      index=idx)
+        rule = TradeRule(name="parrule", entries=lambda d: d["ent"],
+                         exits=lambda d: d["ex"])
+        seq = ev_stats.permutation_trades(rule, cache, n_perm=40, seed=7)
+        par = ev_stats.permutation_trades(rule, cache, n_perm=40, seed=7,
+                                          workers=4)
+        par3 = ev_stats.permutation_trades(rule, cache, n_perm=40, seed=7,
+                                           workers=3)
+        assert par == par3 == seq, "symbol-split null must match the sequential null"
+        assert seq["pnl_p"] is not None and 0.0 <= seq["pnl_p"] <= 1.0
+        assert seq["n_perm"] > 20
+
+    def test_permutation_parallel_single_symbol_falls_back(self):
+        # A one-symbol cache can't be sharded; the result must still come back
+        # and match the sequential path (singleton guard in the workers branch).
+        rng = np.random.default_rng(3)
+        idx = pd.bdate_range("2021-01-04", periods=200)
+        close = 50 * np.exp(np.cumsum(rng.normal(0, 0.005, size=200)))
+        ent = np.zeros(200, dtype=bool)
+        ent[rng.choice(200, size=8, replace=False)] = True
+        ex = np.zeros(200, dtype=bool)
+        ex[rng.choice(200, size=20, replace=False)] = True
+        cache = {"AAA": pd.DataFrame({"close": close, "ent": ent, "ex": ex},
+                                     index=idx)}
+        rule = TradeRule(name="one", entries=lambda d: d["ent"],
+                         exits=lambda d: d["ex"])
+        seq = ev_stats.permutation_trades(rule, cache, n_perm=30, seed=5)
+        par = ev_stats.permutation_trades(rule, cache, n_perm=30, seed=5,
+                                          workers=8)
+        assert par is not None and par == seq
+
+    def test_permutation_portfolio_config_stays_classic(self):
+        # A config with a capital/concurrency budget couples symbols and must
+        # take the classic portfolio-pass loop; the result stays deterministic
+        # AND respects the budget (not an error, no silent unbounded null).
+        from evaluation import execution as ev_execution
+        rng = np.random.default_rng(3)
+        idx = pd.bdate_range("2021-01-04", periods=200)
+        cache = {}
+        for sym in ("AAA", "BBB", "CCC"):
+            close = 50 * np.exp(np.cumsum(rng.normal(0, 0.005, size=200)))
+            ent = np.zeros(200, dtype=bool)
+            ent[rng.choice(200, size=8, replace=False)] = True
+            ex = np.zeros(200, dtype=bool)
+            ex[rng.choice(200, size=20, replace=False)] = True
+            cache[sym] = pd.DataFrame({"close": close, "ent": ent, "ex": ex},
+                                      index=idx)
+        rule = TradeRule(name="cap", entries=lambda d: d["ent"],
+                         exits=lambda d: d["ex"])
+        cfg = ev_execution.ExecutionConfig(
+            name="capped", limits=ev_execution.PortfolioLimits(capital=100_000.0))
+        a = ev_stats.permutation_trades(rule, cache, n_perm=30, seed=1, config=cfg)
+        b = ev_stats.permutation_trades(rule, cache, n_perm=30, seed=1, config=cfg,
+                                        workers=4)
+        assert a is not None and a == b
+
     def test_bh_fdr_known_vector(self):
         # NOTE: brief's original literals (0.039, 0.041) sit just ABOVE their
         # own BH thresholds (0.03, 0.04), so the largest-k-satisfying-p_(k)
