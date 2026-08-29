@@ -59,37 +59,62 @@ This is consistent with the sentiment (2026-07-06) and oil-shock (2026-07-07) re
 the honest, clustering-aware version of the statistic keeps killing effects that look
 real when pooled.
 
-## Caveat found while checking the output — `baseline` is unusable
+## Caveat found while checking the output — `baseline` was unusable (FIXED 2026-08-29)
 
-The `baseline_pct` and `edge_pct` columns in `event_study()`'s horizons table came back
-absurd (`4.25e9`, `3.36e+22`). Cause: `event_backtest.py:274` computes the unconditional
-baseline as the **cross-sectional mean daily return across every symbol in the close
-matrix**, then compounds it. A single symbol with a broken price series explodes it.
+The `baseline_pct` and `edge_pct` columns first came back absurd (`4.25e9`,
+`3.36e+22`). Cause: `event_backtest.py:274` computes the unconditional baseline as the
+**cross-sectional mean daily return across every symbol in the close matrix**, then
+compounds it. A single symbol with a broken price series explodes it.
 
-**This does not affect the result above.** `mean_pct`, `t_stat`, and the whole date-level
-analysis read only from `res.car` / `res.events`; `baseline` feeds `baseline_pct` and
-`edge_pct` and nothing else. But **`baseline_pct`/`edge_pct` should not be trusted in any
-event study run against `prices`** until the underlying data is cleaned.
+Root cause was in the data, not the engine — see the section below — and was fixed on
+2026-08-29 (commit `503989c`). **The study was re-run end to end on the cleaned store
+and every CAR, t-stat, hit rate and date-level p-value is IDENTICAL to the original
+run.** Only the baseline changed, from `3.36e+22` to a plausible curve:
 
-## Underlying data-quality finding — `prices` contains impossible values
+| horizon | 1 | 3 | 5 | 10 | 21 | 63 |
+|---|---|---|---|---|---|---|
+| baseline % | 0.40 | 1.17 | 1.96 | 4.05 | 8.93 | 49.15 |
 
-Surfaced by the above, and repo-wide rather than specific to this study. In `prices`
-(2012+, 27,623 symbols):
+That is the confirmation of the claim made at the time: `mean_pct`, `t_stat` and the
+whole date-level analysis read only `res.car` / `res.events`, so the contamination never
+touched the verdict. The NumPy `invalid value encountered in reduce` warnings that the
+first run emitted are also gone.
 
-- **501 symbols with `inf` daily returns** (division by a zero close)
-- **536 symbols with `close <= 0`** — 32,436 rows total
-- **5,076 symbols with a >500% single-day move**
-- 867,149 rows with `close < $0.001`
-- Absurd maxima from reverse-split/adjustment artifacts: BINI 7.48e19, ADTX 1.37e11,
-  TOPS 5.81e12
+## Underlying data-quality finding — `prices` contained impossible values (FIXED)
 
-These are overwhelmingly OTC/shell tickers. Sanity check: AAPL's max daily move is
-15.33%, so the healthy universe is fine.
+Surfaced by the above, repo-wide rather than specific to this study. `prices` carried
+**173,178 impossible rows — 161,783 with NEGATIVE prices** (min close -282.83, min open
+-3.6e7), plus 501 symbols with `inf` daily returns.
 
-**Why this study is still valid:** only **229 of 33,600** congressional equity rows
-(0.68%) touch an affected ticker — 4 with inf returns, 42 with >500% moves, 15 with
-`close <= 0`. A 0.68% contamination cannot move adjusted p-values of 0.61–0.89 to
-below 0.05.
+Two shapes, both traced to Schwab's deep history and both present identically across
+independent fetches nine days apart (`price_history_pipeline.py` does no sign
+arithmetic, so this is source data, not a transform bug):
+
+- **all-zero OHLCV bars stamped on market holidays** — 1970-02-23 (Washington's
+  Birthday), Good Friday, Labor Day, Thanksgiving, Christmas. Padding for non-trading
+  days, not real bars.
+- **sign-flipped bars that still carry real volume** — COST 1986-07-09 at
+  `open -28.31 / volume 1,116,800`, with OHLC ordering internally consistent in
+  negative space.
+
+Fixed at curation (`curated._PRICE_SANITY`): raw stays the immutable record of what the
+API returned, and any rebuild regenerates a clean snapshot. `prices` went 46,953,549 ->
+46,780,941 rows. `futures`, `market_history` and `options_history` are deliberately
+excluded — WTI really settled at -$37.63 on 2020-04-20 and options expire worthless.
+
+**Why this study was valid even before the fix:** only 229 of 33,600 congressional
+equity rows (0.68%) touched an affected ticker, which cannot move adjusted p-values of
+0.61-0.89 below 0.05. The identical re-run confirms it directly.
+
+### Still open — a second, subtler corruption
+
+Internally-consistent but simply wrong values, which no structural rule catches. COST in
+1999 reads $1-7 with 170% intraday ranges; it actually traded near $70-80. OHLC ordering
+is valid and volume is plausible, so a mechanical filter would risk destroying real
+data. Recent history is sound (COST 2024 averages $823.96, correct) and the damage
+concentrates in pre-2010 Schwab history. Needs either cross-source validation of deep
+history or a decision to truncate `prices` before a cutoff year — deliberately NOT
+auto-fixed.
 
 ## Performance note — `event_backtest` does not scale to wide universes
 
