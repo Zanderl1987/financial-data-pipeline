@@ -99,12 +99,14 @@ class ValidationResult:
 # critical_nn   — subset that MUST NOT be >50% null            → ERROR if mostly null
 # date_col      — column for future-date check (None = skip)
 # value_ranges  — {col: (lo, hi)}                              → WARN if violated
+# positive_cols — columns that must be STRICTLY > 0            → WARN if violated
 
 SCHEMAS: dict[str, dict] = {
     "prices": {
         "required":    ["symbol", "date", "open", "high", "low", "close", "volume"],
         "critical_nn": ["symbol", "date", "close"],
         "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
     },
     "options_metrics": {
         "required":    ["symbol", "date"],
@@ -182,6 +184,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["symbol", "date", "open", "high", "low", "close", "volume", "sector"],
         "critical_nn": ["symbol", "date", "close"],
         "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
     },
     "short_interest": {
         "required":    ["symbol", "shares_short", "short_pct_float"],
@@ -202,6 +205,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["symbol", "last", "bid", "ask"],
         "critical_nn": ["symbol", "last"],
         "date_col":    None,
+        "positive_cols": ["last"],
     },
     "schwab_options": {
         "required":    ["symbol", "put_call", "expiration_date", "strike", "snapshot_date"],
@@ -301,6 +305,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["symbol", "date", "open", "high", "low", "close", "volume"],
         "critical_nn": ["symbol", "date", "close"],
         "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
     },
     "tiingo_news": {
         "required":    ["article_id", "date", "title"],
@@ -317,6 +322,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["pair", "date", "open", "high", "low", "close"],
         "critical_nn": ["pair", "date", "close"],
         "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
     },
     # ── Institutional holdings ───────────────────────────────────────────────
     "institutional_holdings": {
@@ -413,6 +419,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["coin_id", "symbol", "date", "open", "high", "low", "close"],
         "critical_nn": ["coin_id", "symbol", "date", "close"],
         "date_col":    "date",
+        "positive_cols": ["close"],
     },
     # ── Forex rates (Frankfurter keyless) ────────────────────────────────────
     "forex_rates": {
@@ -541,6 +548,7 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["date", "index_name", "close"],
         "date_col":    "date",
         "value_ranges": {"close": (0, 400)},
+        "positive_cols": ["close"],
     },
     # ── FDIC bank institutions ────────────────────────────────────────────────
     "fdic_institutions": {
@@ -878,6 +886,7 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["symbol", "date", "close", "adj_close", "fetched_at"],
         "critical_nn": ["symbol", "date", "close", "adj_close"],
         "date_col":    "date",
+        "positive_cols": ["close", "adj_close"],
     },
     # ── TradingView technical-rating snapshots ────────────────────────────────
     "tv_ratings": {
@@ -900,6 +909,7 @@ SCHEMAS: dict[str, dict] = {
                         "close", "volume", "freq_min", "fetched_at"],
         "critical_nn": ["symbol", "datetime", "close"],
         "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
     },
     "schwab_movers": {
         "required":    ["date", "index_symbol", "sort", "rank", "symbol",
@@ -1579,6 +1589,41 @@ def _check_value_ranges(df: pd.DataFrame, schema: dict) -> list:
     return results
 
 
+def _check_positive(df: pd.DataFrame, schema: dict) -> list:
+    """
+    Columns that must be strictly greater than zero.
+
+    Separate from value_ranges because that check uses `< lo`, so a bound of
+    (0, hi) silently accepts an exact 0 -- and 0 is the common corruption in
+    price data, not a near-miss. A zero or negative equity close is impossible,
+    not merely implausible.
+
+    Opt-in per table: a negative close is REAL for some instruments (WTI
+    settled at -$37.63 on 2020-04-20, which is genuinely present in `futures`
+    and `market_history`), and an option can expire worthless at 0. Only list
+    columns where non-positive is definitionally wrong.
+    """
+    results = []
+    for col in schema.get("positive_cols", []):
+        if col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        bad = numeric.notna() & (numeric <= 0)
+        n_bad = int(bad.sum())
+        if n_bad > 0:
+            worst = float(numeric[bad].min())
+            n_zero = int((numeric == 0).sum())
+            results.append(CheckResult(
+                f"positive:{col}", Severity.WARNING,
+                f"{n_bad} non-positive values ({n_zero} zero, "
+                f"{n_bad - n_zero} negative, min {worst:g})"
+            ))
+        else:
+            results.append(CheckResult(
+                f"positive:{col}", Severity.OK, f"all {col} values > 0"))
+    return results
+
+
 def _latest_file(glob_path: str) -> list[str]:
     """
     List matching files sorted OLDEST to NEWEST by modification time.
@@ -1673,6 +1718,7 @@ def validate_df(
     checks.extend(_check_null_rates(df, schema))
     checks.append(_check_future_dates(df, schema))
     checks.extend(_check_value_ranges(df, schema))
+    checks.extend(_check_positive(df, schema))
     checks.append(_check_row_count(table, df))
     if check_freshness:
         checks.append(_check_fetched_at(df, max_age_hours))
@@ -1701,6 +1747,36 @@ def validate_table(table: str) -> ValidationResult:
     except Exception as exc:
         return ValidationResult(table, [
             CheckResult("read", Severity.ERROR, f"Failed to read {os.path.basename(files[-1])}: {exc}")
+        ])
+    return validate_df(table, df, check_freshness=False)
+
+
+def validate_table_full(table: str) -> ValidationResult:
+    """
+    Validate a table's ENTIRE deduplicated history, not just its newest file.
+
+    validate_table() reads only the mtime-latest raw file. That keeps the
+    routine health check fast, but it means a defect anywhere in history is
+    invisible: `prices` carries 170,795 non-positive rows (161,783 of them
+    negative) and still spot-checks clean, because its newest daily file is
+    fine. Use this to audit an existing table; use validate_table() for the
+    daily gate.
+
+    Reads through query.py, so it sees the curated snapshot when one exists.
+    """
+    if table not in q.CATALOG:
+        return ValidationResult(table, [
+            CheckResult("catalog", Severity.ERROR, f"'{table}' not in CATALOG")
+        ])
+    try:
+        df = q.load(table)
+    except Exception as exc:
+        return ValidationResult(table, [
+            CheckResult("read", Severity.ERROR, f"Failed to load {table}: {exc}")
+        ])
+    if df.empty:
+        return ValidationResult(table, [
+            CheckResult("files", Severity.WARNING, "No data on disk yet")
         ])
     return validate_df(table, df, check_freshness=False)
 
@@ -1744,10 +1820,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate financial pipeline Parquet outputs")
     parser.add_argument("--table", help="Validate a single table by name")
     parser.add_argument("--all",   action="store_true", help="Include tables with no data")
+    parser.add_argument("--full",  action="store_true",
+                        help="Validate the table's ENTIRE history via the curated "
+                             "snapshot instead of spot-checking its newest raw file "
+                             "(slower; use to audit, not as the daily gate)")
     args = parser.parse_args()
 
     if args.table:
-        res = validate_table(args.table)
+        res = validate_table_full(args.table) if args.full else validate_table(args.table)
         print(res)
         sys.exit(0 if res.passed else 1)
 

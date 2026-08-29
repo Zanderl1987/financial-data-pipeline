@@ -185,3 +185,66 @@ class TestValidateAll:
         summary = v.validate_all()
         no_data = summary[summary["status"] == "NO DATA"]
         assert (no_data["latest_file"] == "").all()
+
+
+# -- positive_cols check (added 2026-08-29) -----------------------------------
+
+class TestPositiveCols:
+    """
+    `close > 0` and friends. Exists because value_ranges uses `< lo`, so a
+    bound of (0, hi) silently accepts an exact 0 -- and 0 is the common
+    corruption in price data.
+    """
+
+    def test_flags_zero_and_negative(self):
+        df = pd.DataFrame({"close": [10.0, 0.0, -5.0, 3.0]})
+        res = v._check_positive(df, {"positive_cols": ["close"]})
+        assert len(res) == 1
+        assert res[0].severity == v.Severity.WARNING
+        assert "1 zero" in res[0].message
+        assert "1 negative" in res[0].message
+
+    def test_value_ranges_alone_would_miss_the_zero(self):
+        # The reason this check exists at all -- guards against someone
+        # "simplifying" it back into value_ranges.
+        df = pd.DataFrame({"close": [10.0, 0.0]})
+        rng = v._check_value_ranges(df, {"value_ranges": {"close": (0, 1000)}})
+        assert rng[0].severity == v.Severity.OK,             "value_ranges(0, hi) is expected to accept 0 -- if this now fails, "             "positive_cols may be redundant"
+        pos = v._check_positive(df, {"positive_cols": ["close"]})
+        assert pos[0].severity == v.Severity.WARNING
+
+    def test_all_positive_passes(self):
+        df = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+        res = v._check_positive(df, {"positive_cols": ["close"]})
+        assert res[0].severity == v.Severity.OK
+
+    def test_nulls_are_ignored(self):
+        df = pd.DataFrame({"close": [1.0, None, 2.0]})
+        res = v._check_positive(df, {"positive_cols": ["close"]})
+        assert res[0].severity == v.Severity.OK
+
+    def test_missing_column_is_skipped_not_failed(self):
+        df = pd.DataFrame({"close": [1.0]})
+        res = v._check_positive(df, {"positive_cols": ["close", "nonexistent"]})
+        assert len(res) == 1
+
+    def test_no_positive_cols_key_is_a_no_op(self):
+        assert v._check_positive(pd.DataFrame({"close": [-1.0]}), {}) == []
+
+    def test_equity_price_tables_declare_it(self):
+        for table in ("prices", "tiingo_prices", "yfinance_universe_prices",
+                      "schwab_intraday", "sector_etfs"):
+            assert "close" in v.SCHEMAS[table].get("positive_cols", []),                 f"{table} should require a positive close"
+
+    def test_instruments_that_can_legitimately_go_negative_are_excluded(self):
+        # WTI settled at -$37.63 on 2020-04-20 and that print is really in
+        # both tables; an option can expire worthless at 0. Flagging these
+        # would be a false positive, so they must stay opted out.
+        for table in ("futures", "market_history", "options_history"):
+            assert "positive_cols" not in v.SCHEMAS.get(table, {}),                 f"{table} can legitimately hold non-positive prices"
+
+    def test_positive_cols_are_declared_columns(self):
+        for table, schema in v.SCHEMAS.items():
+            for col in schema.get("positive_cols", []):
+                assert col in schema["required"],                     f"{table}: positive_cols has '{col}' which is not in required"
+
