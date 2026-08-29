@@ -376,6 +376,59 @@ def _curated_path(table: str) -> str:
 # full-backfill case `prices` was added for.
 _LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints"}
 
+# ── Price sanity filter ───────────────────────────────────────────────────────
+# A non-positive equity price is impossible, but `prices` carries 173,178 such
+# rows (161,783 of them NEGATIVE, min -282.83; `open` reaches -3.6e7). Two
+# distinct shapes, both from Schwab's deep history:
+#   * all-zero OHLCV bars stamped on market holidays (1970-02-23, Good Friday,
+#     Thanksgiving...) -- padding for non-trading days, not real bars;
+#   * sign-flipped bars that still carry real volume (COST 1986-07-09 at
+#     open -28.31 / volume 1,116,800).
+# Both are unusable, and keeping them is strictly worse than dropping them: a
+# missing bar is handled everywhere (event_backtest skips incomplete windows),
+# while a negative bar silently poisons whatever consumes it -- it is what made
+# event_study()'s unconditional baseline return 3.36e+22 on 2026-08-28.
+#
+# Filtered at CURATION, not in the pipeline: raw stays the immutable record of
+# what the API actually returned, and re-running curated.py regenerates a clean
+# snapshot, so this is fully reversible by editing the predicate below.
+#
+# NULLs are preserved -- only values that are present AND non-positive are
+# dropped. Deliberately NOT filtered: `futures` and `market_history` (WTI really
+# settled at -$37.63 on 2020-04-20) and `options_history` (options expire
+# worthless at 0). Mirrors validate.py's `positive_cols`.
+_PRICE_SANITY: dict[str, list[str]] = {
+    "prices":                   ["open", "high", "low", "close"],
+    "sector_etfs":              ["open", "high", "low", "close"],
+    "tiingo_prices":            ["open", "high", "low", "close"],
+    "yfinance_universe_prices": ["close", "adj_close"],
+    "schwab_intraday":          ["open", "high", "low", "close"],
+    "alpha_vantage_forex":      ["open", "high", "low", "close"],
+    "crypto_history":           ["close"],
+    "cboe_volatility":          ["close"],
+}
+
+
+def _drop_nonpositive_prices(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose price columns are present but <= 0 (see _PRICE_SANITY)."""
+    cols = [c for c in _PRICE_SANITY.get(table, []) if c in df.columns]
+    if not cols:
+        return df
+    bad = pd.Series(False, index=df.index)
+    for c in cols:
+        numeric = pd.to_numeric(df[c], errors="coerce")
+        bad |= numeric.notna() & (numeric <= 0)
+    return df[~bad] if bad.any() else df
+
+
+def _sanity_sql_predicate(table: str) -> str:
+    """The same filter as SQL, for the DuckDB path in _compact_large_table()."""
+    cols = _PRICE_SANITY.get(table, [])
+    if not cols:
+        return ""
+    return " AND ".join(f"({c} IS NULL OR {c} > 0)" for c in cols)
+
+
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     """DuckDB-native equivalent of compact() for oversized tables — returns
@@ -392,6 +445,8 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     partition_cols = ", ".join(key)
     raw_scan = f"read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)"
+    sanity = _sanity_sql_predicate(table)
+    where_sanity = f"WHERE {sanity}" if sanity else ""
 
     con = duckdb.connect()
     try:
@@ -403,6 +458,7 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
                         PARTITION BY {partition_cols} ORDER BY fetched_at DESC
                     ) AS _rn
                     FROM {raw_scan}
+                    {where_sanity}
                 )
                 WHERE _rn = 1
             ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
@@ -466,6 +522,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = _normalize_period_end(table, df)
     df = _backfill_snapshot_date(table, df)
+    df = _drop_nonpositive_prices(table, df)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)

@@ -213,3 +213,59 @@ class TestPeriodEndNormalization:
         })
         out = curated.dedup("prices", df)
         assert out.iloc[0]["close"] == 1.0
+
+
+# -- price sanity filter (added 2026-08-29) -----------------------------------
+
+class TestPriceSanity:
+    """
+    Non-positive prices are dropped at curation. See curated._PRICE_SANITY --
+    `prices` carried 173,178 such rows (161,783 negative) from Schwab's deep
+    history, which is what made event_study()'s baseline return 3.36e+22.
+    """
+
+    def _df(self):
+        return pd.DataFrame({
+            "symbol": ["A", "B", "C", "D", "E"],
+            "open":   [10.0, -1.0,  5.0, None,  2.0],
+            "high":   [11.0,  1.0,  5.0,  3.0,  2.0],
+            "low":    [ 9.0,  1.0,  0.0,  3.0,  2.0],
+            "close":  [10.5,  1.0,  5.0,  3.0,  0.0],
+        })
+
+    def test_drops_negative_and_zero_keeps_null(self):
+        out = curated._drop_nonpositive_prices("prices", self._df())
+        # B negative open, C zero low, E zero close -> dropped.
+        # D has a NULL open but is otherwise valid -> kept.
+        assert list(out["symbol"]) == ["A", "D"]
+
+    def test_untouched_when_table_not_listed(self):
+        df = self._df()
+        assert len(curated._drop_nonpositive_prices("some_other_table", df)) == len(df)
+
+    def test_instruments_that_can_go_negative_are_excluded(self):
+        # WTI settled at -$37.63 on 2020-04-20 and that print is really in both
+        # tables; options expire worthless at 0. Filtering them would destroy
+        # real data, so they must stay out of _PRICE_SANITY.
+        for table in ("futures", "market_history", "options_history"):
+            assert table not in curated._PRICE_SANITY
+
+    def test_sql_predicate_matches_the_pandas_filter(self):
+        # prices goes through the DuckDB path (_LARGE_TABLES), every other
+        # table through the pandas path -- they must agree.
+        pred = curated._sanity_sql_predicate("prices")
+        for col in curated._PRICE_SANITY["prices"]:
+            assert f"({col} IS NULL OR {col} > 0)" in pred
+        assert curated._sanity_sql_predicate("futures") == ""
+
+    def test_prices_uses_the_duckdb_path(self):
+        # If prices ever leaves _LARGE_TABLES the SQL predicate stops being
+        # exercised, so this guards the assumption above.
+        assert "prices" in curated._LARGE_TABLES
+
+    def test_dedup_applies_the_filter(self):
+        df = self._df()
+        df["fetched_at"] = "2026-08-29T00:00:00"
+        out = curated.dedup("sector_etfs", df)
+        assert list(out["symbol"]) == ["A", "D"]
+
