@@ -377,57 +377,155 @@ def _curated_path(table: str) -> str:
 _LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints"}
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
-# A non-positive equity price is impossible, but `prices` carries 173,178 such
-# rows (161,783 of them NEGATIVE, min -282.83; `open` reaches -3.6e7). Two
-# distinct shapes, both from Schwab's deep history:
-#   * all-zero OHLCV bars stamped on market holidays (1970-02-23, Good Friday,
-#     Thanksgiving...) -- padding for non-trading days, not real bars;
-#   * sign-flipped bars that still carry real volume (COST 1986-07-09 at
-#     open -28.31 / volume 1,116,800).
-# Both are unusable, and keeping them is strictly worse than dropping them: a
-# missing bar is handled everywhere (event_backtest skips incomplete windows),
-# while a negative bar silently poisons whatever consumes it -- it is what made
-# event_study()'s unconditional baseline return 3.36e+22 on 2026-08-28.
+# SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
+# That was WRONG: cross-validation against yfinance proved the negatives are
+# legitimate. Schwab BACK-ADJUSTS deep history for special dividends
+# SUBTRACTIVELY, so `schwab_close = raw_close - (sum of future special
+# dividends)`. Verified exactly on COST: the offset is 32 after 2015-06
+# (= the 7 + 10 + 15 specials still to come) and 0 after 2024-06 (none left).
+# A price goes negative wherever those future specials exceed the old nominal
+# price -- real data in an unusual convention, not corruption. Blanket-dropping
+# it deleted 172,608 rows of genuine history for ~729 high-special-dividend
+# names (COST, PCAR, AFG, DDS, TPL...). See backadjust.py for the correction.
 #
-# Filtered at CURATION, not in the pipeline: raw stays the immutable record of
-# what the API actually returned, and re-running curated.py regenerates a clean
-# snapshot, so this is fully reversible by editing the predicate below.
+# What IS still dropped: all-zero OHLCV bars. Schwab pads NON-TRADING DAYS with
+# them -- the dates are market holidays (1970-02-23 Washington's Birthday, Good
+# Friday, Labor Day, Thanksgiving, Christmas) and volume is 0. Those are not
+# bars at all, in any adjustment convention.
 #
-# NULLs are preserved -- only values that are present AND non-positive are
-# dropped. Deliberately NOT filtered: `futures` and `market_history` (WTI really
-# settled at -$37.63 on 2020-04-20) and `options_history` (options expire
-# worthless at 0). Mirrors validate.py's `positive_cols`.
-_PRICE_SANITY: dict[str, list[str]] = {
-    "prices":                   ["open", "high", "low", "close"],
-    "sector_etfs":              ["open", "high", "low", "close"],
-    "tiingo_prices":            ["open", "high", "low", "close"],
-    "yfinance_universe_prices": ["close", "adj_close"],
-    "schwab_intraday":          ["open", "high", "low", "close"],
-    "alpha_vantage_forex":      ["open", "high", "low", "close"],
-    "crypto_history":           ["close"],
-    "cboe_volatility":          ["close"],
+# NULLs are preserved. futures/market_history/options_history are untouched
+# (WTI really settled at -$37.63 on 2020-04-20; options expire worthless).
+_ZERO_BAR_TABLES: dict[str, list[str]] = {
+    "prices":          ["open", "high", "low", "close"],
+    "sector_etfs":     ["open", "high", "low", "close"],
+    "schwab_intraday": ["open", "high", "low", "close"],
 }
 
 
-def _drop_nonpositive_prices(table: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows whose price columns are present but <= 0 (see _PRICE_SANITY)."""
-    cols = [c for c in _PRICE_SANITY.get(table, []) if c in df.columns]
+# ── Schwab back-adjustment correction ─────────────────────────────────────────
+# See backadjust.py. Schwab subtracts future special dividends from historical
+# prices, so `raw = stored + offset(t)` where offset is a per-symbol step
+# function derived empirically against yfinance. Applying it here (rather than
+# rewriting raw) keeps storage/raw/ as the record of what the API returned and
+# makes the correction reproducible from the offset table.
+_BACKADJUST_TABLE = "price_backadjust"
+_BACKADJUST_COLS = ["open", "high", "low", "close"]
+
+
+_BACKADJUST_GLOB = os.path.join(
+    "storage", "raw", "price_backadjust", "**", "*.parquet")
+
+
+def load_backadjust_offsets() -> pd.DataFrame:
+    """
+    The offset step table, or empty when backadjust.py has never run.
+
+    Read straight off disk rather than through query.py: this is correction
+    metadata, not an analytical table, and putting it in CATALOG would trip
+    the no-orphaned-tables guard (which requires a run_all.py PipelineSpec).
+
+    The first step's start and the last step's end are stretched to open
+    bounds. The offset only moves on a special-dividend date, so any date
+    outside the reference window carries the nearest observed value: earlier
+    dates inherit the earliest offset, later dates the latest.
+    """
+    import glob as _g
+    files = _g.glob(_BACKADJUST_GLOB, recursive=True)
+    if not files:
+        return pd.DataFrame()
+    off = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    need = {"symbol", "start_date", "end_date", "offset"}
+    if off.empty or not need.issubset(off.columns):
+        return pd.DataFrame()
+    off = off.sort_values(["symbol", "start_date"]).reset_index(drop=True)
+    first = off.groupby("symbol")["start_date"].transform("min")
+    last = off.groupby("symbol")["end_date"].transform("max")
+    off.loc[off["start_date"] == first, "start_date"] = "0000-01-01"
+    off.loc[off["end_date"] == last, "end_date"] = "9999-12-31"
+    return off
+
+
+def apply_backadjust(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add the back-adjustment offset back onto price columns.
+
+    Dates before a symbol's earliest observed step inherit that step: the
+    offset only changes on a special-dividend date, so any such date earlier
+    than the reference history is already baked into the earliest value.
+    """
+    if table != "prices" or df.empty:
+        return df
+    off = load_backadjust_offsets()
+    if off.empty:
+        return df
+    cols = [c for c in _BACKADJUST_COLS if c in df.columns]
+    if not cols or "symbol" not in df.columns or "date" not in df.columns:
+        return df
+
+    off = off.sort_values(["symbol", "start_date"])
+    df = df.copy()
+    df["_adj"] = 0.0
+    for sym, steps in off.groupby("symbol", sort=False):
+        mask = df["symbol"] == sym
+        if not mask.any():
+            continue
+        dates = df.loc[mask, "date"].astype(str)
+        adj = pd.Series(float(steps["offset"].iloc[0]), index=dates.index)
+        for _, st in steps.iterrows():
+            adj[dates >= str(st["start_date"])] = float(st["offset"])
+        df.loc[mask, "_adj"] = adj.values
+    for c in cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce") + df["_adj"]
+    return df.drop(columns=["_adj"])
+
+
+def _drop_zero_bars(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Drop padding bars where EVERY price field is exactly 0 (see above)."""
+    cols = [c for c in _ZERO_BAR_TABLES.get(table, []) if c in df.columns]
     if not cols:
         return df
-    bad = pd.Series(False, index=df.index)
+    allzero = pd.Series(True, index=df.index)
     for c in cols:
         numeric = pd.to_numeric(df[c], errors="coerce")
-        bad |= numeric.notna() & (numeric <= 0)
-    return df[~bad] if bad.any() else df
+        allzero &= numeric.notna() & (numeric == 0)
+    return df[~allzero] if allzero.any() else df
 
 
 def _sanity_sql_predicate(table: str) -> str:
     """The same filter as SQL, for the DuckDB path in _compact_large_table()."""
-    cols = _PRICE_SANITY.get(table, [])
+    cols = _ZERO_BAR_TABLES.get(table, [])
     if not cols:
         return ""
-    return " AND ".join(f"({c} IS NULL OR {c} > 0)" for c in cols)
+    allzero = " AND ".join(f"{c} = 0" for c in cols)
+    return f"NOT ({allzero})"
 
+
+
+
+def _backadjust_sql(table: str, inner: str, con) -> "str | None":
+    """
+    Wrap `inner` so the back-adjustment offset is added onto price columns.
+
+    Done in SQL because `prices` is compacted by DuckDB (46M rows -- pulling it
+    through pandas to apply the correction is not viable). Returns None when
+    there is nothing to correct.
+    """
+    if table != "prices":
+        return None
+    off = load_backadjust_offsets()
+    if off.empty:
+        return None
+    con.register("_backadjust_offsets", off)
+    cols = ", ".join(
+        f"p.{c} + COALESCE(o.offset, 0) AS {c}" for c in _BACKADJUST_COLS)
+    return f"""
+        SELECT p.* EXCLUDE ({", ".join(_BACKADJUST_COLS)}), {cols}
+        FROM ({inner}) p
+        LEFT JOIN _backadjust_offsets o
+          ON p.symbol = o.symbol
+         AND CAST(p.date AS VARCHAR) >= o.start_date
+         AND CAST(p.date AS VARCHAR) <= o.end_date
+    """
 
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
@@ -451,17 +549,20 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     con = duckdb.connect()
     try:
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
+        deduped = f"""
+            SELECT * EXCLUDE (_rn) FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY {partition_cols} ORDER BY fetched_at DESC
+                ) AS _rn
+                FROM {raw_scan}
+                {where_sanity}
+            )
+            WHERE _rn = 1
+        """
+        select_sql = _backadjust_sql(table, deduped, con) or deduped
         con.execute(f"""
-            COPY (
-                SELECT * EXCLUDE (_rn) FROM (
-                    SELECT *, ROW_NUMBER() OVER (
-                        PARTITION BY {partition_cols} ORDER BY fetched_at DESC
-                    ) AS _rn
-                    FROM {raw_scan}
-                    {where_sanity}
-                )
-                WHERE _rn = 1
-            ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+            COPY ({select_sql}) TO '{out_path}'
+                 (FORMAT PARQUET, COMPRESSION SNAPPY)
         """)
         curated_rows = con.execute(
             f"SELECT count(*) FROM read_parquet('{out_path}')"
@@ -522,7 +623,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = _normalize_period_end(table, df)
     df = _backfill_snapshot_date(table, df)
-    df = _drop_nonpositive_prices(table, df)
+    df = _drop_zero_bars(table, df)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)

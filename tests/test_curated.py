@@ -215,57 +215,111 @@ class TestPeriodEndNormalization:
         assert out.iloc[0]["close"] == 1.0
 
 
-# -- price sanity filter (added 2026-08-29) -----------------------------------
+# -- zero-bar filter (added 2026-08-29, SCOPE NARROWED 2026-08-30) ------------
 
-class TestPriceSanity:
+class TestZeroBars:
     """
-    Non-positive prices are dropped at curation. See curated._PRICE_SANITY --
-    `prices` carried 173,178 such rows (161,783 negative) from Schwab's deep
-    history, which is what made event_study()'s baseline return 3.36e+22.
+    Originally this dropped every non-positive price. That was wrong: the
+    negatives are legitimate Schwab back-adjusted prices (see TestBackadjust),
+    and the blanket rule deleted 172,608 rows of real history. Only all-zero
+    OHLCV bars -- Schwab's padding for market holidays -- are dropped now.
     """
 
     def _df(self):
         return pd.DataFrame({
-            "symbol": ["A", "B", "C", "D", "E"],
-            "open":   [10.0, -1.0,  5.0, None,  2.0],
-            "high":   [11.0,  1.0,  5.0,  3.0,  2.0],
-            "low":    [ 9.0,  1.0,  0.0,  3.0,  2.0],
-            "close":  [10.5,  1.0,  5.0,  3.0,  0.0],
+            "symbol": ["holiday", "backadj", "normal", "partial"],
+            "open":   [0.0, -28.3125, 10.0, 0.0],
+            "high":   [0.0, -27.9375, 11.0, 1.0],
+            "low":    [0.0, -28.4375,  9.0, 0.0],
+            "close":  [0.0, -28.0000, 10.5, 1.0],
         })
 
-    def test_drops_negative_and_zero_keeps_null(self):
-        out = curated._drop_nonpositive_prices("prices", self._df())
-        # B negative open, C zero low, E zero close -> dropped.
-        # D has a NULL open but is otherwise valid -> kept.
-        assert list(out["symbol"]) == ["A", "D"]
+    def test_drops_only_the_all_zero_bar(self):
+        out = curated._drop_zero_bars("prices", self._df())
+        assert list(out["symbol"]) == ["backadj", "normal", "partial"]
+
+    def test_negative_prices_are_preserved(self):
+        # COST 1986-07-09 really is -28.31 with 1.1M shares traded; it becomes
+        # 10.69 once the +39 offset is added back. Dropping it loses real history.
+        out = curated._drop_zero_bars("prices", self._df())
+        assert "backadj" in set(out["symbol"])
 
     def test_untouched_when_table_not_listed(self):
         df = self._df()
-        assert len(curated._drop_nonpositive_prices("some_other_table", df)) == len(df)
+        assert len(curated._drop_zero_bars("some_other_table", df)) == len(df)
 
     def test_instruments_that_can_go_negative_are_excluded(self):
         # WTI settled at -$37.63 on 2020-04-20 and that print is really in both
-        # tables; options expire worthless at 0. Filtering them would destroy
-        # real data, so they must stay out of _PRICE_SANITY.
+        # tables; options expire worthless at 0.
         for table in ("futures", "market_history", "options_history"):
-            assert table not in curated._PRICE_SANITY
+            assert table not in curated._ZERO_BAR_TABLES
 
     def test_sql_predicate_matches_the_pandas_filter(self):
-        # prices goes through the DuckDB path (_LARGE_TABLES), every other
-        # table through the pandas path -- they must agree.
         pred = curated._sanity_sql_predicate("prices")
-        for col in curated._PRICE_SANITY["prices"]:
-            assert f"({col} IS NULL OR {col} > 0)" in pred
+        for col in curated._ZERO_BAR_TABLES["prices"]:
+            assert f"{col} = 0" in pred
+        assert pred.startswith("NOT (")
         assert curated._sanity_sql_predicate("futures") == ""
-
-    def test_prices_uses_the_duckdb_path(self):
-        # If prices ever leaves _LARGE_TABLES the SQL predicate stops being
-        # exercised, so this guards the assumption above.
-        assert "prices" in curated._LARGE_TABLES
 
     def test_dedup_applies_the_filter(self):
         df = self._df()
-        df["fetched_at"] = "2026-08-29T00:00:00"
+        df["fetched_at"] = "2026-08-30T00:00:00"
         out = curated.dedup("sector_etfs", df)
-        assert list(out["symbol"]) == ["A", "D"]
+        assert "holiday" not in set(out["symbol"])
+
+
+# -- Schwab back-adjustment correction (added 2026-08-30) ---------------------
+
+class TestBackadjust:
+    """
+    Schwab subtracts future special dividends from historical prices, so
+    `raw = stored + offset(t)`. Proven on COST: offsets 39/32/25/15/0 with the
+    step boundaries landing exactly on its special-dividend ex-dates and the
+    drops equal to the payouts (7, 7, 10, 15).
+    """
+
+    def test_offsets_get_open_bounds(self, monkeypatch, tmp_path):
+        # The offset only moves on a special-dividend date, so dates outside
+        # the reference window must inherit the nearest observed value rather
+        # than falling through to zero.
+        f = tmp_path / "price_backadjust_test.parquet"
+        pd.DataFrame({
+            "symbol": ["ZZZ", "ZZZ"],
+            "start_date": ["2000-01-01", "2010-01-01"],
+            "end_date": ["2009-12-31", "2020-12-31"],
+            "offset": [10.0, 5.0],
+        }).to_parquet(f, index=False)
+        monkeypatch.setattr(curated, "_BACKADJUST_GLOB", str(tmp_path / "*.parquet"))
+        off = curated.load_backadjust_offsets()
+        assert off.loc[off["offset"] == 10.0, "start_date"].iloc[0] == "0000-01-01"
+        assert off.loc[off["offset"] == 5.0, "end_date"].iloc[0] == "9999-12-31"
+
+    def test_missing_table_is_a_no_op(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(curated, "_BACKADJUST_GLOB", str(tmp_path / "none*.parquet"))
+        assert curated.load_backadjust_offsets().empty
+
+    def test_sql_only_applies_to_prices(self):
+        # Every other table must be left alone -- a subtractive correction is
+        # specific to Schwab's daily price history.
+        assert curated._backadjust_sql("futures", "SELECT 1", None) is None
+        assert curated._backadjust_sql("tiingo_prices", "SELECT 1", None) is None
+
+    def test_prices_is_on_the_duckdb_path(self):
+        # The correction is implemented in SQL because prices is compacted by
+        # DuckDB; dedup() is never called for a _LARGE_TABLES entry. If prices
+        # ever leaves that set the correction silently stops being applied.
+        assert "prices" in curated._LARGE_TABLES
+
+    def test_zero_bars_still_dropped_but_negatives_kept(self):
+        # Negatives are legitimate back-adjusted prices and must survive;
+        # all-zero bars are Schwab's market-holiday padding and must not.
+        df = pd.DataFrame({
+            "symbol": ["A", "B", "C"],
+            "open":  [0.0, -28.31, 10.0],
+            "high":  [0.0, -27.94, 11.0],
+            "low":   [0.0, -28.44,  9.0],
+            "close": [0.0, -28.00, 10.5],
+        })
+        out = curated._drop_zero_bars("prices", df)
+        assert list(out["symbol"]) == ["B", "C"]
 
