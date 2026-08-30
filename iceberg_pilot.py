@@ -66,15 +66,36 @@ def load_catalog():
 
 
 def latest_metadata(identifier: str) -> str | None:
-    """Return the newest *.metadata.json for a pilot table, or None if absent.
+    """Return the CURRENT *.metadata.json for a pilot table, or None if absent.
 
     DuckDB's iceberg_scan takes this path directly.
+
+    The catalog is asked first, because the on-disk version numbers are NOT a
+    reliable ordering. Recreating a table restarts the sequence while the old
+    files stay behind, so the directory can hold two 00001-* and two 00002-*
+    from different lineages -- and a lexicographic `sorted(...)[-1]` then
+    returns whichever has the highest NUMBER rather than the newest write.
+    That bit on 2026-08-30: a stale `00003-*` written at 00:44 shadowed the
+    live `00002-*` written at 01:31, so query.py silently served pre-correction
+    prices through iceberg_scan while the curated parquet was already fixed.
+
+    Falls back to the most recently MODIFIED file (never the highest-numbered)
+    when the catalog cannot be read.
     """
+    try:
+        table = load_catalog().load_table(identifier)
+        loc = getattr(table, "metadata_location", None)
+        if loc:
+            return loc.replace("file://", "").lstrip("/").replace("\\", "/")                 if loc.startswith("file://") else loc.replace("\\", "/")
+    except Exception:
+        pass
     matches = glob.glob(
         str(_table_dir(identifier) / "metadata" / "*.metadata.json").replace("\\", "/"),
         recursive=False,
     )
-    return sorted(matches)[-1].replace("\\", "/") if matches else None
+    if not matches:
+        return None
+    return max(matches, key=os.path.getmtime).replace("\\", "/")
 
 
 def ensure_table(catalog, identifier: str, arrow_schema: pa.Schema):
