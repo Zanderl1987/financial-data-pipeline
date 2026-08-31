@@ -380,6 +380,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="california_disclosures",
+        file="california_disclosures_pipeline.py",
+        desc="California legislature Form 700 Schedule A-1 investments -- FPPC eRetrieval (keyless)",
+        stage=1,
+        tables=["california_disclosures"],
+        backfill_args=["--backfill"],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="patents",
         file="patents_pipeline.py",
         desc="USPTO PatentsView grants across 6 tech sectors (keyless)",

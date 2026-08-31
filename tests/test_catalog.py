@@ -144,6 +144,8 @@ EXPECTED_TABLES = [
     "oecd_macro",
     # Congressional trade disclosures
     "congressional_trades",
+    # California legislature Form 700 Schedule A-1
+    "california_disclosures",
     # USPTO patents
     "patents",
     # ECB rates

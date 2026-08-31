@@ -191,6 +191,8 @@ CATALOG: dict[str, str] = {
     "oecd_macro":              _glob("oecd/**/*.parquet"),
     # ── Congressional stock trade disclosures ─────────────────────────────────
     "congressional_trades":    _glob("congressional_trades/**/*.parquet"),
+    # ── California legislature Form 700 Schedule A-1 (investments) ───────────
+    "california_disclosures": _glob("california_disclosures/**/california_disclosures_*.parquet"),
     # ── USPTO PatentsView ─────────────────────────────────────────────────────
     "patents":                 _glob("patents/**/*.parquet"),
     # ── ECB policy rates, Euribor, yield curve, HICP ─────────────────────────

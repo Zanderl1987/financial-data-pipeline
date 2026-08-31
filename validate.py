@@ -456,6 +456,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["chamber", "member_name"],
         "date_col":    "transaction_date",
     },
+    # ── California legislature Form 700 Schedule A-1 (investments) ────────────
+    "california_disclosures": {
+        "required":    ["agency", "filer_last_name", "business_entity", "fetched_at"],
+        "critical_nn": ["agency", "filer_last_name", "business_entity"],
+        "date_col":    "filed_date",
+    },
     # ── USPTO patents ─────────────────────────────────────────────────────────
     "patents": {
         "required":    ["patent_id", "patent_date", "sector", "fetched_at"],

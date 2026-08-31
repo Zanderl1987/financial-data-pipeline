@@ -40,6 +40,7 @@ PIPELINE_MODULES = [
     "bea_pipeline",
     "oecd_pipeline",
     "congressional_trades_pipeline",
+    "california_disclosures_pipeline",
     "patents_pipeline",
     "ecb_pipeline",
     "fama_french_pipeline",

@@ -310,6 +310,10 @@ KEYS: dict[str, list[str]] = {
     # Congressional PTRs: (chamber, doc_id, row_index) is an exact key --
     # a filing can legitimately repeat the same ticker/date/amount twice.
     "congressional_trades":            ['chamber', 'doc_id', 'row_index'],
+    # California Form 700 Schedule A-1: (index_id, row_index) mirrors the
+    # congressional_trades key -- a filing's own natural key plus the
+    # investment slot's position within it.
+    "california_disclosures":          ['index_id', 'row_index'],
     "treasury_yield_curve":            ['date'],
     "treasury_avg_interest_rates":     ['record_date', 'security_desc'],
     "treasury_interest_expense":       ['record_date', 'expense_catg_desc', 'expense_type_desc'],
