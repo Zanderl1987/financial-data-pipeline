@@ -967,6 +967,11 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['series_id', 'date', 'value'],
         "date_col":    "date",
     },
+    "fred_credit": {
+        "required":    ['series_id', 'date', 'value', 'fetched_at'],
+        "critical_nn": ['series_id', 'date', 'value'],
+        "date_col":    "date",
+    },
     "fred_rates_gdp_interest_rates": {
         "required":    ['series_id', 'date', 'value', 'fetched_at'],
         "critical_nn": ['series_id', 'date', 'value'],

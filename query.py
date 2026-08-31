@@ -318,6 +318,7 @@ CATALOG: dict[str, str] = {
     "fred_macro_industrial":  _glob("fred_macro/industrial/**/*.parquet"),
     "fred_macro_consumer":    _glob("fred_macro/consumer/**/*.parquet"),
     "fred_macro_trade":       _glob("fred_macro/trade/**/*.parquet"),
+    "fred_credit":            _glob("fred_credit/**/*.parquet"),
     "fred_rates_gdp_interest_rates":  _glob("fred_rates_gdp/interest_rates/**/*.parquet"),
     "fred_rates_gdp_money_supply":    _glob("fred_rates_gdp/money_supply/**/*.parquet"),
     "fred_rates_gdp_gdp":             _glob("fred_rates_gdp/gdp/**/*.parquet"),
@@ -483,6 +484,24 @@ ANALYTICS_VIEWS: dict[str, str] = {
         FROM index_members im
         LEFT JOIN securities s ON im.ticker = s.symbol
         LEFT JOIN identifier_map i ON im.ticker = i.ticker
+    """,
+
+    # S&P targets per GICS sector: which S&P index members land in each
+    # Select Sector Index, per snapshot. Each Select Sector Index is, by
+    # definition, the GICS-sector subset of the S&P 500 — so this is derivable
+    # directly from index_members with no separate source. See
+    # docs/RESEARCH_NOTES_INDEX_DATA.md.
+    "sector_members": """
+        SELECT
+            snapshot_date,
+            index_code,
+            index_name,
+            gics_sector      AS sector,
+            count(DISTINCT ticker) AS n_constituents
+        FROM index_members
+        WHERE index_code = 'SPX'
+          AND gics_sector IS NOT NULL
+        GROUP BY snapshot_date, index_code, index_name, gics_sector
     """,
 
     # Fund holdings enriched with issuer reference data + FIGI

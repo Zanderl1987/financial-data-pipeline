@@ -252,6 +252,7 @@ EXPECTED_TABLES = [
     "fred_macro_industrial",
     "fred_macro_consumer",
     "fred_macro_trade",
+    "fred_credit",
     "fred_rates_gdp_interest_rates",
     "fred_rates_gdp_money_supply",
     "fred_rates_gdp_gdp",

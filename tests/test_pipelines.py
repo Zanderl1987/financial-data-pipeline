@@ -67,6 +67,7 @@ PIPELINE_MODULES = [
     "signal_scan",
     "signal_monitor",
     "fred_macro_pipeline",
+    "fred_credit_pipeline",
     "fred_rates_gdp_pipeline",
     "alpha_vantage_fundamentals_pipeline",
     "coingecko_expansion_pipeline",

@@ -219,6 +219,7 @@ KEYS: dict[str, list[str]] = {
     "fred_macro_industrial":  ['series_id', 'date'],
     "fred_macro_consumer":    ['series_id', 'date'],
     "fred_macro_trade":       ['series_id', 'date'],
+    "fred_credit":            ['series_id', 'date'],
     "fred_rates_gdp_interest_rates":  ['series_id', 'date'],
     "fred_rates_gdp_money_supply":    ['series_id', 'date'],
     "fred_rates_gdp_gdp":             ['series_id', 'date'],

@@ -61,6 +61,8 @@ UNIVERSE = [
     ("IEF",       "7-10yr Treasury ETF",     "rates"),
     ("HYG",       "High-Yield Corporate ETF", "credit"),
     ("LQD",       "Inv-Grade Corporate ETF", "credit"),
+    ("AGG",       "US Aggregate Bond ETF",   "credit"),
+    ("BND",       "Total US Bond ETF",       "credit"),
     # --- crypto (24/7 daily) ---
     ("BTC-USD",   "Bitcoin",                 "crypto"),
 ]

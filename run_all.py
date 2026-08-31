@@ -716,6 +716,16 @@ PIPELINES: list[PipelineSpec] = [
         timeout=600,
     ),
     PipelineSpec(
+        name="fred_credit",
+        file="fred_credit_pipeline.py",
+        desc="FRED credit/fixed-income (ICE BofA OAS + total-return proxies for Bloomberg indices)",
+        stage=1,
+        tables=['fred_credit'],
+        requires_env=['FRED_API_KEY'],
+        backfill_args=['--backfill'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="fred_rates_gdp",
         file="fred_rates_gdp_pipeline.py",
         desc="FRED rates/GDP/inflation/FX/markets/federal debt (deduped vs commodity_macro)",
