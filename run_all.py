@@ -382,10 +382,11 @@ PIPELINES: list[PipelineSpec] = [
     PipelineSpec(
         name="california_disclosures",
         file="california_disclosures_pipeline.py",
-        desc="California legislature Form 700 Schedule A-1 investments -- FPPC eRetrieval (keyless)",
+        desc="California legislature Form 700 Schedule A-1/D (investments, gifts) -- FPPC eRetrieval (keyless)",
         stage=1,
-        tables=["california_disclosures"],
-        backfill_args=["--backfill"],
+        tables=["california_disclosures", "california_disclosures_gifts"],
+        backfill_args=["--backfill", "--schedules", "a1", "d"],
+        incremental_args=["--schedules", "a1", "d"],
         timeout=300,
     ),
     PipelineSpec(

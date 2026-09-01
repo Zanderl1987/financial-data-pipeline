@@ -146,6 +146,8 @@ EXPECTED_TABLES = [
     "congressional_trades",
     # California legislature Form 700 Schedule A-1
     "california_disclosures",
+    # California legislature Form 700 Schedule D (gifts)
+    "california_disclosures_gifts",
     # USPTO patents
     "patents",
     # ECB rates

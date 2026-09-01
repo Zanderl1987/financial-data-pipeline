@@ -3,9 +3,10 @@ Offline tests for california_disclosures_pipeline.
 
 No network: SearchDocuments/GetRedactedFormPdf responses are built as the same
 double-JSON-encoded shape captured live from form700search.fppc.ca.gov on
-2026-08-31. The Schedule A-1 PDF parser itself (parse_schedule_a1) is
-exercised only live -- same precedent as congressional_trades_pipeline's
-parse_house_ptr, which has no offline PDF fixture either.
+2026-08-31. The Schedule A-1/D PDF parsers themselves (parse_schedule_a1,
+parse_schedule_d) are exercised only live -- same precedent as
+congressional_trades_pipeline's parse_house_ptr, which has no offline PDF
+fixture either.
 """
 
 import json
@@ -232,6 +233,49 @@ class TestCheckboxSelected:
             {"color": (0.0, 0.0, 1.0), "rect": _Rect(400.0, 400.0, 404.0, 404.0)},
         ]
         assert cdp._checkbox_selected(drawings, 48.1, 173.2, -0.3, 11.0) is False
+
+
+class TestDigitsNear:
+
+    def test_sorts_by_x_not_by_duplicate_y(self):
+        # Regression: the PDF renderer sometimes draws a digit run twice at a
+        # slightly different y (a visual-weight artifact). Sorting by (y, x)
+        # instead of x can interleave the duplicate with the next digit and
+        # scramble the date -- found via a real Schedule D filing where
+        # 04/30/24 came out as 04/24/30.
+        words = [
+            (52.9, 417.5, 60.0, 425.0, "04", 0, 0, 0),
+            (93.9, 417.5, 100.0, 425.0, "24", 0, 0, 0),
+            (73.5, 417.6, 80.0, 425.0, "30", 0, 0, 0),
+        ]
+        rows = cdp._words_by_row(words)
+        digits = cdp._digits_near(rows, 50.4, 293.4, (0, 46), (118, 138))
+        assert digits == ["04", "30", "24"]
+
+    def test_excludes_non_digit_tokens(self):
+        words = [
+            (52.9, 214.3, 60.0, 222.0, "/", 0, 0, 0),
+            (73.8, 214.3, 80.0, 222.0, "18", 0, 0, 0),
+        ]
+        rows = cdp._words_by_row(words)
+        digits = cdp._digits_near(rows, 50.4, 115.4, (0, 46), (93, 112))
+        assert digits == ["18"]
+
+
+class TestFinalizeGeneric:
+
+    def test_empty_input_returns_empty_frame(self):
+        assert cdp._finalize_generic([], "2026-09-01T00:00:00").empty
+
+    def test_adds_row_index_and_fetched_at(self):
+        rows = [
+            {"index_id": "1", "source_name": "Acme"},
+            {"index_id": "1", "source_name": "Beta"},
+            {"index_id": "2", "source_name": "Gamma"},
+        ]
+        df = cdp._finalize_generic(rows, "2026-09-01T00:00:00")
+        assert df[df["index_id"] == "1"]["row_index"].tolist() == [0, 1]
+        assert (df["fetched_at"] == "2026-09-01T00:00:00").all()
 
 
 class _Rect:

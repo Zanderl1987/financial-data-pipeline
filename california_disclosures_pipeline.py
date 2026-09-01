@@ -35,18 +35,24 @@ Notes on the data:
     bullet; every other field is a slot-relative offset from that anchor
     or from the slot's own "FAIR MARKET VALUE"/"NATURE OF INVESTMENT"
     labels, so the map holds across rows/columns/pages.
-  - Only Schedule A-1 is parsed. Schedules A-2/B/C/D/E are real, separate
-    field layouts and out of scope for this pipeline -- see
+  - Schedule A-1 (investments) and Schedule D (gifts) are parsed, each to
+    its own output table -- one PDF fetch per filing serves every enabled
+    schedule via SCHEDULES / --schedules. Schedule D has 5 source slots/page,
+    up to 3 gift line items each, no checkboxes. Same digit-duplication
+    render artifact as A-1's dates -- see _digits_near.
+  - Schedules B, C, A-2, E not yet built -- see
     work-notes/financial-data-pipeline/TASKS.md.
 
 CLI:
-  python california_disclosures_pipeline.py                 # current year
+  python california_disclosures_pipeline.py                 # current year, Schedule A-1
   python california_disclosures_pipeline.py --backfill       # full history
   python california_disclosures_pipeline.py --years 2024 2025
   python california_disclosures_pipeline.py --agency senate  # one chamber
+  python california_disclosures_pipeline.py --schedules a1 d # multiple schedules
 
 Outputs:
   storage/raw/california_disclosures/california_disclosures_{mode}_{YYYY}.parquet
+  storage/raw/california_disclosures_gifts/california_disclosures_gifts_{mode}_{YYYY}.parquet
 """
 
 import argparse
@@ -256,6 +262,29 @@ def _text_near(rows, x0, y0, dx_range, dy_range, exclude=()):
     return " ".join(t for _, _, t in found).strip() or None
 
 
+def _digits_near(rows, x0, y0, dx_range, dy_range):
+    """
+    Digit tokens ("/"-stripped) within an offset window, sorted left-to-right
+    by x -- NOT by (y, x) like _text_near. The renderer sometimes draws a
+    digit run twice at a slightly different y (a visual-weight artifact);
+    sorting by y first can interleave the duplicate with the next digit and
+    scramble the date. Bucket by x, keep the topmost (min-y) duplicate.
+    """
+    by_x_bucket = {}
+    for y, cells in rows.items():
+        dy = y - y0
+        if not (dy_range[0] <= dy <= dy_range[1]):
+            continue
+        for x, text in cells:
+            dx = x - x0
+            t = text.strip("/")
+            if dx_range[0] <= dx <= dx_range[1] and t.isdigit():
+                bucket = round(x / 8)
+                if bucket not in by_x_bucket or y < by_x_bucket[bucket][1]:
+                    by_x_bucket[bucket] = (x, y, t)
+    return [t for _, _, t in sorted(by_x_bucket.values())]
+
+
 def _checkbox_selected(drawings, x0, y0, dx, dy):
     """True if a blue-filled mark sits inside the checkbox at (x0+dx, y0+dy)."""
     cx, cy = x0 + dx, y0 + dy
@@ -394,6 +423,85 @@ def _finalize(rows, fetched_at):
     return df
 
 
+def _finalize_generic(rows, fetched_at):
+    """Same as _finalize but for schedules with no acquired/disposed dates."""
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["fetched_at"] = fetched_at
+    df = df.reset_index(drop=True)
+    df["row_index"] = df.groupby("index_id").cumcount()
+    return df
+
+
+# -- Schedule D parsing (Income -- Gifts) --------------------------------
+# 5 source slots per page (2 columns x 2 rows, plus a 5th sharing space with
+# the signature block), each with up to 3 gift line items. No checkboxes.
+
+_D_SLOT_ANCHOR = ("NAME", "OF", "SOURCE")
+_D_LINE_DY = [(93, 112), (118, 138), (144, 163)]  # 3 gift-line dy bands
+
+
+def parse_schedule_d(pdf_bytes, filing):
+    """Extract Schedule D (Income -- Gifts) line items from one Form 700 PDF."""
+    rows_out = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            if "SCHEDULE D" not in page.get_text().upper():
+                continue
+            words = page.get_text("words")
+            row_map = _words_by_row(words)
+
+            anchors = _find_anchors(row_map, _D_SLOT_ANCHOR)
+            for ax, ay in anchors:
+                source = _text_near(row_map, ax, ay, (0, 240), (8, 15),
+                                     exclude=("NAME", "OF", "SOURCE",
+                                              "(Not", "an", "Acronym)", "?"))
+                if not source:
+                    continue  # unfilled template slot
+                address = _text_near(row_map, ax, ay, (0, 240), (35, 42),
+                                      exclude=("ADDRESS", "(Business",
+                                                "Address", "Acceptable)"))
+                business = _text_near(row_map, ax, ay, (0, 240), (63, 70),
+                                       exclude=("BUSINESS", "ACTIVITY,",
+                                                 "IF", "ANY,", "OF", "SOURCE"))
+                for lo, hi in _D_LINE_DY:
+                    digits = _digits_near(row_map, ax, ay, (0, 46), (lo, hi))
+                    value_txt = _text_near(row_map, ax, ay, (65, 90), (lo, hi))
+                    desc = _text_near(row_map, ax, ay, (105, 240), (lo, hi))
+                    date = _mmddyy_to_iso(*digits[0:3]) if len(digits) >= 3 else None
+                    value = None
+                    if value_txt:
+                        try:
+                            value = float(value_txt.replace("$", "").replace(",", ""))
+                        except ValueError:
+                            value = None
+                    if not (date or value or desc):
+                        continue  # blank template line
+                    rows_out.append({
+                        "index_id": filing["index_id"],
+                        "filer_last_name": filing["filer_last_name"],
+                        "filer_first_name": filing["filer_first_name"],
+                        "filer_middle_name": filing["filer_middle_name"],
+                        "agency": filing["agency"],
+                        "position": filing["position"],
+                        "filing_type": filing["filing_type"],
+                        "filing_year": filing["filing_year"],
+                        "filed_date": filing["filed_date"],
+                        "is_amendment": filing["is_amendment"],
+                        "source_name": source,
+                        "source_address": address,
+                        "source_business_activity": business,
+                        "gift_date": date,
+                        "gift_value": value,
+                        "gift_description": desc,
+                    })
+    finally:
+        doc.close()
+    return rows_out
+
+
 # -- Resumable checkpoints (same reasoning as congressional_trades_pipeline) -
 
 def _done_path(path):
@@ -439,8 +547,21 @@ def _clear_checkpoint(path):
 
 
 # -- Collection ------------------------------------------------------------
+# Each schedule: (parser, finalizer, output dir, output filename prefix).
+# collect_year fetches each filing's PDF once and runs every enabled
+# schedule's parser against it, so a multi-schedule run costs one PDF fetch
+# per filing, not one per schedule.
 
-def collect_year(session, agency_key, agency_label, year, mode, fetched_at):
+SCHEDULES = {
+    "a1": (parse_schedule_a1, _finalize, OUTPUT_DIR, "california_disclosures"),
+    "d": (parse_schedule_d, _finalize_generic,
+          os.path.join("storage", "raw", "california_disclosures_gifts"),
+          "california_disclosures_gifts"),
+}
+
+
+def collect_year(session, agency_key, agency_label, year, mode, fetched_at,
+                  schedules=("a1",)):
     print(f"\n[{agency_key} {year}] searching filings...")
     filings = fetch_filing_index(session, agency_label, year)
     if not filings:
@@ -448,49 +569,66 @@ def collect_year(session, agency_key, agency_label, year, mode, fetched_at):
         return
     print(f"  {len(filings)} filings")
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
-    checkpoint = os.path.join(CACHE_DIR, f"{agency_key}_{year}_partial.parquet")
-    rows, done = _load_checkpoint(checkpoint)
-    if done:
-        print(f"  resuming: {len(done)} filings already parsed")
+    state = {}
+    for sched in schedules:
+        _, _, out_dir, prefix = SCHEDULES[sched]
+        os.makedirs(out_dir, exist_ok=True)
+        checkpoint = os.path.join(
+            CACHE_DIR, f"{sched}_{agency_key}_{year}_partial.parquet")
+        rows, done = _load_checkpoint(checkpoint)
+        if done:
+            print(f"  [{sched}] resuming: {len(done)} filings already parsed")
+        state[sched] = {"checkpoint": checkpoint, "rows": rows, "done": done,
+                         "no_data": 0}
 
-    no_data = 0
+    # A filing is "fully done" once every requested schedule has processed
+    # it -- resuming only re-fetches filings still missing from some schedule.
+    fully_done = set.intersection(
+        *(state[s]["done"] for s in schedules)) if schedules else set()
+
     for i, filing in enumerate(filings, 1):
         index_id = filing["index_id"]
-        if index_id in done:
+        if index_id in fully_done:
             continue
-        pdf_bytes = _fetch_pdf(session, index_id)
-        if pdf_bytes is None:
-            no_data += 1
-        else:
-            try:
-                parsed = parse_schedule_a1(pdf_bytes, filing)
-            except Exception as exc:
-                print(f"    parse failed for {index_id}: {exc}")
-                parsed = []
-            if parsed:
-                rows.extend(parsed)
+        pending = [s for s in schedules if index_id not in state[s]["done"]]
+        pdf_bytes = _fetch_pdf(session, index_id) if pending else None
+        for sched in pending:
+            parser_fn = SCHEDULES[sched][0]
+            if pdf_bytes is None:
+                state[sched]["no_data"] += 1
             else:
-                no_data += 1
-        done.add(index_id)
+                try:
+                    parsed = parser_fn(pdf_bytes, filing)
+                except Exception as exc:
+                    print(f"    [{sched}] parse failed for {index_id}: {exc}")
+                    parsed = []
+                if parsed:
+                    state[sched]["rows"].extend(parsed)
+                else:
+                    state[sched]["no_data"] += 1
+            state[sched]["done"].add(index_id)
 
         if i % CHECKPOINT_EVERY == 0:
-            _save_checkpoint(checkpoint, rows, done)
-            print(f"    {i}/{len(filings)} filings, {len(rows)} rows")
+            for sched in schedules:
+                s = state[sched]
+                _save_checkpoint(s["checkpoint"], s["rows"], s["done"])
+            print(f"    {i}/{len(filings)} filings")
 
-    df = _finalize(rows, fetched_at)
-    if df.empty:
-        print(f"  {year}: no Schedule A-1 rows parsed")
-        _clear_checkpoint(checkpoint)
-        return
-    path = write_partitioned(
-        df, OUTPUT_DIR,
-        f"california_disclosures_{agency_key}_{mode}_{year}.parquet")
-    print(f"  -> {path}  ({len(df):,} rows, "
-          f"{df['filer_last_name'].nunique()} filers, "
-          f"{no_data} filings with no Schedule A-1 / unfetchable)")
-    _clear_checkpoint(checkpoint)
+    for sched in schedules:
+        s = state[sched]
+        _, finalize_fn, out_dir, prefix = SCHEDULES[sched]
+        df = finalize_fn(s["rows"], fetched_at)
+        if df.empty:
+            print(f"  [{sched}] {year}: no rows parsed")
+            _clear_checkpoint(s["checkpoint"])
+            continue
+        path = write_partitioned(
+            df, out_dir, f"{prefix}_{agency_key}_{mode}_{year}.parquet")
+        print(f"  [{sched}] -> {path}  ({len(df):,} rows, "
+              f"{df['filer_last_name'].nunique()} filers, "
+              f"{s['no_data']} filings with no data / unfetchable)")
+        _clear_checkpoint(s["checkpoint"])
 
 
 def main():
@@ -503,6 +641,8 @@ def main():
                         help="Explicit years to fetch (overrides --backfill)")
     parser.add_argument("--agency", choices=["senate", "assembly", "both"],
                         default="both", help="Limit to one chamber")
+    parser.add_argument("--schedules", nargs="+", choices=list(SCHEDULES),
+                        default=["a1"], help="Which schedules to parse")
     args = parser.parse_args()
 
     if fitz is None:
@@ -524,16 +664,16 @@ def main():
                 else [(args.agency, AGENCIES[args.agency])])
 
     print("California Legislature Disclosures Pipeline  "
-          "(keyless, FPPC Form 700 Schedule A-1)")
+          "(keyless, FPPC Form 700)")
     print(f"  mode={mode}  years={years[0]}-{years[-1]}  "
-          f"agencies={[a for a, _ in agencies]}")
+          f"agencies={[a for a, _ in agencies]}  schedules={args.schedules}")
 
     session = requests.Session()
     session.headers["User-Agent"] = USER_AGENT
     for agency_key, agency_label in agencies:
         for year in years:
             collect_year(session, agency_key, agency_label, year, mode,
-                         fetched_at)
+                         fetched_at, schedules=args.schedules)
 
     print("\n--- CALIFORNIA DISCLOSURES PIPELINE COMPLETE ---")
 
