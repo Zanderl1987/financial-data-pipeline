@@ -419,7 +419,29 @@ _BACKADJUST_COLS = ["open", "high", "low", "close"]
 
 
 _BACKADJUST_GLOB = os.path.join(
-    "storage", "raw", "price_backadjust", "**", "*.parquet")
+    "storage", "raw", "price_backadjust", "**", "price_backadjust_*.parquet")
+
+_CLOSE_CORRECTIONS_PATH = os.path.join(
+    "storage", "raw", "price_backadjust", "close_corrections.parquet")
+
+
+def load_close_corrections() -> pd.DataFrame:
+    """
+    Per-date close replacements for symbols whose Schwab data contains
+    negative prices (split-adjustment went too far back). On affected
+    dates the Schwab close is replaced wholesale with the yfinance close.
+
+    Returns DataFrame with columns: symbol, date, corrected_close, factor
+    (factor is informational only -- OHLC are left untouched because
+    scaling negative bars by a positive ratio makes them more negative).
+    Empty when the file doesn't exist.
+    """
+    if not os.path.exists(_CLOSE_CORRECTIONS_PATH):
+        return pd.DataFrame()
+    df = pd.read_parquet(_CLOSE_CORRECTIONS_PATH)
+    if df.empty or not {"symbol", "date", "corrected_close"}.issubset(df.columns):
+        return pd.DataFrame()
+    return df
 
 
 def load_backadjust_offsets() -> pd.DataFrame:
@@ -455,34 +477,67 @@ def apply_backadjust(table: str, df: pd.DataFrame) -> pd.DataFrame:
     """
     Add the back-adjustment offset back onto price columns.
 
+    Two correction paths applied in order:
+    1. Close corrections (per-date) — replaces Schwab close with yfinance close
+       on dates where Schwab returned negative prices.
+    2. Additive offsets (piecewise-constant) — reverses special-dividend
+       back-adjustment on remaining symbols (excludes close-corrected ones).
+
     Dates before a symbol's earliest observed step inherit that step: the
     offset only changes on a special-dividend date, so any such date earlier
     than the reference history is already baked into the earliest value.
     """
     if table != "prices" or df.empty:
         return df
-    off = load_backadjust_offsets()
-    if off.empty:
-        return df
     cols = [c for c in _BACKADJUST_COLS if c in df.columns]
     if not cols or "symbol" not in df.columns or "date" not in df.columns:
         return df
 
-    off = off.sort_values(["symbol", "start_date"])
     df = df.copy()
-    df["_adj"] = 0.0
-    for sym, steps in off.groupby("symbol", sort=False):
-        mask = df["symbol"] == sym
-        if not mask.any():
-            continue
-        dates = df.loc[mask, "date"].astype(str)
-        adj = pd.Series(float(steps["offset"].iloc[0]), index=dates.index)
-        for _, st in steps.iterrows():
-            adj[dates >= str(st["start_date"])] = float(st["offset"])
-        df.loc[mask, "_adj"] = adj.values
-    for c in cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce") + df["_adj"]
-    return df.drop(columns=["_adj"])
+
+    # --- Path 1: Close corrections (negative-Schwab symbols) ---
+    cc = load_close_corrections()
+    corrected_syms = set()
+    if not cc.empty:
+        corrected_syms = set(cc["symbol"].unique())
+        cc["date_key"] = cc["date"]
+
+        # Only merge on rows that could be affected (corrected symbols)
+        sym_mask = df["symbol"].isin(corrected_syms)
+        df_sub = df.loc[sym_mask].copy()
+        df_sub["date_key"] = pd.to_datetime(df_sub["date"]).dt.strftime("%Y-%m-%d")
+
+        merged = df_sub.merge(
+            cc[["symbol", "date_key", "corrected_close"]],
+            on=["symbol", "date_key"],
+            how="inner",
+        )
+        if not merged.empty:
+            df.loc[merged.index, "close"] = merged["corrected_close"].values
+        df = df.drop(columns=["date_key"], errors="ignore")
+
+    # --- Path 2: Additive offsets (exclude close-corrected symbols) ---
+    off = load_backadjust_offsets()
+    if not off.empty:
+        if corrected_syms:
+            off = off[~off["symbol"].isin(corrected_syms)]
+        if not off.empty:
+            off = off.sort_values(["symbol", "start_date"])
+            df["_adj"] = 0.0
+            for sym, steps in off.groupby("symbol", sort=False):
+                mask = df["symbol"] == sym
+                if not mask.any():
+                    continue
+                dates = df.loc[mask, "date"].astype(str)
+                adj = pd.Series(float(steps["offset"].iloc[0]), index=dates.index)
+                for _, st in steps.iterrows():
+                    adj[dates >= str(st["start_date"])] = float(st["offset"])
+                df.loc[mask, "_adj"] = adj.values
+            for c in cols:
+                df[c] = pd.to_numeric(df[c], errors="coerce") + df["_adj"]
+            df = df.drop(columns=["_adj"])
+
+    return df
 
 
 def _drop_zero_bars(table: str, df: pd.DataFrame) -> pd.DataFrame:
@@ -510,7 +565,19 @@ def _sanity_sql_predicate(table: str) -> str:
 
 def _backadjust_sql(table: str, inner: str, con) -> "str | None":
     """
-    Wrap `inner` so the back-adjustment offset is added onto price columns.
+    Wrap `inner` so back-adjustment corrections are applied to price columns.
+
+    Two correction paths:
+    1. Close corrections (per-date, for 66 symbols whose Schwab data contains
+       negative prices): on affected dates the close is replaced wholesale with
+       the yfinance close.
+    2. Additive offsets (piecewise-constant, for 142 symbols with special-dividend
+       back-adjustment).
+
+    Close corrections are applied FIRST (close replacement), then additive
+    (corrected + offset → dividend-adjusted). A symbol corrected via
+    close-corrections is excluded from the additive path to avoid double
+    correction.
 
     Done in SQL because `prices` is compacted by DuckDB (46M rows -- pulling it
     through pandas to apply the correction is not viable). Returns None when
@@ -518,20 +585,64 @@ def _backadjust_sql(table: str, inner: str, con) -> "str | None":
     """
     if table != "prices":
         return None
+
+    cc = load_close_corrections()
     off = load_backadjust_offsets()
-    if off.empty:
+
+    if cc.empty and off.empty:
         return None
-    con.register("_backadjust_offsets", off)
-    cols = ", ".join(
-        f"p.{c} + COALESCE(o.offset, 0) AS {c}" for c in _BACKADJUST_COLS)
-    return f"""
-        SELECT p.* EXCLUDE ({", ".join(_BACKADJUST_COLS)}), {cols}
-        FROM ({inner}) p
-        LEFT JOIN _backadjust_offsets o
-          ON p.symbol = o.symbol
-         AND CAST(p.date AS VARCHAR) >= o.start_date
-         AND CAST(p.date AS VARCHAR) <= o.end_date
-    """
+
+    price_cols = ", ".join(_BACKADJUST_COLS)
+    corrected_syms = set(cc["symbol"].unique()) if not cc.empty else set()
+
+    # --- Path 1: Close-correction (per-date close replacement) ---
+    if not cc.empty:
+        con.register("_close_corrections", cc)
+        close_expr = (
+            "CASE WHEN x.corrected_close IS NOT NULL "
+            "THEN x.corrected_close ELSE p.close END"
+        )
+        # OHLC untouched -- scaling negative bars by a positive factor makes
+        # them more negative, so the correction is limited to close.
+        corrected_select = ", ".join(
+            f"p.{c} AS {c}" for c in _BACKADJUST_COLS[:-1]) + ", " + close_expr + " AS close"
+        cc_join = f"""
+            LEFT JOIN _close_corrections x
+              ON p.symbol = x.symbol
+             AND CAST(p.date AS VARCHAR) = x.date
+        """
+        cc_query = f"""
+            SELECT p.* EXCLUDE ({price_cols}), {corrected_select}
+            FROM ({inner}) p
+            {cc_join}
+        """
+        inner_stage = cc_query
+    else:
+        inner_stage = inner
+
+    # --- Path 2: Additive offsets (exclude close-corrected symbols) ---
+    if not off.empty:
+        off_filtered = off
+        if corrected_syms:
+            off_filtered = off[~off["symbol"].isin(corrected_syms)]
+        if not off_filtered.empty:
+            con.register("_backadjust_offsets", off_filtered)
+            add_apply = ", ".join(
+                f"m.{c} + COALESCE(o.offset, 0) AS {c}" for c in _BACKADJUST_COLS)
+            return f"""
+                SELECT m.* EXCLUDE ({price_cols}), {add_apply}
+                FROM ({inner_stage}) m
+                LEFT JOIN _backadjust_offsets o
+                  ON m.symbol = o.symbol
+                 AND CAST(m.date AS VARCHAR) >= o.start_date
+                 AND CAST(m.date AS VARCHAR) <= o.end_date
+            """
+
+    # Only close-corrections applied
+    if not cc.empty:
+        return inner_stage
+
+    return None
 
 
 def _compact_large_table(table: str) -> "tuple[str, int, int] | None":

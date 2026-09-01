@@ -41,6 +41,7 @@ any such date before yfinance's history would already be included in it.
 Usage:
   python backadjust.py --detect            # find affected symbols, write report
   python backadjust.py --build             # build the offset table
+  python backadjust.py --build-close-corrections   # negative-price close fix
   python backadjust.py --verify            # re-check corrected prices vs yfinance
 """
 
@@ -215,12 +216,103 @@ def write_offsets(df: pd.DataFrame) -> str:
     return write_partitioned(df, OUT_DIR, f"price_backadjust_{stamp}.parquet")
 
 
+def build_close_corrections(symbols: list, verbose: bool = True) -> pd.DataFrame:
+    """
+    Per-date close-replacement table for symbols whose raw Schwab close is
+    negative (the rejecteds whose split-adjustment went too far back). On any
+    date where Schwab's stored close <= 0 and yfinance has a bar, the corrected
+    close is yfinance's unadjusted close, wholesale.
+
+    Read from RAW (not curated): `curated.py` already applies this correction,
+    so reading the corrected table would find nothing left to fix. Reads the
+    dated raw globs via query.py with the curated flag toggled off, mirrors the
+    construction used in the 2026-09-01 session, and is idempotent -- re-running
+    it reproduces close_corrections.parquet exactly.
+
+    Symbols whose negative prices sit entirely before yfinance's coverage get no
+    correction rows (CCU, INGR): there is no reference to fix against.
+    """
+    prev = q.USE_CURATED
+    q.USE_CURATED = False
+    q.reload()
+    try:
+        rows = []
+        for i, sym in enumerate(symbols, 1):
+            time.sleep(REQUEST_PAUSE)
+            ref = _yf_history(sym)
+            if ref.empty:
+                if verbose:
+                    print(f"  [{i}/{len(symbols)}] {sym}: no yfinance history")
+                continue
+            ours = q.sql(f"""
+                SELECT CAST(date AS VARCHAR) AS date, close FROM prices
+                WHERE symbol = '{sym}' AND close IS NOT NULL ORDER BY date
+            """)
+            if ours.empty:
+                continue
+            m = ours.merge(ref, on="date", how="inner")
+            bad = m[m["close"] <= 0]
+            if bad.empty:
+                if verbose:
+                    print(f"  [{i}/{len(symbols)}] {sym}: no negative closes")
+                continue
+            rows.append(pd.DataFrame({
+                "symbol": sym,
+                "date": bad["date"].astype(str),
+                "corrected_close": bad["ref_close"].round(4),
+            }))
+            if verbose:
+                print(f"  [{i}/{len(symbols)}] {sym}: {len(bad)} corrected date(s)")
+    finally:
+        q.USE_CURATED = prev
+        q.reload()
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).drop_duplicates(
+        subset=["symbol", "date"], keep="first").reset_index(drop=True)
+
+
+def rejected_negative_symbols() -> list:
+    """
+    Symbols that BOTH carry a non-positive stored close in raw prices AND are
+    in the rejected-not-piecewise-constant list. The rejected list is the
+    scope for the close correction: those symbols' ratio to yfinance is ~1
+    (same security, multiplicative mismatch), whereas a negative close outside
+    it (SVA, GRIN, ...) is ticker reuse and must NOT be "corrected".
+    """
+    rej_path = os.path.join(OUT_DIR, "REJECTED_not_piecewise_constant.csv")
+    if not os.path.exists(rej_path):
+        return []
+    rejected = set(pd.read_csv(rej_path)["symbol"])
+
+    prev = q.USE_CURATED
+    q.USE_CURATED = False
+    q.reload()
+    try:
+        df = q.sql("SELECT DISTINCT symbol FROM prices WHERE close <= 0")
+        negs = df["symbol"].tolist()
+    finally:
+        q.USE_CURATED = prev
+        q.reload()
+    return sorted(sym for sym in negs if sym in rejected)
+
+
+def write_close_corrections(df: pd.DataFrame) -> str:
+    os.makedirs(OUT_DIR, exist_ok=True)
+    path = os.path.join(OUT_DIR, "close_corrections.parquet")
+    df.to_parquet(path, index=False)
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--detect", action="store_true",
                     help="report candidate symbols (no network)")
     ap.add_argument("--build", action="store_true",
                     help="derive and write the offset table")
+    ap.add_argument("--build-close-corrections", action="store_true",
+                    help="derive and write per-date close-correction table "
+                         "(negative-price symbol fix)")
     ap.add_argument("--verify", action="store_true",
                     help="re-check corrected prices against yfinance")
     ap.add_argument("--limit", type=int, default=None,
@@ -254,11 +346,30 @@ def main():
         return 0
 
     if args.verify:
-        from curated import load_backadjust_offsets
+        from curated import load_backadjust_offsets, load_close_corrections
         off = load_backadjust_offsets()
+        cc = load_close_corrections()
         print(f"offset table: {len(off):,} step rows, "
               f"{off['symbol'].nunique():,} symbols"
               if not off.empty else "offset table is empty")
+        print(f"close corrections: {len(cc):,} rows, "
+              f"{cc['symbol'].nunique():,} symbols"
+              if not cc.empty else "close corrections are empty")
+        return 0
+
+    if args.build_close_corrections:
+        symbols = rejected_negative_symbols()
+        print(f"rejected symbols with a non-positive raw close: {len(symbols):,}")
+        if args.limit:
+            symbols = symbols[:args.limit]
+        print(f"\nbuilding close corrections for {len(symbols):,} symbols...")
+        out = build_close_corrections(symbols)
+        if out.empty:
+            print("no corrections derived")
+            return 1
+        path = write_close_corrections(out)
+        print(f"\n-> {path}  ({len(out):,} rows, "
+              f"{out['symbol'].nunique():,} symbols)")
         return 0
 
     ap.print_help()
