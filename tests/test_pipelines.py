@@ -81,6 +81,7 @@ PIPELINE_MODULES = [
     "securities_reference_pipeline",
     "fund_holdings_pipeline",
     "etf_holdings_pipeline",
+    "ssga_holdings_pipeline",
     "openfigi_pipeline",
     "finnhub_expansion_pipeline",
     "finnhub_fundamentals_pipeline",

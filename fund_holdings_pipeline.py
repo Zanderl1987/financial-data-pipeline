@@ -141,6 +141,12 @@ ETF_PID_MAP = {
     # Short Duration
     "SHV":  {"pid": "239466", "name": "iShares Short Treasury Bond ETF"},
     "NEAR": {"pid": "239854", "name": "iShares Short Duration Bond Active ETF"},
+    # International (gap closed 2026-09-01; pids verified live)
+    "ACWX": {"pid": "239594", "name": "iShares MSCI ACWI ex US ETF"},
+    # Thematic & Crypto (gap closed 2026-09-01; pids verified live)
+    "ICLN": {"pid": "239738", "name": "iShares Global Clean Energy ETF"},
+    "IBIT": {"pid": "333011", "name": "iShares Bitcoin Trust"},
+    "ETHA": {"pid": "337614", "name": "iShares Ethereum Trust"},
 }
 
 # Fixed-income iShares ETFs — same BlackRock varnish API, but a different
@@ -153,6 +159,9 @@ BOND_ETF_PID_MAP = {
     "LQD": {"pid": "239566", "name": "iShares iBoxx $ Investment Grade Corporate Bond ETF"},
     "HYG": {"pid": "239565", "name": "iShares iBoxx $ High Yield Corporate Bond ETF"},
     "TIP": {"pid": "239467", "name": "iShares TIPS Bond ETF"},
+    # Treasury + commodity (gap closed 2026-09-01; pids verified live)
+    "IEI": {"pid": "239455", "name": "iShares 3-7 Year Treasury Bond ETF"},
+    "GSG": {"pid": "239757", "name": "iShares S&P GSCI Commodity-Indexed Trust"},
 }
 
 # Mutual funds to fetch via EdgarTools N-PORT
@@ -217,6 +226,27 @@ MUTUAL_FUND_UNIVERSE = {
     "DFUVX": "DFA US Vector Equity Fund Institutional",
     "DFVEX": "DFA US Targeted Value Fund Institutional",
     "DFEMX": "DFA Emerging Markets Core Equity Fund Institutional",
+    # --- ETF share classes that resolve correctly through EdgarTools ---
+    # EdgarTools' Fund(ticker) resolver is UNRELIABLE for most ETF tickers
+    # (it collapses share classes of the same fund family -- BIV/BLV/BSV/VCIT/
+    # VCSH/VCLT all resolve to a sibling fund, and crypto/commodity trusts
+    # return no N-PORT at all). The tickers below were verified live to resolve
+    # to the exact expected fund (2026-09-01) and carry an expected-name guard
+    # (nt: each must match a substring of report.name or the fetch raises) so a
+    # future regressions fails loudly instead of writing a sibling fund's
+    # holdings. BND/BNDX/VTEB add holdings for gap tickers that SecuritiesDB,
+    # the BlackRock varnish API, and the SSGA SPDR feed all miss.
+    "BND":  "Vanguard Total Bond Market ETF (N-PORT, name-guarded)",
+    "BNDX": "Vanguard Total International Bond ETF (N-PORT, name-guarded)",
+    "VTEB": "Vanguard Tax-Exempt Bond ETF (N-PORT, name-guarded)",
+}
+
+# Substring that must appear in the resolved report.name (case-insensitive)
+# before a guarded ETF's holdings are accepted.
+NPORT_ETF_NAME_GUARD = {
+    "BND":  "total bond market ii",
+    "BNDX": "total international bond ii",
+    "VTEB": "intermediate-term tax-exempt",
 }
 
 
@@ -465,6 +495,18 @@ def fetch_mutual_fund_holdings(ticker: str) -> pd.DataFrame:
     if report is None:
         raise RuntimeError(f"No N-PORT filing found for {ticker}")
 
+    # Name-guard for guarded ETFs: reject a wrong-fund resolution before we
+    # write a sibling fund's holdings (BIV/BLV/BSV/VCIT/VCSH/VCLT all resolve
+    # to a wrong share class of the same family; see ETF_PID_MAP notes).
+    expected = NPORT_ETF_NAME_GUARD.get(ticker)
+    if expected:
+        resolved = (report.name or "").lower()
+        if expected not in resolved:
+            raise RuntimeError(
+                f"{ticker}: name guard failed -- resolved {report.name!r}, "
+                f"expected substring {expected!r}"
+            )
+
     df = report.securities_data()
     if df is None or df.empty:
         raise RuntimeError(f"Empty portfolio for {ticker}")
@@ -479,11 +521,13 @@ def fetch_mutual_fund_holdings(ticker: str) -> pd.DataFrame:
         "balance": "shares_held",
         "asset_category": "asset_category",
         "investment_country": "country",
+        "maturity_date": "maturity_date",
+        "annualized_rate": "coupon_pct",
     }
     df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
     # Parse numeric columns
-    for col in ["market_value_usd", "weight_pct", "shares_held"]:
+    for col in ["market_value_usd", "weight_pct", "shares_held", "coupon_pct"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -496,7 +540,7 @@ def fetch_mutual_fund_holdings(ticker: str) -> pd.DataFrame:
         "holding_ticker": df.get("holding_ticker"),
         "holding_name": df.get("holding_name"),
         "cusip": df.get("cusip"),
-        "isin": None,
+        "isin": df.get("isin"),
         "figi": None,
         "sedol": None,
         "weight_pct": df.get("weight_pct"),
@@ -511,10 +555,25 @@ def fetch_mutual_fund_holdings(ticker: str) -> pd.DataFrame:
             if hasattr(report, "reporting_period") else None,
         "source": f"edgar_nport:{ticker}",
         "fetched_at": FETCHED_AT,
+        "par_value": None,
+        "maturity_date": df.get("maturity_date"),
+        "coupon_pct": df.get("coupon_pct"),
+        "duration": None,
+        "ytm_pct": None,
     })
 
-    # Drop rows with no holding_ticker (cash, derivatives, etc.)
-    result = result[result["holding_ticker"].notna() & (result["holding_ticker"] != "")]
+    # Keep rows that identify a security by TICKER, CUSIP, or ISIN (bond-fund
+    # N-PORT rows are keyed by CUSIP/ISIN, never ticker; foreign bonds may
+    # have only an ISIN). Drops cash/sweep/derivative rows (no ticker and no
+    # real identifier -- e.g. Vanguard Market Liquidity has cusip "N/A").
+    ticker_ok = result["holding_ticker"].notna() & (result["holding_ticker"].astype(str) != "")
+    cusip_ok = result["cusip"].fillna("").astype(str).str.len() >= 6
+    isin_ok = result["isin"].fillna("").astype(str).str.len() >= 8
+    non_na = ~(
+        result["cusip"].fillna("").astype(str).isin(["N/A", "nan", "", "NaN"])
+        & result["isin"].fillna("").astype(str).isin(["N/A", "nan", "", "NaN"])
+    )
+    result = result[ticker_ok | ((cusip_ok | isin_ok) & non_na)]
     log.info("[MF:%s] Output: %d holdings (period: %s)", ticker, len(result),
              getattr(report, "reporting_period", "unknown"))
     return result

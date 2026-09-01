@@ -859,6 +859,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=1800,
     ),
     PipelineSpec(
+        name="ssga_holdings",
+        file="ssga_holdings_pipeline.py",
+        desc="ETF holdings -- State Street SPDR daily holdings (official issuer XLSX, no auth) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        backfill_args=["--backfill"],
+        timeout=900,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",
