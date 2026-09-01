@@ -35,12 +35,18 @@ Notes on the data:
     bullet; every other field is a slot-relative offset from that anchor
     or from the slot's own "FAIR MARKET VALUE"/"NATURE OF INVESTMENT"
     labels, so the map holds across rows/columns/pages.
-  - Schedule A-1 (investments) and Schedule D (gifts) are parsed, each to
-    its own output table -- one PDF fetch per filing serves every enabled
-    schedule via SCHEDULES / --schedules. Schedule D has 5 source slots/page,
-    up to 3 gift line items each, no checkboxes. Same digit-duplication
-    render artifact as A-1's dates -- see _digits_near.
-  - Schedules B, C, A-2, E not yet built -- see
+  - Schedule A-1 (investments), Schedule D (gifts), and Schedule E (income --
+    gifts -- travel payments) are parsed, each to its own output table -- one
+    PDF fetch per filing serves every enabled schedule via SCHEDULES /
+    --schedules. Schedule D has 5 source slots/page, up to 3 gift line items
+    each, no checkboxes. Same digit-duplication render artifact as A-1's
+    dates -- see _digits_near. Schedule E has 4 source slots/page (2 cols x
+    2 rows), a travel date RANGE per slot (not a single date), and three
+    checkbox concepts (501(c)(3) toggle, Gift/Income, Speech-or-Panel/Other)
+    -- its checkbox marks have more column-to-column positional slop than
+    A-1's (~10pt vs ~4pt), so nearest-label distance matching is used
+    instead of a fixed-offset table -- see _nearest_checkbox_label.
+  - Schedules B, C, A-2 not yet built -- see
     work-notes/financial-data-pipeline/TASKS.md.
 
 CLI:
@@ -48,11 +54,12 @@ CLI:
   python california_disclosures_pipeline.py --backfill       # full history
   python california_disclosures_pipeline.py --years 2024 2025
   python california_disclosures_pipeline.py --agency senate  # one chamber
-  python california_disclosures_pipeline.py --schedules a1 d # multiple schedules
+  python california_disclosures_pipeline.py --schedules a1 d e # multiple schedules
 
 Outputs:
   storage/raw/california_disclosures/california_disclosures_{mode}_{YYYY}.parquet
   storage/raw/california_disclosures_gifts/california_disclosures_gifts_{mode}_{YYYY}.parquet
+  storage/raw/california_disclosures_travel_gifts/california_disclosures_travel_gifts_{mode}_{YYYY}.parquet
 """
 
 import argparse
@@ -116,6 +123,17 @@ def _mmddyy_to_iso(mm, dd, yy):
     if pd.isna(ts):
         return None
     return ts.strftime("%Y-%m-%d")
+
+
+def _plausible_date(iso_date, filing_year, slack=2):
+    """None out a date whose year is implausibly far from the filing year --
+    a signal the extraction window landed on the wrong digits (e.g. a form
+    revision with shifted row coordinates) rather than a real date."""
+    if not iso_date or not filing_year:
+        return iso_date
+    if abs(int(iso_date[:4]) - int(filing_year)) > slack:
+        return None
+    return iso_date
 
 
 # -- Filing index --------------------------------------------------------
@@ -295,6 +313,42 @@ def _checkbox_selected(drawings, x0, y0, dx, dy):
         if (abs(r.x0 - cx) < _BOX_TOL and abs(r.y0 - cy) < _BOX_TOL):
             return True
     return False
+
+
+def _checkbox_in_window(drawings, x0, x1, y0, y1):
+    """True if any blue-filled mark's top-left corner falls in this window."""
+    for d in drawings:
+        if d.get("color") != (0.0, 0.0, 1.0):
+            continue
+        r = d["rect"]
+        if x0 <= r.x0 <= x1 and y0 <= r.y0 <= y1:
+            return True
+    return False
+
+
+def _nearest_checkbox_label(drawings, x0, y0, x_win, y_win, candidates,
+                             max_dist=40.0):
+    """
+    Pick the label of the candidate (dx, dy, label) closest to a blue-filled
+    mark found inside the (x0+x_win, y0+y_win) window. Schedule E's checkbox
+    marks aren't positioned as consistently relative to their option text as
+    Schedule A-1's are (~10pt of column-to-column slop vs ~4pt), so nearest-
+    distance classification against the (template-fixed) option label
+    positions is more robust here than a tight fixed-offset match.
+    """
+    best_label, best_dist = None, None
+    for d in drawings:
+        if d.get("color") != (0.0, 0.0, 1.0):
+            continue
+        r = d["rect"]
+        if not (x0 + x_win[0] <= r.x0 <= x0 + x_win[1]
+                and y0 + y_win[0] <= r.y0 <= y0 + y_win[1]):
+            continue
+        for dx, dy, label in candidates:
+            dist = ((r.x0 - (x0 + dx)) ** 2 + (r.y0 - (y0 + dy)) ** 2) ** 0.5
+            if best_dist is None or dist < best_dist:
+                best_dist, best_label = dist, label
+    return best_label if (best_dist is None or best_dist <= max_dist) else None
 
 
 def parse_schedule_a1(pdf_bytes, filing):
@@ -502,6 +556,139 @@ def parse_schedule_d(pdf_bytes, filing):
     return rows_out
 
 
+# -- Schedule E parsing (Income -- Gifts -- Travel Payments) ------------
+# 4 source slots per page (2 columns x 2 rows). Each slot has a travel date
+# RANGE (not a single date, unlike D), an amount, and three independent
+# checkbox concepts: a 501(c)(3) toggle on the business-activity line, a
+# Gift/Income choice, and a Speech-or-Panel/Other choice (with a free-text
+# description when Other is picked). All offsets below are relative to the
+# slot's own "NAME OF SOURCE" anchor, derived from a live filing (Sen.
+# Cabaldon, 2024) and confirmed to reproduce identically across both columns
+# for text; checkbox marks vary by ~10pt between columns, hence
+# _nearest_checkbox_label instead of a fixed-offset table.
+
+_E_SLOT_ANCHOR = ("NAME", "OF", "SOURCE")
+_E_501C3_LABEL = ("501", "(c)(3)")
+
+_E_GIFT_INCOME_CANDIDATES = [(91.2, 139.6, "Gift"), (148.5, 139.9, "Income")]
+_E_SPEECH_OTHER_CANDIDATES = [(15.1, 157.5, "Speech"), (15.1, 175.6, "Other")]
+
+
+def parse_schedule_e(pdf_bytes, filing):
+    """Extract Schedule E (Income -- Gifts -- Travel Payments) line items."""
+    rows_out = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            text_upper = page.get_text().upper()
+            if "SCHEDULE E" not in text_upper:
+                continue
+            if "GIFT" not in text_upper and "TRAVEL" not in text_upper:
+                continue  # cover-page mention of Schedule E, not the form page
+            words = page.get_text("words")
+            row_map = _words_by_row(words)
+            drawings = page.get_drawings()
+
+            anchors = _find_anchors(row_map, _E_SLOT_ANCHOR)
+            for ax, ay in anchors:
+                source = _text_near(row_map, ax, ay, (0, 260), (7, 14),
+                                     exclude=("NAME", "OF", "SOURCE", "(Not",
+                                               "an", "Acronym)"))
+                if not source:
+                    continue  # unfilled template slot
+                address = _text_near(row_map, ax, ay, (0, 260), (24, 67),
+                                      exclude=("ADDRESS", "(Business",
+                                                "Address", "Acceptable)",
+                                                "CITY", "AND", "STATE"))
+                business = _text_near(row_map, ax, ay, (0, 260), (78, 88),
+                                       exclude=("501", "(c)(3)", "or",
+                                                 "DESCRIBE", "BUSINESS",
+                                                 "ACTIVITY,", "IF", "ANY,",
+                                                 "OF", "SOURCE"))
+                source_501c3 = _checkbox_in_window(
+                    drawings, ax - 8, ax + 18, ay + 78, ay + 92)
+
+                digits = _digits_near(row_map, ax, ay, (20, 140), (105, 116))
+                date_start = (_mmddyy_to_iso(*digits[0:3])
+                              if len(digits) >= 3 else None)
+                date_end = (_mmddyy_to_iso(*digits[3:6])
+                            if len(digits) >= 6 else None)
+                # Older form revisions (pre-2024/2025) shift this row's y
+                # position enough that the digit window can grab unrelated
+                # digits -- guard against a plausible-looking but wrong date
+                # rather than let it silently corrupt the table.
+                date_start = _plausible_date(date_start, filing["filing_year"])
+                date_end = _plausible_date(date_end, filing["filing_year"])
+                amt_txt = _text_near(row_map, ax, ay, (170, 235), (105, 116))
+                amount = None
+                if amt_txt:
+                    try:
+                        amount = float(amt_txt.replace("$", "").replace(",", ""))
+                    except ValueError:
+                        amount = None
+                # A source PDF with a corrupted embedded font (rare, but seen
+                # live -- MuPDF logs "unknown cid font type" for these) can
+                # decode a $ token into garbage digits, e.g. a real filing
+                # coming out as a $1.12 billion travel gift. Cap at a ceiling
+                # well above any plausible legitimate travel reimbursement
+                # (even large ones are 5-6 figures) rather than trust it.
+                if amount is not None and amount > 5_000_000:
+                    amount = None
+
+                gift_or_income = _nearest_checkbox_label(
+                    drawings, ax, ay, (60, 170), (135, 152),
+                    _E_GIFT_INCOME_CANDIDATES)
+                speech_or_other = _nearest_checkbox_label(
+                    drawings, ax, ay, (-10, 40), (153, 190),
+                    _E_SPEECH_OTHER_CANDIDATES)
+
+                other_description = None
+                if speech_or_other == "Other":
+                    other_description = _text_near(
+                        row_map, ax, ay, (0, 260), (179, 192))
+
+                destination = _text_near(row_map, ax, ay, (-2, 260), (206, 213),
+                                          exclude=("NAME", "OF", "SOURCE",
+                                                    "(Not", "an", "Acronym)"))
+                # Same class of issue as _plausible_date: on a layout the
+                # coordinate table doesn't match, this window can land on
+                # static boilerplate (a neighboring slot's header, the
+                # page-level "Comments:" line) instead of real data.
+                if destination and ("SOURCE" in destination.upper()
+                                     or "COMMENTS" in destination.upper()):
+                    destination = None
+
+                if not (date_start or amount or gift_or_income or destination):
+                    continue  # blank template slot with only a name printed
+
+                rows_out.append({
+                    "index_id": filing["index_id"],
+                    "filer_last_name": filing["filer_last_name"],
+                    "filer_first_name": filing["filer_first_name"],
+                    "filer_middle_name": filing["filer_middle_name"],
+                    "agency": filing["agency"],
+                    "position": filing["position"],
+                    "filing_type": filing["filing_type"],
+                    "filing_year": filing["filing_year"],
+                    "filed_date": filing["filed_date"],
+                    "is_amendment": filing["is_amendment"],
+                    "source_name": source,
+                    "source_address": address,
+                    "source_business_activity": business,
+                    "source_501c3": source_501c3,
+                    "gift_or_income": gift_or_income,
+                    "travel_date_start": date_start,
+                    "travel_date_end": date_end,
+                    "amount": amount,
+                    "speech_or_other": speech_or_other,
+                    "other_description": other_description,
+                    "travel_destination": destination,
+                })
+    finally:
+        doc.close()
+    return rows_out
+
+
 # -- Resumable checkpoints (same reasoning as congressional_trades_pipeline) -
 
 def _done_path(path):
@@ -557,6 +744,9 @@ SCHEDULES = {
     "d": (parse_schedule_d, _finalize_generic,
           os.path.join("storage", "raw", "california_disclosures_gifts"),
           "california_disclosures_gifts"),
+    "e": (parse_schedule_e, _finalize_generic,
+          os.path.join("storage", "raw", "california_disclosures_travel_gifts"),
+          "california_disclosures_travel_gifts"),
 }
 
 

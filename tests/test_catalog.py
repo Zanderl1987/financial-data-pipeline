@@ -148,6 +148,8 @@ EXPECTED_TABLES = [
     "california_disclosures",
     # California legislature Form 700 Schedule D (gifts)
     "california_disclosures_gifts",
+    # California legislature Form 700 Schedule E (income -- gifts -- travel)
+    "california_disclosures_travel_gifts",
     # USPTO patents
     "patents",
     # ECB rates

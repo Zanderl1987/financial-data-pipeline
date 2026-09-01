@@ -468,6 +468,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["agency", "filer_last_name", "source_name"],
         "date_col":    "filed_date",
     },
+    # ── California legislature Form 700 Schedule E (income -- gifts -- travel) ──
+    "california_disclosures_travel_gifts": {
+        "required":    ["agency", "filer_last_name", "source_name", "fetched_at"],
+        "critical_nn": ["agency", "filer_last_name", "source_name"],
+        "date_col":    "filed_date",
+    },
     # ── USPTO patents ─────────────────────────────────────────────────────────
     "patents": {
         "required":    ["patent_id", "patent_date", "sector", "fetched_at"],

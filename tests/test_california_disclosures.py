@@ -283,6 +283,123 @@ class _Rect:
         self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
 
 
+class TestCheckboxInWindow:
+
+    def test_true_when_fill_inside_window(self):
+        drawings = [{"color": (0.0, 0.0, 1.0), "rect": _Rect(50.0, 300.0, 55.0, 305.0)}]
+        assert cdp._checkbox_in_window(drawings, 40, 60, 295, 310) is True
+
+    def test_false_when_fill_outside_window(self):
+        drawings = [{"color": (0.0, 0.0, 1.0), "rect": _Rect(500.0, 500.0, 505.0, 505.0)}]
+        assert cdp._checkbox_in_window(drawings, 40, 60, 295, 310) is False
+
+    def test_ignores_non_blue_fills(self):
+        drawings = [{"color": (0.0, 0.0, 0.0), "rect": _Rect(50.0, 300.0, 55.0, 305.0)}]
+        assert cdp._checkbox_in_window(drawings, 40, 60, 295, 310) is False
+
+
+class TestNearestCheckboxLabel:
+    # Regression coverage for the real-filing finding that Schedule E's
+    # checkbox marks sit ~10pt further from their option text in the right
+    # column than the left -- too much slop for a fixed-offset match, but
+    # nearest-distance classification against both option positions still
+    # resolves correctly since the options are spaced far apart.
+
+    CANDIDATES = [(91.2, 139.6, "Gift"), (148.5, 139.9, "Income")]
+
+    def test_picks_nearest_when_offset_is_off_template(self):
+        ax, ay = 333.0, 220.3
+        drawings = [{"color": (0.0, 0.0, 1.0),
+                     "rect": _Rect(ax + 73.07, ay + 143.14, ax + 77.6, ay + 147.7)}]
+        label = cdp._nearest_checkbox_label(
+            drawings, ax, ay, (60, 170), (135, 152), self.CANDIDATES)
+        assert label == "Gift"
+
+    def test_picks_income_when_closer(self):
+        ax, ay = 46.8, 220.3
+        drawings = [{"color": (0.0, 0.0, 1.0),
+                     "rect": _Rect(ax + 138.0, ay + 143.0, ax + 142.5, ay + 147.5)}]
+        label = cdp._nearest_checkbox_label(
+            drawings, ax, ay, (60, 170), (135, 152), self.CANDIDATES)
+        assert label == "Income"
+
+    def test_none_when_no_fill_in_window(self):
+        label = cdp._nearest_checkbox_label(
+            [], 46.8, 220.3, (60, 170), (135, 152), self.CANDIDATES)
+        assert label is None
+
+
+class TestPlausibleDate:
+
+    def test_keeps_date_within_slack(self):
+        assert cdp._plausible_date("2024-09-16", 2024) == "2024-09-16"
+
+    def test_nones_out_implausible_year(self):
+        # Regression: an older Schedule E form revision (2023/2024) shifted
+        # the date row enough that the digit window grabbed unrelated
+        # digits, producing dates like 2002-02-16 and 2031-01-23 for a
+        # 2023 filing year.
+        assert cdp._plausible_date("2002-02-16", 2023) is None
+        assert cdp._plausible_date("2031-01-23", 2023) is None
+
+    def test_passes_through_missing_input(self):
+        assert cdp._plausible_date(None, 2024) is None
+        assert cdp._plausible_date("2024-09-16", None) == "2024-09-16"
+
+
+class TestScheduleEAmountCap:
+    # Regression: a source PDF with a corrupted embedded font decoded an
+    # AMT: $ token into garbage digits, producing a $1.12 billion "travel
+    # gift" for a real 2022 filing (Cervantes). parse_schedule_e caps
+    # amount rather than trust an implausible extracted value.
+
+    def _page_words(self, amt_text):
+        # Minimal slot: NAME OF SOURCE anchor + a source name + an AMT token
+        # at the offsets parse_schedule_e expects.
+        ax, ay = 46.8, 220.3
+        return [
+            (ax, ay, ax + 20, ay + 8, "NAME", 0, 0, 0),
+            (ax + 24, ay, ax + 30, ay + 8, "OF", 0, 0, 0),
+            (ax + 34, ay, ax + 44, ay + 8, "SOURCE", 0, 0, 0),
+            (ax, ay + 10, ax + 40, ay + 18, "Acme", 0, 0, 0),
+            (ax + 178, ay + 108.6, ax + 220, ay + 116.6, amt_text, 0, 0, 0),
+            (ax + 32, ay + 108.6, ax + 40, ay + 116.6, "09", 0, 0, 0),
+            (ax + 50, ay + 108.6, ax + 58, ay + 116.6, "16", 0, 0, 0),
+            (ax + 68, ay + 108.6, ax + 76, ay + 116.6, "22", 0, 0, 0),
+        ]
+
+    def _parse(self, amt_text, monkeypatch):
+        class _FakePage:
+            def get_text(self, kind=None):
+                return ("SCHEDULE E Income Gifts Travel Payments"
+                        if kind is None else self._words)
+            def get_drawings(self):
+                return []
+        page = _FakePage()
+        page._words = self._page_words(amt_text)
+
+        class _FakeDoc:
+            def __iter__(self):
+                return iter([page])
+            def close(self):
+                pass
+        monkeypatch.setattr(cdp.fitz, "open", lambda **kw: _FakeDoc())
+        filing = {"index_id": "1", "filer_last_name": "X", "filer_first_name": "Y",
+                  "filer_middle_name": None, "agency": "State Senate",
+                  "position": "Senator", "filing_type": "Annual",
+                  "filing_year": 2022, "filed_date": "2022-01-01",
+                  "is_amendment": False}
+        return cdp.parse_schedule_e(b"", filing)
+
+    def test_caps_implausible_amount(self, monkeypatch):
+        rows = self._parse("$1120000000", monkeypatch)
+        assert rows[0]["amount"] is None
+
+    def test_keeps_plausible_large_amount(self, monkeypatch):
+        rows = self._parse("$836459", monkeypatch)
+        assert rows[0]["amount"] == 836459.0
+
+
 # ── Output contract ─────────────────────────────────────────────────────
 
 class TestFinalize:
