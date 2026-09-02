@@ -13,11 +13,121 @@ range lives in the `date_range` string.
 
 import hashlib
 import os
+import time
 import uuid
 
 import pandas as pd
 
 REG_PATH = os.path.join("storage", "eval_registry", "results.parquet")
+
+
+class RegistryLockTimeout(RuntimeError):
+    """Raised when append() cannot secure the registry's file lock within the
+    timeout -- a held lock means another writer is mid-append; waiting past
+    ~30s almost always means a crashed holder left a live-looking lock."""
+
+
+def _pid_alive(pid: "int | None") -> bool:
+    """True if process `pid` exists.
+
+    NOT os.kill(pid, 0): on Windows that call is not a liveness probe -- it
+    sends CTRL_C_EVENT to the process' console (silently killing concurrent
+    writers mid-append) and raises SystemError instead of ProcessLookupError,
+    so a crashed holder can never be reclaimed. Use the Win32 OpenProcess /
+    GetExitCodeProcess pair instead, which is a true existence check."""
+
+    def _win_alive(unchecked: int) -> bool:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                      wintypes.BOOL(False),
+                                      wintypes.DWORD(unchecked))
+        if not handle:
+            # Access denied (exists but owned by another user) -- be
+            # conservative and treat it as alive rather than reclaiming a
+            # live lock.
+            return True
+        try:
+            code = wintypes.DWORD()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            if not ok:
+                return True
+            return bool(code.value == STILL_ACTIVE)
+        finally:
+            kernel32.CloseHandle(handle)
+
+    if pid is None or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            return _win_alive(pid)
+        except OSError:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but owned by another user.
+        return True
+    return True
+
+
+def _lock_path(path: str) -> str:
+    return path + ".lock"
+
+
+def _acquire_lock(path: str, timeout: float = 60.0):
+    """Cross-process exclusive lock for the registry file, via an
+    O_CREAT|O_EXCL lockfile. append() is read-modify-write (load whole
+    results.parquet, concat, os.replace) so two concurrent writers can lose
+    each other's rows; the lock serializes them.
+
+    Stale-lock recovery: if the lockfile names a PID that no longer exists,
+    the lock is reclaimed. A live-crashed holder (PID reused, or a file the
+    OS refuses to tell us about) is surfaced as RegistryLockTimeout rather
+    than silently corrupting the registry.
+    """
+    lock = _lock_path(path)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, f"{os.getpid()} {time.time()}\n".encode("ascii"))
+            return fd
+        except FileExistsError:
+            pid = None
+            try:
+                with open(lock, "r", encoding="ascii") as f:
+                    pid = int(f.read().split()[0])
+            except (ValueError, IndexError, OSError, FileNotFoundError):
+                pid = None
+            if not _pid_alive(pid):
+                try:
+                    os.remove(lock)
+                except OSError:
+                    pass
+                continue
+            if time.time() > deadline:
+                raise RegistryLockTimeout(
+                    f"registry lock {lock} held by live pid {pid} for "
+                    f">{timeout:.0f}s")
+            time.sleep(0.25)
+
+
+def _release_lock(fd, path: str) -> None:
+    try:
+        os.close(fd)
+    finally:
+        try:
+            os.remove(_lock_path(path))
+        except OSError:
+            pass
 
 COLUMNS = [
     "run_id", "input_name", "input_type", "evaluation", "horizon",
@@ -77,16 +187,25 @@ def load(path: str = REG_PATH) -> pd.DataFrame:
 
 
 def append(rows: pd.DataFrame, path: str = REG_PATH) -> int:
-    """Append rows atomically (write temp, os.replace). Returns rows added."""
+    """Append rows atomically (write temp, os.replace). Returns rows added.
+
+    Serialized with a cross-process lockfile so two concurrent writers (e.g.
+    two Stage-3 batches running in parallel) cannot lose each other's rows in
+    the read-modify-write. Single-writer callers take and release the lock
+    with no contention."""
     rows = _normalize(rows)
-    existing = load(path)
-    combined = (pd.concat([existing, rows], ignore_index=True)
-                if not existing.empty else rows)
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    tmp = path + ".tmp"
-    combined.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
-    return len(rows)
+    fd = _acquire_lock(path)
+    try:
+        existing = load(path)
+        combined = (pd.concat([existing, rows], ignore_index=True)
+                    if not existing.empty else rows)
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        tmp = path + ".tmp"
+        combined.to_parquet(tmp, index=False)
+        os.replace(tmp, path)
+        return len(rows)
+    finally:
+        _release_lock(fd, path)
 
 
 def baselines(input_name=None, path: str = REG_PATH) -> pd.DataFrame:

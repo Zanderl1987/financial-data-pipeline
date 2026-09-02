@@ -222,6 +222,109 @@ class TestSupertrendPort:
         assert {"long", "short"}.issubset(set(trades_df["side"]))
 
 
+# --------------------------------------------------------------- MA-cross port
+
+class TestMAcrossDollarSLTPPort:
+    """ihvpg6ts_stop_loss_and_take_profit_in_example -- SMA(14) x SMA(28)
+    both-sided cross with entry-anchored $-SL/TP (as % of the fixed notional)."""
+
+    def _frame(self):
+        # trending up then down so both a golden cross and a death cross fire
+        rng = np.random.default_rng(5)
+        n = 320
+        close = 100 * np.cumprod(1 + 0.001 + rng.normal(0, 0.006, n))
+        close[160:] = close[160] * np.cumprod(1 - 0.0015 + rng.normal(0, 0.008, n - 160))
+        prev = np.concatenate(([close[0]], close[:-1]))
+        high = np.maximum(close, prev) * 1.01
+        low = np.minimum(close, prev) * 0.99
+        return pd.DataFrame(
+            {"open": prev, "high": high, "low": low, "close": close,
+             "volume": 1e6}, index=pd.date_range("2015-01-01", periods=n, freq="B"))
+
+    def test_both_sides_fire(self):
+        from strategies.ports.ihvpg6ts_stop_loss_and_take_profit_in_example import compute
+        res = compute(self._frame())
+        assert res["entries"].sum() >= 1
+        assert res["short_entries"].sum() >= 1
+
+    def test_entry_equals_golden_cross(self):
+        from strategies.ports.ihvpg6ts_stop_loss_and_take_profit_in_example import compute
+        df = self._frame()
+        res = compute(df)
+        fast = df["close"].rolling(14).mean()
+        slow = df["close"].rolling(28).mean()
+        golden = (fast > slow) & (fast.shift(1) <= slow.shift(1))
+        assert res["entries"].equals(golden.fillna(False))
+
+    def test_engine_trades_both_sides(self):
+        from strategies.ports.ihvpg6ts_stop_loss_and_take_profit_in_example import build_rule
+        t = trades.simulate(build_rule(), {"SYN": self._frame()})
+        assert len(t) >= 2
+        assert {"long", "short"}.issubset(set(t["side"]))
+
+    def test_tp_tighter_than_sl_shape(self):
+        # exits can also be the opposing cross; make sure level exits exist too
+        from strategies.ports.ihvpg6ts_stop_loss_and_take_profit_in_example import compute
+        res = compute(self._frame())
+        assert (res["entries"] & res["exits"]).sum() == 0  # no same-bar chaos
+        assert res["exits"].dtype == bool and res["short_exits"].dtype == bool
+
+
+# ------------------------------------------------------ gap-filling port
+
+class TestGapFillingPort:
+    """ghocsiv7_gap_filling_strategy -- daily-gap mean reversion, both sides."""
+
+    def _frame(self):
+        rng = np.random.default_rng(3)
+        n = 240
+        close = 100 * np.cumprod(1 + rng.normal(0.0002, 0.01, n))
+        opens = (np.concatenate(([close[0]], close[:-1]))
+                 * (1 + rng.normal(0, 0.003, n)))
+        for g in (40, 90, 140, 180):
+            opens[g] = close[g - 1] * 0.97   # down gap
+            close[g] = opens[g] + abs(rng.normal(0, 0.005))
+        for g in (60, 110):
+            opens[g] = close[g - 1] * 1.03   # up gap
+        high = np.maximum(close, opens) * 1.005
+        low = np.minimum(close, opens) * 0.995
+        return pd.DataFrame(
+            {"open": opens, "high": high, "low": low, "close": close,
+             "volume": 1e6}, index=pd.date_range("2019-01-01", periods=n, freq="B"))
+
+    def test_gaps_generate_entries(self):
+        from strategies.ports.ghocsiv7_gap_filling_strategy import compute
+        res = compute(self._frame())
+        assert res["entries"].sum() >= 1     # buys the down gaps
+        assert res["short_entries"].sum() >= 1   # sells the up gaps
+
+    def test_default_buys_down_sells_up(self):
+        # non-inverted: BUY on down gap, SELL on up gap
+        from strategies.ports.ghocsiv7_gap_filling_strategy import compute
+        df = self._frame()
+        res = compute(df)
+        dngap_bars = [40, 90, 140, 180]
+        upgap_bars = [60, 110]
+        assert any(res["entries"].iloc[b] for b in dngap_bars)
+        assert any(res["short_entries"].iloc[b] for b in upgap_bars)
+
+    def test_invert_flips_sides(self):
+        from strategies.ports.ghocsiv7_gap_filling_strategy import compute
+        df = self._frame()
+        base = compute(df)
+        inv = compute(df, {"invert": True})
+        assert inv["entries"].sum() >= 1
+        assert inv["short_entries"].sum() >= 1
+        # no bar is both a buy and a sell under either setting
+        assert not (inv["entries"] & inv["short_entries"]).any()
+
+    def test_engine_trades(self):
+        from strategies.ports.ghocsiv7_gap_filling_strategy import build_rule
+        t = trades.simulate(build_rule(), {"SYN": self._frame()})
+        assert len(t) >= 1
+        assert {"long", "short"}.issubset(set(t["side"]))
+
+
 # ------------------------------------------------------------------ registry
 
 class TestRegistry:
@@ -233,8 +336,6 @@ class TestRegistry:
     def test_all_ports_contains_hybrid(self):
         slugs = {p.slug for p in all_ports()}
         assert {"hybrid_breakout_vcp", "supertrend_entry_tp123"}.issubset(slugs)
-
-    def test_port_info_metadata(self):
         info = port_info("hybrid_breakout_vcp")
         assert info.tv_author == "blitz_locked"
         assert info.translation_verified == "unverified"

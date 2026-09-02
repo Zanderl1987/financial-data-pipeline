@@ -357,13 +357,25 @@ def registry_rows_for(row: dict, run_id: str, universe_hash: str, date_range: st
 # --------------------------------------------------------------- main
 
 def run_all(n_perm: int = N_PERM, seed: int = SEED, write_registry: bool = True,
-           limit: "int | None" = None, workers: int = 0) -> pd.DataFrame:
+           limit: "int | None" = None, workers: int = 0,
+           only_slugs: "list[str] | None" = None) -> pd.DataFrame:
     slugs = admitted_slugs()
     cache = dev_cache()
     uhash = ev_registry.universe_hash(cache.keys())
     date_range = f"..{DEV_END} (+75% symbols full history)"
     created_at = datetime.now(timezone.utc).isoformat()
     run_id = ev_registry.new_run_id()
+
+    if only_slugs is not None:
+        want = {s.split("_")[0] if "_" in s else s for s in only_slugs}
+        available = {k.split("_")[0]: k for k in slugs}
+        missing = want - set(available)
+        if missing:
+            raise ValueError(
+                f"--only-slugs: {len(missing)} slugs are not admitted: "
+                f"{sorted(missing)[:5]}...")
+        slugs = {k: note for k, note in slugs.items()
+                 if k.split("_")[0] in want}
 
     ordered = sorted(slugs.items())
     total = len(ordered) if limit is None else min(limit, len(ordered))
@@ -409,9 +421,17 @@ if __name__ == "__main__":
                     help="parallel processes for the permutation null (0 = "
                          "classic single-process loop; results are "
                          "byte-identical either way)")
+    ap.add_argument("--only-slugs", type=str, default=None,
+                    help="path to a file with one admitted slug per line; "
+                         "restrict this run to exactly those slugs (e.g. a "
+                         "second batch running in parallel with the main one)")
     args = ap.parse_args()
+    only = None
+    if args.only_slugs:
+        with open(args.only_slugs, "r", encoding="utf-8") as fh:
+            only = [ln.strip() for ln in fh if ln.strip()]
     out = run_all(n_perm=args.n_perm, write_registry=not args.no_registry,
-                  limit=args.limit, workers=args.workers)
+                  limit=args.limit, workers=args.workers, only_slugs=only)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.width", 200)
     cols = [c for c in ["strategy_id", "translation_verified", "n_trades",
