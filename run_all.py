@@ -961,6 +961,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="gold_bar_holdings",
+        file="gold_bar_holdings_pipeline.py",
+        desc="ETF holdings -- GLD/SGOL physical gold bar lists (custodian PDFs, keyless, one row per bar) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",

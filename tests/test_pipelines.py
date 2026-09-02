@@ -93,6 +93,7 @@ PIPELINE_MODULES = [
     "robo_holdings_pipeline",
     "vanguard_bond_holdings_pipeline",
     "schwab_holdings_pipeline",
+    "gold_bar_holdings_pipeline",
     "openfigi_pipeline",
     "finnhub_expansion_pipeline",
     "finnhub_fundamentals_pipeline",
