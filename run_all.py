@@ -660,6 +660,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="jmic",
+        file="jmic_pipeline.py",
+        desc="JMIC maritime security advisories/incidents - Red Sea/Gulf of Aden/Arabian Gulf (issuer REST index, keyless, curl_cffi TLS bypass, PDF text + table extraction)",
+        stage=1,
+        tables=["jmic_documents", "jmic_incidents"],
+        backfill_args=["--backfill"],
+        timeout=1800,
+    ),
+    PipelineSpec(
         name="yfinance",
         file="yfinance_pipeline.py",
         desc="Yahoo Finance deep daily history — indices, commodity futures, FX, rates ETFs (keyless)",

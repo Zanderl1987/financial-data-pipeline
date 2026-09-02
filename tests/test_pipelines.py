@@ -58,6 +58,7 @@ PIPELINE_MODULES = [
     "real_estate_pipeline",
     "shipping_pipeline",
     "piracy_pipeline",
+    "jmic_pipeline",
     "yfinance_pipeline",
     "tradingview_pipeline",
     "sec_filings_pipeline",
