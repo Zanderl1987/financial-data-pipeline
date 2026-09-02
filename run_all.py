@@ -893,6 +893,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=600,
     ),
     PipelineSpec(
+        name="invesco_holdings",
+        file="invesco_holdings_pipeline.py",
+        desc="ETF holdings -- Invesco daily holdings JSON (dng-api backend, no auth, WAF rate limited) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",

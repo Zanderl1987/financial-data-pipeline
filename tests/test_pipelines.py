@@ -85,6 +85,7 @@ PIPELINE_MODULES = [
     "proshares_holdings_pipeline",
     "vaneck_holdings_pipeline",
     "globalx_holdings_pipeline",
+    "invesco_holdings_pipeline",
     "openfigi_pipeline",
     "finnhub_expansion_pipeline",
     "finnhub_fundamentals_pipeline",
