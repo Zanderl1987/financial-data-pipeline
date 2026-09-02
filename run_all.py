@@ -925,6 +925,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="robo_holdings",
+        file="robo_holdings_pipeline.py",
+        desc="ETF holdings -- ROBO Global quarterly holdings (SEC N-PORT, series-matched, keyless) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        requires_env=['EDGAR_USER_AGENT'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",
