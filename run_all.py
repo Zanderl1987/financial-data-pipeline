@@ -943,6 +943,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="vanguard_bond_holdings",
+        file="vanguard_bond_holdings_pipeline.py",
+        desc="ETF holdings -- Vanguard bond ETFs BIV/BLV/BSV/VCIT/VCSH/VCLT quarterly holdings (SEC N-PORT, series-matched, keyless) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        requires_env=['EDGAR_USER_AGENT'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="schwab_holdings",
         file="schwab_holdings_pipeline.py",
         desc="ETF holdings -- Schwab Asset Management daily holdings CSV (official issuer, keyless, curl_cffi TLS bypass) (Iceberg table)",
