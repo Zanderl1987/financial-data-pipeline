@@ -138,6 +138,10 @@ ETF_PID_MAP = {
     "IAU":  {"pid": "239561", "name": "iShares Gold Trust"},
     "SLV":  {"pid": "239855", "name": "iShares Silver Trust"},
     "REET": {"pid": "268752", "name": "iShares Global REIT ETF"},
+    # Real Estate (gap closed 2026-09-01; pid verified live -- product slug is
+    # the legacy name "ishares-real-estate-50-etf", which is why the slug map
+    # miss; the varnish API resolves the pid fine)
+    "USRT": {"pid": "239544", "name": "iShares Core US REIT ETF"},
     # Short Duration
     "SHV":  {"pid": "239466", "name": "iShares Short Treasury Bond ETF"},
     "NEAR": {"pid": "239854", "name": "iShares Short Duration Bond Active ETF"},
