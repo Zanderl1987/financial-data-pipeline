@@ -72,6 +72,17 @@ MIN_AFFECTED_FRAC = 0.20
 MAX_STEPS = 60
 REQUEST_PAUSE = 0.6
 
+# Symbols verified (2026-09-01 review) as the SAME security as yfinance with a
+# positive reference bar on every negative date, even though they never entered
+# the rejected list (so rejected_negative_symbols() would skip them). BF/A is
+# Brown-Forman Class A; its 1985-88 negatives are a split-adjustment artifact
+# and yahoo (as "BF-A") covers all 810 dates. The other residuals (SVA, LGOV,
+# GRIN, CHRD, MEDS, CCU, INGR) FAILED this check -- ticker reuse / pre-listing
+# / delisted -- and are deliberately excluded as known-garbage.
+CLOSE_CORRECTION_ALLOWLIST = ["BF/A"]
+# Store uses Schwab's symbol form; yfinance needs a different one.
+YAHOO_SYMBOL_OVERRIDES = {"BF/A": "BF-A"}
+
 
 def _yf_history(symbol: str) -> pd.DataFrame:
     """Unadjusted daily closes from yfinance, or an empty frame."""
@@ -239,7 +250,7 @@ def build_close_corrections(symbols: list, verbose: bool = True) -> pd.DataFrame
         rows = []
         for i, sym in enumerate(symbols, 1):
             time.sleep(REQUEST_PAUSE)
-            ref = _yf_history(sym)
+            ref = _yf_history(YAHOO_SYMBOL_OVERRIDES.get(sym, sym))
             if ref.empty:
                 if verbose:
                     print(f"  [{i}/{len(symbols)}] {sym}: no yfinance history")
@@ -295,6 +306,26 @@ def rejected_negative_symbols() -> list:
         q.USE_CURATED = prev
         q.reload()
     return sorted(sym for sym in negs if sym in rejected)
+
+
+def close_correction_symbols() -> list:
+    """
+    The full scope for the close correction: rejected-negative symbols PLUS the
+    explicitly verified allowlist (same security with a full positive yfinance
+    reference -- see CLOSE_CORRECTION_ALLOWLIST). Unknown negatives stay out:
+    they are ticker reuse / pre-listing garbage, not recoverable history.
+    """
+    symbols = set(rejected_negative_symbols())
+    prev = q.USE_CURATED
+    q.USE_CURATED = False
+    q.reload()
+    try:
+        negs = set(q.sql("SELECT DISTINCT symbol FROM prices WHERE close <= 0")["symbol"])
+    finally:
+        q.USE_CURATED = prev
+        q.reload()
+    symbols |= set(CLOSE_CORRECTION_ALLOWLIST) & negs
+    return sorted(symbols)
 
 
 def write_close_corrections(df: pd.DataFrame) -> str:
@@ -358,8 +389,8 @@ def main():
         return 0
 
     if args.build_close_corrections:
-        symbols = rejected_negative_symbols()
-        print(f"rejected symbols with a non-positive raw close: {len(symbols):,}")
+        symbols = close_correction_symbols()
+        print(f"close-correction scope (rejected negatives + allowlist): {len(symbols):,}")
         if args.limit:
             symbols = symbols[:args.limit]
         print(f"\nbuilding close corrections for {len(symbols):,} symbols...")
