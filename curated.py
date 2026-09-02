@@ -174,6 +174,12 @@ KEYS: dict[str, list[str]] = {
     # by editors simply re-dedupes to the newest snapshot.
     "piracy_incidents":        ["incident_id"],
     "somali_hijackings":       ["section_year", "row_num"],
+    # JMIC: doc_id is the issuer's own document GUID, stable across runs.
+    # Incidents have no natural id -- ukmto_reference is unique per real-world
+    # event, but null for the small number of rows the table parser mis-reads;
+    # doc_id+vessel_name as a fallback keeps those from colliding across docs.
+    "jmic_documents":          ["doc_id"],
+    "jmic_incidents":          ["doc_id", "ukmto_reference", "vessel_name"],
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],

@@ -886,6 +886,20 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    None,
         "value_ranges": {"section_year": (1990, 2030)},
     },
+    # ── JMIC maritime security advisories/incidents ───────────────────────────
+    # full_text is nullable if a PDF fails to parse; incident_date/vessel_name
+    # are nullable for weekly-dashboard/infonotes rows where find_tables()
+    # matches a header but the row's date cell doesn't parse (rare).
+    "jmic_documents": {
+        "required":    ["doc_id", "product_type", "reference", "issue_date", "pdf_url", "source", "fetched_at"],
+        "critical_nn": ["doc_id", "product_type", "pdf_url"],
+        "date_col":    "issue_date",
+    },
+    "jmic_incidents": {
+        "required":    ["doc_id", "doc_reference", "source", "fetched_at"],
+        "critical_nn": ["doc_id"],
+        "date_col":    "incident_date",
+    },
     # ── TSA checkpoint travel volumes ─────────────────────────────────────────
     "tsa_checkpoint": {
         "required":    ["date", "travelers", "fetched_at"],

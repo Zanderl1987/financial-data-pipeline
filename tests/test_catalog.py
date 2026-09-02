@@ -203,6 +203,9 @@ EXPECTED_TABLES = [
     # Piracy incidents (ICC IMB live-map archive + Wikipedia Somali hijacking log)
     "piracy_incidents",
     "somali_hijackings",
+    # JMIC maritime security advisories/incidents (Red Sea/Gulf of Aden/Arabian Gulf)
+    "jmic_documents",
+    "jmic_incidents",
     # Signal health monitor (maintained backtest performance tracking)
     "signal_health",
     # EIA refinery + crude trade (oil/transportation depth batch)

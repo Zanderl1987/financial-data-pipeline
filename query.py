@@ -290,6 +290,9 @@ CATALOG: dict[str, str] = {
     # ── Piracy incidents (ICC IMB live-map archive + Wikipedia Somali log) ────
     "piracy_incidents":        _glob("piracy/imb/**/*.parquet"),
     "somali_hijackings":       _glob("piracy/wiki/**/*.parquet"),
+    # ── JMIC maritime security (Red Sea/Gulf of Aden/Arabian Gulf advisories) ─
+    "jmic_documents":          _glob("jmic/documents/**/*.parquet"),
+    "jmic_incidents":          _glob("jmic/incidents/**/*.parquet"),
     # ── Dividends ────────────────────────────────────────────────────────────
     "dividends":               _glob("finnhub/dividends/**/*.parquet"),
     # ── Finnhub fundamentals + market data ───────────────────────────────────
