@@ -10,6 +10,7 @@ numpy==1.26.4
 pyarrow==24.0.0
 duckdb==1.5.4
 requests==2.31.0
+curl_cffi==0.15.0            # jmic_pipeline, schwab_holdings_pipeline (Cloudflare TLS-fingerprint bypass)
 python-dotenv==1.2.2
 scipy==1.10.1
 

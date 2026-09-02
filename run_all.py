@@ -934,6 +934,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="schwab_holdings",
+        file="schwab_holdings_pipeline.py",
+        desc="ETF holdings -- Schwab Asset Management daily holdings CSV (official issuer, keyless, curl_cffi TLS bypass) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="finnhub_expansion",
         file="finnhub_expansion_pipeline.py",
         desc="Finnhub alt-data expansion -- ESG, lobbying, patents, econ calendar, etc",

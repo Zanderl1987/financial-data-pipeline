@@ -90,6 +90,7 @@ PIPELINE_MODULES = [
     "firsttrust_holdings_pipeline",
     "direxion_holdings_pipeline",
     "robo_holdings_pipeline",
+    "schwab_holdings_pipeline",
     "openfigi_pipeline",
     "finnhub_expansion_pipeline",
     "finnhub_fundamentals_pipeline",
