@@ -193,6 +193,7 @@ CATALOG: dict[str, str] = {
     "congressional_trades":    _glob("congressional_trades/**/*.parquet"),
     # ── California legislature Form 700 Schedule A-1 (investments) ───────────
     "california_disclosures": _glob("california_disclosures/**/california_disclosures_*.parquet"),
+    "california_disclosures_property": _glob("california_disclosures_property/**/california_disclosures_property_*.parquet"),
     "california_disclosures_gifts": _glob("california_disclosures_gifts/**/california_disclosures_gifts_*.parquet"),
     "california_disclosures_travel_gifts": _glob("california_disclosures_travel_gifts/**/california_disclosures_travel_gifts_*.parquet"),
     # ── USPTO PatentsView ─────────────────────────────────────────────────────

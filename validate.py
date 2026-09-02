@@ -462,6 +462,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["agency", "filer_last_name", "business_entity"],
         "date_col":    "filed_date",
     },
+    # ── California legislature Form 700 Schedule B (interests in real property) ─
+    "california_disclosures_property": {
+        "required":    ["agency", "filer_last_name", "property_address", "fetched_at"],
+        "critical_nn": ["agency", "filer_last_name", "property_address"],
+        "date_col":    "filed_date",
+    },
     # ── California legislature Form 700 Schedule D (gifts) ─────────────────────
     "california_disclosures_gifts": {
         "required":    ["agency", "filer_last_name", "source_name", "fetched_at"],

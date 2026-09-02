@@ -35,18 +35,23 @@ Notes on the data:
     bullet; every other field is a slot-relative offset from that anchor
     or from the slot's own "FAIR MARKET VALUE"/"NATURE OF INVESTMENT"
     labels, so the map holds across rows/columns/pages.
-  - Schedule A-1 (investments), Schedule D (gifts), and Schedule E (income --
-    gifts -- travel payments) are parsed, each to its own output table -- one
-    PDF fetch per filing serves every enabled schedule via SCHEDULES /
-    --schedules. Schedule D has 5 source slots/page, up to 3 gift line items
-    each, no checkboxes. Same digit-duplication render artifact as A-1's
-    dates -- see _digits_near. Schedule E has 4 source slots/page (2 cols x
-    2 rows), a travel date RANGE per slot (not a single date), and three
-    checkbox concepts (501(c)(3) toggle, Gift/Income, Speech-or-Panel/Other)
-    -- its checkbox marks have more column-to-column positional slop than
-    A-1's (~10pt vs ~4pt), so nearest-label distance matching is used
-    instead of a fixed-offset table -- see _nearest_checkbox_label.
-  - Schedules B, C, A-2 not yet built -- see
+  - Schedule A-1 (investments), Schedule B (interests in real property),
+    Schedule D (gifts), and Schedule E (income -- gifts -- travel payments)
+    are parsed, each to its own output table -- one PDF fetch per filing
+    serves every enabled schedule via SCHEDULES / --schedules. Schedule D has
+    5 source slots/page, up to 3 gift line items each, no checkboxes. Same
+    digit-duplication render artifact as A-1's dates -- see _digits_near.
+    Schedule E has 4 source slots/page (2 cols x 2 rows), a travel date RANGE
+    per slot (not a single date), and three checkbox concepts (501(c)(3)
+    toggle, Gift/Income, Speech-or-Panel/Other) -- its checkbox marks have
+    more column-to-column positional slop than A-1's (~10pt vs ~4pt), so
+    nearest-label distance matching is used instead of a fixed-offset table
+    -- see _nearest_checkbox_label. Schedule B has 2 property slots/page
+    (one per column); the same 2025/2026 page also stacks a loans subsection
+    below the property slots, which the parser ignores (that belongs to
+    Schedule C). Its checkbox groups (FMV / nature of interest / gross
+    rental income) use _nearest_checkbox_label for the same reason.
+  - Schedules A-2, C not yet built -- see
     work-notes/financial-data-pipeline/TASKS.md.
 
 CLI:
@@ -54,10 +59,11 @@ CLI:
   python california_disclosures_pipeline.py --backfill       # full history
   python california_disclosures_pipeline.py --years 2024 2025
   python california_disclosures_pipeline.py --agency senate  # one chamber
-  python california_disclosures_pipeline.py --schedules a1 d e # multiple schedules
+  python california_disclosures_pipeline.py --schedules a1 b d e # multiple schedules
 
 Outputs:
   storage/raw/california_disclosures/california_disclosures_{mode}_{YYYY}.parquet
+  storage/raw/california_disclosures_property/california_disclosures_property_{mode}_{YYYY}.parquet
   storage/raw/california_disclosures_gifts/california_disclosures_gifts_{mode}_{YYYY}.parquet
   storage/raw/california_disclosures_travel_gifts/california_disclosures_travel_gifts_{mode}_{YYYY}.parquet
 """
@@ -245,6 +251,10 @@ _BOX_TOL = 4.0  # points of slop when matching a drawing to a checkbox slot
 def _words_by_row(words):
     rows = {}
     for x0, y0, x1, y1, text, *_ in words:
+        # The Schedule B template renders ASSESSOR'S with a curly apostrophe
+        # (U+2019); labels are matched and excluded by ASCII token, so fold
+        # curlies to ASCII here -- harmless for the other schedules' text.
+        text = text.replace("\u2019", "'").replace("\u2018", "'")
         rows.setdefault(round(y0, 1), []).append((x0, text))
     return rows
 
@@ -689,6 +699,184 @@ def parse_schedule_e(pdf_bytes, filing):
     return rows_out
 
 
+# -- Schedule B parsing (Interests in Real Property) ----------------------
+# 2 property slots per page (one per column: left x~58, right x~320 on the
+# 612-wide page). The 2025/2026 template also stacks a loans subsection
+# (NAME OF LENDER, HIGHEST BALANCE...) below the property slots on the same
+# page -- ignored here (that belongs to Schedule C). All offsets below are
+# relative to the slot's own "ASSESSOR'S PARCEL NUMBER OR STREET ADDRESS"
+# label (or each checkbox group's own label), derived from two live 2025
+# filings (Petrie-Norris 932 Catalina St; Lowenthal) and identical across
+# both columns. The checkbox marks reuse _nearest_checkbox_label -- same
+# Schedule E lesson: ~10pt of column-to-column positional slop rules out a
+# fixed-offset table. A form redesign would need this re-derived, not tuned.
+# The acquired/disposed dates share the "IF APPLICABLE, LIST DATE:" row that
+# A-1's dates use; on B pages the renderer pre-prints the 2-digit year into
+# the blank fields, so dates come out None unless actually filled.
+
+_B_SLOT_ANCHOR = ("ASSESSOR'S", "PARCEL", "NUMBER", "OR", "STREET", "ADDRESS")
+_B_CITY_LABEL = ("CITY",)
+_B_FMV_LABEL = ("FAIR", "MARKET", "VALUE")
+_B_NATURE_LABEL = ("NATURE", "OF", "INTEREST")
+_B_RENTAL_LABEL = ("IF", "RENTAL", "PROPERTY,", "GROSS", "INCOME", "RECEIVED")
+_B_SOURCES_LABEL = ("SOURCES", "OF", "RENTAL", "INCOME:")
+_B_DATE_LABEL = ("IF", "APPLICABLE,", "LIST", "DATE:")
+
+# (dx, dy, label) of each checkbox, relative to its group's label anchor.
+_B_FMV_CANDIDATES = [
+    (-0.2, 10.3, "$2,000 - $10,000"),
+    (-0.2, 20.9, "$10,001 - $100,000"),
+    (-0.2, 31.6, "$100,001 - $1,000,000"),
+    (-0.2, 42.1, "Over $1,000,000"),
+]
+_B_FMV_RANGES = {
+    "$2,000 - $10,000": (2000, 10000),
+    "$10,001 - $100,000": (10001, 100000),
+    "$100,001 - $1,000,000": (100001, 1000000),
+    "Over $1,000,000": (1000000, None),
+}
+_B_NATURE_CANDIDATES = [
+    (-0.2, 13.4, "Ownership/Deed of Trust"),
+    (125.8, 13.4, "Easement"),
+    (-0.2, 33.8, "Leasehold"),
+    (125.8, 33.7, "Other"),
+]
+_B_RENTAL_CANDIDATES = [
+    (0.0, 15.2, "$0 - $499"),
+    (63.8, 15.2, "$500 - $1,000"),
+    (144.0, 15.2, "$1,001 - $10,000"),
+    (0.0, 30.4, "$10,001 - $100,000"),
+    (108.6, 30.4, "OVER $100,000"),
+]
+_B_COL_WIDTH = 300.0  # x dividing the page's left and right property columns
+
+
+def _pick_same_column(anchors, ax, col_width):
+    """Nearest anchor in the same column (left/right half) as x=ax."""
+    left_col = ax < col_width
+    matches = [p for p in anchors if (p[0] < col_width) == left_col]
+    return min(matches, key=lambda p: p[1]) if matches else None
+
+
+def parse_schedule_b(pdf_bytes, filing):
+    """Extract Schedule B (Interests in Real Property) rows from one PDF."""
+    rows_out = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            text_upper = page.get_text().upper()
+            if "SCHEDULE B" not in text_upper:
+                continue
+            if "INTERESTS IN REAL PROPERTY" not in text_upper:
+                continue  # cover-page mention of Schedule B, not the form page
+            words = page.get_text("words")
+            row_map = _words_by_row(words)
+            drawings = page.get_drawings()
+
+            anchors = _find_anchors(row_map, _B_SLOT_ANCHOR)
+            city_anchors = _find_anchors(row_map, _B_CITY_LABEL)
+            fmv_anchors = _find_anchors(row_map, _B_FMV_LABEL)
+            nature_anchors = _find_anchors(row_map, _B_NATURE_LABEL)
+            rental_anchors = _find_anchors(row_map, _B_RENTAL_LABEL)
+            sources_anchors = _find_anchors(row_map, _B_SOURCES_LABEL)
+            date_anchors = _find_anchors(row_map, _B_DATE_LABEL)
+
+            for ax, ay in anchors:
+                property_address = _text_near(
+                    row_map, ax, ay, (0, 235), (11, 30),
+                    exclude=("ASSESSOR'S", "PARCEL", "NUMBER", "OR", "STREET",
+                             "ADDRESS", "CITY", "►"))
+                if not property_address:
+                    continue  # unfilled template slot
+
+                city = None
+                city_pick = _pick_same_column(city_anchors, ax, _B_COL_WIDTH)
+                if city_pick and 25 <= city_pick[1] - ay <= 35:
+                    city = _text_near(row_map, city_pick[0], city_pick[1],
+                                      (0, 235), (11, 30), exclude=("CITY",))
+
+                acquired = disposed = None
+                date_pick = _pick_same_column(date_anchors, ax, _B_COL_WIDTH)
+                if date_pick and 55 <= date_pick[1] - ay <= 70:
+                    digits = _digits_near(row_map, date_pick[0], date_pick[1],
+                                          (0, 160), (12, 22))
+                    if len(digits) >= 3:
+                        acquired = _plausible_date(
+                            _mmddyy_to_iso(*digits[0:3]),
+                            filing["filing_year"])
+                    if len(digits) >= 6:
+                        disposed = _plausible_date(
+                            _mmddyy_to_iso(*digits[3:6]),
+                            filing["filing_year"])
+
+                fmv_range = fmv_min = fmv_max = None
+                fmv_pick = _pick_same_column(fmv_anchors, ax, _B_COL_WIDTH)
+                if fmv_pick and 55 <= fmv_pick[1] - ay <= 70:
+                    label = _nearest_checkbox_label(
+                        drawings, fmv_pick[0], fmv_pick[1], (-8, 125), (5, 50),
+                        _B_FMV_CANDIDATES)
+                    if label:
+                        fmv_range, fmv_min, fmv_max = (label,
+                                                       *_B_FMV_RANGES[label])
+
+                nature = None
+                nature_pick = _pick_same_column(nature_anchors, ax,
+                                                _B_COL_WIDTH)
+                if nature_pick and 115 <= nature_pick[1] - ay <= 130:
+                    nature = _nearest_checkbox_label(
+                        drawings, nature_pick[0], nature_pick[1],
+                        (-8, 140), (8, 45), _B_NATURE_CANDIDATES)
+                    if nature == "Other":
+                        describe = _text_near(
+                            row_map, nature_pick[0], nature_pick[1],
+                            (165, 235), (41, 50), exclude=("Other",))
+                        if describe:
+                            nature = f"Other: {describe}"
+
+                rental_income = None
+                rental_pick = _pick_same_column(rental_anchors, ax,
+                                                _B_COL_WIDTH)
+                if rental_pick and 175 <= rental_pick[1] - ay <= 190:
+                    rental_income = _nearest_checkbox_label(
+                        drawings, rental_pick[0], rental_pick[1],
+                        (-8, 165), (5, 40), _B_RENTAL_CANDIDATES)
+
+                rental_sources = None
+                sources_pick = _pick_same_column(sources_anchors, ax,
+                                                 _B_COL_WIDTH)
+                if sources_pick and 225 <= sources_pick[1] - ay <= 240:
+                    rental_sources = _text_near(
+                        row_map, sources_pick[0], sources_pick[1],
+                        (0, 235), (35, 80), exclude=("None", "OF", "$10,000",
+                                                      "OR", "MORE."))
+
+                rows_out.append({
+                    "index_id": filing["index_id"],
+                    "filer_last_name": filing["filer_last_name"],
+                    "filer_first_name": filing["filer_first_name"],
+                    "filer_middle_name": filing["filer_middle_name"],
+                    "agency": filing["agency"],
+                    "position": filing["position"],
+                    "filing_type": filing["filing_type"],
+                    "filing_year": filing["filing_year"],
+                    "filed_date": filing["filed_date"],
+                    "is_amendment": filing["is_amendment"],
+                    "property_address": property_address,
+                    "city": city,
+                    "nature_of_interest": nature,
+                    "fmv_range": fmv_range,
+                    "fmv_min": fmv_min,
+                    "fmv_max": fmv_max,
+                    "rental_income_range": rental_income,
+                    "rental_sources": rental_sources,
+                    "acquired_date": acquired,
+                    "disposed_date": disposed,
+                })
+    finally:
+        doc.close()
+    return rows_out
+
+
 # -- Resumable checkpoints (same reasoning as congressional_trades_pipeline) -
 
 def _done_path(path):
@@ -741,6 +929,9 @@ def _clear_checkpoint(path):
 
 SCHEDULES = {
     "a1": (parse_schedule_a1, _finalize, OUTPUT_DIR, "california_disclosures"),
+    "b": (parse_schedule_b, _finalize,
+          os.path.join("storage", "raw", "california_disclosures_property"),
+          "california_disclosures_property"),
     "d": (parse_schedule_d, _finalize_generic,
           os.path.join("storage", "raw", "california_disclosures_gifts"),
           "california_disclosures_gifts"),
@@ -823,7 +1014,7 @@ def collect_year(session, agency_key, agency_label, year, mode, fetched_at,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="California legislature Form 700 Schedule A-1 "
+        description="California legislature Form 700 schedules A-1/B/D/E "
                     "(keyless, FPPC official source)")
     parser.add_argument("--backfill", action="store_true",
                         help=f"Full history ({FIRST_YEAR}+)")

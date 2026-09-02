@@ -400,6 +400,181 @@ class TestScheduleEAmountCap:
         assert rows[0]["amount"] == 836459.0
 
 
+# ── Schedule B (Interests in Real Property) ────────────────────────────────
+# parse_schedule_b's slot geometry was derived from two live 2025 filings
+# (Petrie-Norris, Lowenthal) and is template-constant across the page's two
+# property columns. This synthetic page pins the exact offsets: left-column
+# template coords, one filled slot with FMV/nature/rental blue marks, tenant
+# names in the rental-sources box (with the static "None" bubble alongside),
+# and a second blank right-column slot that must be skipped.
+
+_B_LEFT = {
+    "anchor": 58.12, "ay": 120.38,
+    "parcel_y": 131.48,
+    "city_y": 149.74, "city_val_y": 161.60,
+    "fmv_y": 183.22, "nature_y": 242.72,
+    "rental_y": 301.71, "sources_y": 350.14,
+    "date_x": 168.62, "date_y": 183.22, "date_digits_y": 200.34,
+}
+
+
+def _b_words(_B=_B_LEFT):
+    a = _B["anchor"]
+    words = [
+        (a, _B["ay"], a + 40, _B["ay"] + 9, "ASSESSOR\u2019S", 0, 0, 0),
+        (a + 47.2, _B["ay"], a + 90, _B["ay"] + 9, "PARCEL", 0, 0, 0),
+        (a + 77.2, _B["ay"], a + 107, _B["ay"] + 9, "NUMBER", 0, 0, 0),
+        (a + 110.3, _B["ay"], a + 120, _B["ay"] + 9, "OR", 0, 0, 0),
+        (a + 123.6, _B["ay"], a + 154, _B["ay"] + 9, "STREET", 0, 0, 0),
+        (a + 154.9, _B["ay"], a + 190, _B["ay"] + 9, "ADDRESS", 0, 0, 0),
+        (a + 1.8, _B["parcel_y"], a + 17, _B["parcel_y"] + 13, "932", 0, 0, 0),
+        (a + 21.3, _B["parcel_y"], a + 58, _B["parcel_y"] + 13, "Catalina", 0, 0, 0),
+        (a + 60.8, _B["parcel_y"], a + 87, _B["parcel_y"] + 13, "Street", 0, 0, 0),
+        (a, _B["city_y"], a + 16, _B["city_y"] + 9, "CITY", 0, 0, 0),
+        (a + 1.8, _B["city_val_y"], a + 36, _B["city_val_y"] + 13, "Laguna", 0, 0, 0),
+        (a + 38.0, _B["city_val_y"], a + 71, _B["city_val_y"] + 13, "Beach,", 0, 0, 0),
+        (a + 71.9, _B["city_val_y"], a + 85, _B["city_val_y"] + 13, "CA", 0, 0, 0),
+        # Acquired + disposed dates on the "IF APPLICABLE, LIST DATE:" row.
+        (_B["date_x"], _B["date_y"], _B["date_x"] + 10, _B["date_y"] + 9, "IF", 0, 0, 0),
+        (_B["date_x"] + 9, _B["date_y"], _B["date_x"] + 56, _B["date_y"] + 9, "APPLICABLE,", 0, 0, 0),
+        (_B["date_x"] + 59, _B["date_y"], _B["date_x"] + 78, _B["date_y"] + 9, "LIST", 0, 0, 0),
+        (_B["date_x"] + 77.3, _B["date_y"], _B["date_x"] + 98, _B["date_y"] + 9, "DATE:", 0, 0, 0),
+        (_B["date_x"] + 16.6, _B["date_digits_y"], _B["date_x"] + 19, _B["date_digits_y"] + 12, "04", 0, 0, 0),
+        (_B["date_x"] + 35.8, _B["date_digits_y"], _B["date_x"] + 38, _B["date_digits_y"] + 12, "15", 0, 0, 0),
+        (_B["date_x"] + 79.6, _B["date_digits_y"], _B["date_x"] + 82, _B["date_digits_y"] + 12, "25", 0, 0, 0),
+        (_B["date_x"] + 98.8, _B["date_digits_y"], _B["date_x"] + 101, _B["date_digits_y"] + 12, "06", 0, 0, 0),
+        (_B["date_x"] + 118.0, _B["date_digits_y"], _B["date_x"] + 121, _B["date_digits_y"] + 12, "20", 0, 0, 0),
+        (_B["date_x"] + 138.0, _B["date_digits_y"], _B["date_x"] + 141, _B["date_digits_y"] + 12, "25", 0, 0, 0),
+        # Group labels.
+        (a, _B["fmv_y"], a + 16, _B["fmv_y"] + 9, "FAIR", 0, 0, 0),
+        (a + 19.3, _B["fmv_y"], a + 49, _B["fmv_y"] + 9, "MARKET", 0, 0, 0),
+        (a + 52.5, _B["fmv_y"], a + 75.9, _B["fmv_y"] + 9, "VALUE", 0, 0, 0),
+        (a, _B["nature_y"], a + 20, _B["nature_y"] + 9, "NATURE", 0, 0, 0),
+        (a + 32.5, _B["nature_y"], a + 42, _B["nature_y"] + 9, "OF", 0, 0, 0),
+        (a + 45.4, _B["nature_y"], a + 81, _B["nature_y"] + 9, "INTEREST", 0, 0, 0),
+        (a, _B["rental_y"], a + 6, _B["rental_y"] + 9, "IF", 0, 0, 0),
+        (a + 9.4, _B["rental_y"], a + 37, _B["rental_y"] + 9, "RENTAL", 0, 0, 0),
+        (a + 40.5, _B["rental_y"], a + 81, _B["rental_y"] + 9, "PROPERTY,", 0, 0, 0),
+        (a + 84.6, _B["rental_y"], a + 113, _B["rental_y"] + 9, "GROSS", 0, 0, 0),
+        (a + 113.8, _B["rental_y"], a + 143, _B["rental_y"] + 9, "INCOME", 0, 0, 0),
+        (a + 146.0, _B["rental_y"], a + 183, _B["rental_y"] + 9, "RECEIVED", 0, 0, 0),
+        (a, _B["sources_y"], a + 36, _B["sources_y"] + 9, "SOURCES", 0, 0, 0),
+        (a + 39.1, _B["sources_y"], a + 49, _B["sources_y"] + 9, "OF", 0, 0, 0),
+        (a + 52.0, _B["sources_y"], a + 84, _B["sources_y"] + 9, "RENTAL", 0, 0, 0),
+        (a + 83.0, _B["sources_y"], a + 114, _B["sources_y"] + 9, "INCOME:", 0, 0, 0),
+        # Static "None" bubble + two tenant names inside the sources box.
+        (a + 15.3, _B["sources_y"] + 32.2, a + 44, _B["sources_y"] + 41.8, "None", 0, 0, 0),
+        (a + 2.0, _B["sources_y"] + 42.0, a + 41, _B["sources_y"] + 51.6, "Maureen", 0, 0, 0),
+        (a + 44.2, _B["sources_y"] + 42.0, a + 70, _B["sources_y"] + 51.6, "Smith", 0, 0, 0),
+        (a + 2.0, _B["sources_y"] + 53.5, a + 29, _B["sources_y"] + 63.1, "Lucas", 0, 0, 0),
+        (a + 31.4, _B["sources_y"] + 53.5, a + 68, _B["sources_y"] + 63.1, "Stevens", 0, 0, 0),
+        # Blank right-column slot (anchor label only, no value).
+        (320.24, _B["ay"], 360.0, _B["ay"] + 9, "ASSESSOR\u2019S", 0, 0, 0),
+        (320.24 + 47.2, _B["ay"], 360.0, _B["ay"] + 9, "PARCEL", 0, 0, 0),
+        (320.24 + 77.2, _B["ay"], 360.0, _B["ay"] + 9, "NUMBER", 0, 0, 0),
+        (320.24 + 110.3, _B["ay"], 360.0, _B["ay"] + 9, "OR", 0, 0, 0),
+        (320.24 + 123.6, _B["ay"], 360.0, _B["ay"] + 9, "STREET", 0, 0, 0),
+        (320.24 + 154.9, _B["ay"], 360.0, _B["ay"] + 9, "ADDRESS", 0, 0, 0),
+    ]
+    return words
+
+
+def _b_drawings(bm):
+    drawings = [
+        # FMV: first bracket checked; NATURE: Ownership; RENTAL: $0 - $499.
+        {"color": (0.0, 0.0, 1.0), "rect": _Rect(bm["anchor"] - 0.2, bm["fmv_y"] + 10.3,
+                                                 bm["anchor"] + 2.5, bm["fmv_y"] + 14.6)},
+        {"color": (0.0, 0.0, 1.0), "rect": _Rect(bm["anchor"] - 0.2, bm["nature_y"] + 13.4,
+                                                 bm["anchor"] + 2.5, bm["nature_y"] + 17.7)},
+        {"color": (0.0, 0.0, 1.0), "rect": _Rect(bm["anchor"], bm["rental_y"] + 15.2,
+                                                 bm["anchor"] + 2.7, bm["rental_y"] + 19.5)},
+    ]
+    return drawings
+
+
+class _BPage:
+
+    def __init__(self, words, drawings, header):
+        self._words = words
+        self._drawings = drawings
+        self._header = header
+
+    def get_text(self, kind=None):
+        return self._header if kind is None else self._words
+
+    def get_drawings(self):
+        return self._drawings
+
+
+def _parse_b(words, drawings, header, monkeypatch):
+    class _FakeDoc:
+        def __iter__(self):
+            return iter([_BPage(words, drawings, header)])
+        def close(self):
+            pass
+    monkeypatch.setattr(cdp.fitz, "open", lambda **kw: _FakeDoc())
+    filing = {"index_id": "1", "filer_last_name": "Petrie-Norris",
+              "filer_first_name": "Cottie", "filer_middle_name": None,
+              "agency": "State Assembly", "position": "Assembly Member",
+              "filing_type": "Annual", "filing_year": 2025,
+              "filed_date": "2026-03-02", "is_amendment": False}
+    return cdp.parse_schedule_b(b"", filing)
+
+
+class TestScheduleB:
+    HEADER = ("SCHEDULE B\nInterests in Real Property\n(Including Rental Income)")
+
+    def test_parses_full_left_slot_and_skips_blank_right_slot(self, monkeypatch):
+        rows = _parse_b(_b_words(), _b_drawings(_B_LEFT), self.HEADER, monkeypatch)
+        assert len(rows) == 1, "the blank right-column slot must be skipped"
+        row = rows[0]
+        assert row["property_address"] == "932 Catalina Street"
+        assert row["city"] == "Laguna Beach, CA"
+        assert row["fmv_range"] == "$2,000 - $10,000"
+        assert row["fmv_min"] == 2000 and row["fmv_max"] == 10000
+        assert row["nature_of_interest"] == "Ownership/Deed of Trust"
+        assert row["rental_income_range"] == "$0 - $499"
+        assert row["rental_sources"] == "Maureen Smith Lucas Stevens"
+        assert row["acquired_date"] == "2025-04-15"
+        assert row["disposed_date"] == "2025-06-20"
+
+    def test_skips_cover_page_mention(self, monkeypatch):
+        header = "Schedule B - Real Property - schedule attached"
+        rows = _parse_b(_b_words(), [], header, monkeypatch)
+        assert rows == []
+
+    def test_selection_metrics_are_per_slot(self, monkeypatch):
+        # The same page holds two slots; a mark in the other column's window
+        # must never bleed into this slot's result.
+        drawings = [{"color": (0.0, 0.0, 1.0),
+                     "rect": _Rect(320.24 - 0.2, _B_LEFT["fmv_y"] + 42.1,
+                                   320.24 + 2.5, _B_LEFT["fmv_y"] + 46.4)}]
+        rows = _parse_b(_b_words(), drawings, self.HEADER, monkeypatch)
+        assert rows[0]["fmv_range"] is None, \
+            "a right-column FMV mark must not satisfy the left slot"
+
+    def test_result_carries_filer_identity(self, monkeypatch):
+        rows = _parse_b(_b_words(), _b_drawings(_B_LEFT), self.HEADER, monkeypatch)
+        assert rows[0]["filer_last_name"] == "Petrie-Norris"
+        assert rows[0]["filing_year"] == 2025
+
+    def test_other_nature_captures_describe_text(self, monkeypatch):
+        # "Other" is checked and a description is written inline after the
+        # Other label (measured: label at rel dx~174 dy~42, describe follows
+        # on the same baseline). The describe must render as "Other: <text>".
+        words = _b_words()
+        ax, ay = _B_LEFT["anchor"], _B_LEFT["nature_y"]
+        words.append((ax + 173.9, ay + 41.7, ax + 198.0, ay + 51.0,
+                      "Other", 0, 0, 0))
+        words.append((ax + 202.0, ay + 41.7, ax + 234.0, ay + 51.0,
+                      "Quitclaim", 0, 0, 0))
+        drawings = [{"color": (0.0, 0.0, 1.0),
+                     "rect": _Rect(ax + 127.7, ay + 35.6,
+                                   ax + 130.7, ay + 39.9)}]
+        rows = _parse_b(words, drawings, self.HEADER, monkeypatch)
+        assert rows[0]["nature_of_interest"] == "Other: Quitclaim"
+
+
 # ── Output contract ─────────────────────────────────────────────────────
 
 class TestFinalize:

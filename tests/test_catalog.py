@@ -144,9 +144,11 @@ EXPECTED_TABLES = [
     "oecd_macro",
     # Congressional trade disclosures
     "congressional_trades",
-    # California legislature Form 700 Schedule A-1
-    "california_disclosures",
-    # California legislature Form 700 Schedule D (gifts)
+# California legislature Form 700 Schedule A-1
+"california_disclosures",
+# California legislature Form 700 Schedule B (real property)
+"california_disclosures_property",
+# California legislature Form 700 Schedule D (gifts)
     "california_disclosures_gifts",
     # California legislature Form 700 Schedule E (income -- gifts -- travel)
     "california_disclosures_travel_gifts",

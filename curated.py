@@ -321,6 +321,7 @@ KEYS: dict[str, list[str]] = {
     # congressional_trades key -- a filing's own natural key plus the
     # investment slot's position within it.
     "california_disclosures":          ['index_id', 'row_index'],
+    "california_disclosures_property": ['index_id', 'row_index'],
     "california_disclosures_gifts":    ['index_id', 'row_index'],
     "california_disclosures_travel_gifts": ['index_id', 'row_index'],
     "treasury_yield_curve":            ['date'],
