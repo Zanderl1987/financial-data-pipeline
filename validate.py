@@ -468,6 +468,21 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["agency", "filer_last_name", "property_address"],
         "date_col":    "filed_date",
     },
+    # ── California legislature Form 700 Schedule A-2 (business entity/trust) ───
+    "california_disclosures_business": {
+        "required":    ["agency", "filer_last_name", "business_entity", "fetched_at"],
+        "critical_nn": ["agency", "filer_last_name", "business_entity"],
+        "date_col":    "filed_date",
+    },
+    # ── California legislature Form 700 Schedule C (income/loans, 2 record   ──
+    #    types sharing one table -- source_name/lender_name are each null on
+    #    the OTHER type's rows by design, so critical_nn sticks to columns
+    #    present on every row regardless of record_type.
+    "california_disclosures_income_loans": {
+        "required":    ["agency", "filer_last_name", "record_type", "fetched_at"],
+        "critical_nn": ["agency", "filer_last_name", "record_type"],
+        "date_col":    "filed_date",
+    },
     # ── California legislature Form 700 Schedule D (gifts) ─────────────────────
     "california_disclosures_gifts": {
         "required":    ["agency", "filer_last_name", "source_name", "fetched_at"],

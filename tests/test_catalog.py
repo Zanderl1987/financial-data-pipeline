@@ -148,6 +148,10 @@ EXPECTED_TABLES = [
 "california_disclosures",
 # California legislature Form 700 Schedule B (real property)
 "california_disclosures_property",
+# California legislature Form 700 Schedule A-2 (business entity/trust)
+"california_disclosures_business",
+# California legislature Form 700 Schedule C (income/loans)
+"california_disclosures_income_loans",
 # California legislature Form 700 Schedule D (gifts)
     "california_disclosures_gifts",
     # California legislature Form 700 Schedule E (income -- gifts -- travel)
