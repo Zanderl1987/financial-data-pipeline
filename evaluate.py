@@ -74,6 +74,17 @@ def _print_trades_summary(res):
     print(f"permutation null: pnl_p {_fmt(p.get('pnl_p'))} "
           f"win_rate_p {_fmt(p.get('win_rate_p'))} "
           f"(n_perm={p.get('n_perm')})")
+    meta = res["results"].get("meta_filtered")
+    if meta:
+        if meta.get("meta_reason"):
+            print(f"meta-label: {meta['meta_reason']}")
+        else:
+            u, f = meta["unfiltered"], meta["filtered"]
+            print(f"meta-label @ {meta['threshold']}: kept "
+                  f"{meta['n_kept']}/{meta['n_scored']} "
+                  f"({100 * meta['kept_fraction']:.1f}%) "
+                  f"win_rate {_fmt(u.get('win_rate_pct'))}% -> "
+                  f"{_fmt(f.get('win_rate_pct'))}%")
 
 
 def main(argv=None) -> int:
@@ -115,6 +126,13 @@ def main(argv=None) -> int:
     ap.add_argument("--rebalance", default="M")
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--n-perm", type=int, default=200)
+    ap.add_argument("--meta-label", action="store_true",
+                    help="trade-rule/adapter=tv-rule only: fit a walk-forward "
+                         "meta-label filter (evaluation/meta_label.py) on top "
+                         "of the simulated trades and register it as its own "
+                         "meta_filtered/meta_unfiltered evaluation")
+    ap.add_argument("--meta-threshold", type=float, default=0.5,
+                    help="meta-label keep-probability threshold")
     ap.add_argument("--out-root", default=None)
     ap.add_argument("--registry-path", default=None)
     ap.add_argument("--no-registry", action="store_true",
@@ -196,7 +214,8 @@ def main(argv=None) -> int:
                   benchmark=args.benchmark, price_table=args.price_table,
                   quantiles=args.quantiles, rebalance=args.rebalance,
                   write_registry=not args.no_registry,
-                  n_boot=args.n_boot, n_perm=args.n_perm)
+                  n_boot=args.n_boot, n_perm=args.n_perm,
+                  meta_label=args.meta_label, meta_threshold=args.meta_threshold)
     if cache is not None:
         kwargs["cache"] = cache
     if args.out_root:

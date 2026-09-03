@@ -1111,6 +1111,90 @@ class TestRunner:
         with pytest.raises(ValueError, match="cache"):
             ev_runner.run(rule, out_root=str(tmp_path / "reports"))
 
+    def test_meta_label_off_by_default(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="no_meta_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0)
+        assert "meta_filtered" not in res["results"]
+        reg = ev_registry.load(reg_path)
+        assert not (reg["evaluation"] == "meta_unfiltered").any()
+
+    def test_meta_label_insufficient_trades_reports_reason(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="too_few_meta_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0,
+                            meta_label=True)
+        # default min_train=50 > 2 trades -- no OOS-scored trade exists
+        assert "meta_reason" in res["results"]["meta_filtered"]
+        reg = ev_registry.load(reg_path)
+        assert not (reg["evaluation"] == "meta_unfiltered").any()
+
+    def test_meta_label_opt_in_registers_rows(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=250)
+        n = len(idx)
+        ent = np.zeros(n, dtype=bool)
+        exi = np.zeros(n, dtype=bool)
+        for start in range(10, 240, 10):
+            ent[start] = True
+            exi[start + 5] = True
+        rng = np.random.default_rng(0)
+        close = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, n)), index=idx)
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="meta_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0,
+                            meta_label=True, meta_min_train=5, meta_refit_every=3)
+        meta = res["results"]["meta_filtered"]
+        assert "meta_reason" not in meta
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "meta_unfiltered").any()
+        assert (reg["evaluation"] == "meta_filtered").any()
+        assert (reg["evaluation"] == "meta_summary").any()
+
+    def test_meta_label_exception_is_caught_not_fatal(self, tmp_path, monkeypatch):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="boom_meta_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        def boom(*a, **k):
+            raise RuntimeError("synthetic failure")
+
+        monkeypatch.setattr(ev_runner, "_meta_label_result", boom)
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=str(tmp_path / "reg.parquet"),
+                            n_perm=10, seed=0, meta_label=True)
+        assert "synthetic failure" in res["results"]["meta_filtered"]["meta_reason"]
+
 
 from evaluation import adapters as ev_adapters
 

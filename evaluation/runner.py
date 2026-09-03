@@ -62,7 +62,7 @@ def _json_safe(v):
 _METADATA_KEYS = {
     "n", "ic_days", "top_n", "bottom_n", "oriented",
     "n_boot", "boot_days", "n_days", "n_trials", "n_population", "n_perm",
-    "n_trades", "n_long", "n_short", "n_symbols",
+    "n_trades", "n_long", "n_short", "n_symbols", "n_scored", "n_kept",
 }
 
 
@@ -82,6 +82,40 @@ def _stat_rows(evaluation: str, horizon: int, d: dict, n_key=None) -> list:
         rows.append({"evaluation": evaluation, "horizon": int(horizon),
                      "statistic": str(k), "value": float(v), "n": n})
     return rows
+
+
+def _meta_label_result(trades_df: pd.DataFrame, cache: dict, threshold: float,
+                       min_train: int, refit_every: int, l2: float):
+    """
+    Meta-labeling (evaluation/meta_label.py) on top of an already-simulated
+    TradeRule: build features at each trade's entry_signal_date, score them
+    out-of-sample walk-forward, and compare the meta-filtered subset against
+    the unfiltered set. Registered under its own "meta_filtered"/
+    "meta_unfiltered" evaluation names (never blended into "trades") so a
+    meta-labeled strategy gets the same baseline/compare() treatment as
+    every other registered result, not a side calculation invisible to the
+    registry.
+
+    Returns (result_dict_for_results.json, registry_rows). Best-effort, like
+    the Signal path's portfolio evaluation: a meta-labeling failure (e.g.
+    every training window single-class) is reported via *_reason, never
+    fatal to the rest of the run.
+    """
+    from evaluation import meta_label as ev_meta
+
+    feats = ev_meta.build_features(trades_df, cache)
+    scored = ev_meta.walk_forward_meta_labels(trades_df, feats, min_train=min_train,
+                                               refit_every=refit_every, l2=l2)
+    result = ev_meta.evaluate_meta_filter(scored, threshold=threshold)
+    if "meta_reason" in result:
+        return result, []
+    rows = (_stat_rows("meta_unfiltered", -1, result["unfiltered"], n_key="n_trades")
+            + _stat_rows("meta_filtered", -1, result["filtered"], n_key="n_trades")
+            + _stat_rows("meta_summary", -1,
+                         {"kept_fraction": result["kept_fraction"],
+                          "n_scored": result["n_scored"],
+                          "n_kept": result["n_kept"]}, n_key="n_scored"))
+    return result, rows
 
 
 def _oriented(panel: pd.DataFrame, direction: int) -> pd.DataFrame:
@@ -200,7 +234,9 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         price_table=None, quantiles=5, rebalance="M", long_short=True,
         out_root=os.path.join("storage", "reports", "eval"),
         registry_path=None, write_registry=True,
-        n_boot=1000, n_perm=200, seed=0, cache=None) -> dict:
+        n_boot=1000, n_perm=200, seed=0, cache=None,
+        meta_label=False, meta_threshold=0.5, meta_min_train=50,
+        meta_refit_every=20, meta_l2=1.0) -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -238,6 +274,16 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         results = {"summary": summary, "permutation": perm}
         rows = (_stat_rows("trades", -1, summary, n_key="n_trades")
                 + _stat_rows("trades_perm", -1, perm, n_key="n_perm"))
+        if meta_label:
+            try:
+                meta_result, meta_rows = _meta_label_result(
+                    trades_df, cache, meta_threshold, meta_min_train,
+                    meta_refit_every, meta_l2)
+            except Exception as exc:   # best-effort, never fatal to the run
+                meta_result, meta_rows = (
+                    {"meta_reason": f"{type(exc).__name__}: {exc}"}, [])
+            results["meta_filtered"] = meta_result
+            rows += meta_rows
     else:
         raise TypeError(f"cannot evaluate object of type {type(obj).__name__}"
                         " -- expected Signal, EventSet, or TradeRule")
@@ -271,7 +317,9 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                        "quantiles": quantiles, "rebalance": rebalance,
                        "long_short": long_short, "n_boot": n_boot,
                        "n_perm": n_perm, "seed": seed,
-                       "start": start, "end": end}}
+                       "start": start, "end": end,
+                       "meta_label": meta_label,
+                       "meta_threshold": meta_threshold if meta_label else None}}
     with open(os.path.join(out_dir, "run_meta.json"), "w",
               encoding="utf-8") as fh:
         json.dump(_json_safe(meta), fh, indent=2, default=str)
