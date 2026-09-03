@@ -133,6 +133,13 @@ def main(argv=None) -> int:
                          "meta_filtered/meta_unfiltered evaluation")
     ap.add_argument("--meta-threshold", type=float, default=0.5,
                     help="meta-label keep-probability threshold")
+    ap.add_argument("--regime-report", action="store_true",
+                    help="tag this run with its IS/OOS regime composition "
+                         "(evaluation/regime.py Statistical Jump Model on "
+                         "--regime-benchmark, k=--regime-k) -- what fraction "
+                         "of the evaluated window fell in each regime")
+    ap.add_argument("--regime-benchmark", default="SPY")
+    ap.add_argument("--regime-k", type=int, default=2)
     ap.add_argument("--out-root", default=None)
     ap.add_argument("--registry-path", default=None)
     ap.add_argument("--no-registry", action="store_true",
@@ -215,7 +222,9 @@ def main(argv=None) -> int:
                   quantiles=args.quantiles, rebalance=args.rebalance,
                   write_registry=not args.no_registry,
                   n_boot=args.n_boot, n_perm=args.n_perm,
-                  meta_label=args.meta_label, meta_threshold=args.meta_threshold)
+                  meta_label=args.meta_label, meta_threshold=args.meta_threshold,
+                  regime_report=args.regime_report,
+                  regime_benchmark=args.regime_benchmark, regime_k=args.regime_k)
     if cache is not None:
         kwargs["cache"] = cache
     if args.out_root:
@@ -235,6 +244,13 @@ def main(argv=None) -> int:
         _print_events_summary(res)
     else:
         _print_trades_summary(res)
+    comp = res["results"].get("regime_composition")
+    if comp:
+        pct = ", ".join(f"regime {k.split('_')[-1]}: {100*v:.1f}%"
+                        for k, v in comp.items() if k != "n_days")
+        print(f"regime composition ({comp['n_days']} days): {pct}")
+    elif res["results"].get("regime_reason"):
+        print(f"regime composition: {res['results']['regime_reason']}")
     print(f"artifacts: {res['out_dir']}")
     print(f"registry rows written: {res['rows_written']}")
     return 0

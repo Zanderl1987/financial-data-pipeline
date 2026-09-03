@@ -964,6 +964,46 @@ def _install_fake_market(monkeypatch, closes):
     return fake_eb, fake_bt
 
 
+class TestRegimeComposition:
+    def test_known_fraction_and_n_days(self, monkeypatch):
+        idx = pd.bdate_range("2020-01-01", periods=10)
+        labels = pd.Series([0, 0, 0, 1, 1, 1, 1, 0, 0, 0], index=idx)
+        monkeypatch.setattr(ev_runner, "_regime_labels", lambda b, k: labels)
+        out = ev_runner._regime_composition(idx[0], idx[9], "SPY", 2)
+        assert out["n_days"] == 10
+        assert out["pct_regime_0"] == pytest.approx(0.6)
+        assert out["pct_regime_1"] == pytest.approx(0.4)
+
+    def test_window_boundaries_are_inclusive(self, monkeypatch):
+        idx = pd.bdate_range("2020-01-01", periods=10)
+        labels = pd.Series(range(10), index=idx)   # unique value per day
+        monkeypatch.setattr(ev_runner, "_regime_labels", lambda b, k: labels)
+        out = ev_runner._regime_composition(idx[2], idx[5], "SPY", 2)
+        assert out["n_days"] == 4     # idx[2], idx[3], idx[4], idx[5] -- both ends in
+
+    def test_none_labels_gives_none(self, monkeypatch):
+        monkeypatch.setattr(ev_runner, "_regime_labels", lambda b, k: None)
+        assert ev_runner._regime_composition(pd.Timestamp("2020-01-01"),
+                                             pd.Timestamp("2020-01-10"),
+                                             "SPY", 2) is None
+
+    def test_none_dates_gives_none(self, monkeypatch):
+        idx = pd.bdate_range("2020-01-01", periods=10)
+        monkeypatch.setattr(ev_runner, "_regime_labels",
+                            lambda b, k: pd.Series([0] * 10, index=idx))
+        assert ev_runner._regime_composition(None, idx[5], "SPY", 2) is None
+        assert ev_runner._regime_composition(idx[0], None, "SPY", 2) is None
+
+    def test_no_overlap_gives_none(self, monkeypatch):
+        idx = pd.bdate_range("2020-01-01", periods=10)
+        monkeypatch.setattr(ev_runner, "_regime_labels",
+                            lambda b, k: pd.Series([0] * 10, index=idx))
+        out = ev_runner._regime_composition(pd.Timestamp("1990-01-01"),
+                                            pd.Timestamp("1990-01-10"),
+                                            "SPY", 2)
+        assert out is None
+
+
 class TestRunner:
     def test_signal_end_to_end(self, tmp_path, monkeypatch):
         closes = _fake_price_world()
@@ -1194,6 +1234,95 @@ class TestRunner:
                             registry_path=str(tmp_path / "reg.parquet"),
                             n_perm=10, seed=0, meta_label=True)
         assert "synthetic failure" in res["results"]["meta_filtered"]["meta_reason"]
+
+    def test_regime_report_off_by_default(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="no_regime_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0)
+        assert "regime_composition" not in res["results"]
+        reg = ev_registry.load(reg_path)
+        assert not (reg["evaluation"] == "regime_composition").any()
+
+    def test_regime_report_opt_in_registers_rows(self, tmp_path, monkeypatch):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="regime_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        fake_labels = pd.Series([0, 1] * 20, index=idx)
+        monkeypatch.setattr(ev_runner, "_regime_labels",
+                            lambda benchmark, k: fake_labels)
+
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0,
+                            regime_report=True)
+        comp = res["results"]["regime_composition"]
+        assert comp["pct_regime_0"] == pytest.approx(0.5, abs=0.1)
+        assert comp["pct_regime_1"] == pytest.approx(0.5, abs=0.1)
+        assert comp["n_days"] > 0
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "regime_composition").any()
+
+    def test_regime_report_no_overlap_gives_reason_not_error(self, tmp_path, monkeypatch):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="no_overlap_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        far_idx = pd.bdate_range("1990-01-02", periods=40)
+        fake_labels = pd.Series([0] * 40, index=far_idx)
+        monkeypatch.setattr(ev_runner, "_regime_labels",
+                            lambda benchmark, k: fake_labels)
+
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=str(tmp_path / "reg.parquet"),
+                            n_perm=10, seed=0, regime_report=True)
+        assert "regime_composition" not in res["results"]
+        assert "regime_reason" in res["results"]
+
+    def test_regime_report_exception_is_caught_not_fatal(self, tmp_path, monkeypatch):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="boom_regime_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        def boom(benchmark, k):
+            raise RuntimeError("no benchmark history")
+
+        monkeypatch.setattr(ev_runner, "_regime_labels", boom)
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=str(tmp_path / "reg.parquet"),
+                            n_perm=10, seed=0, regime_report=True)
+        assert "no benchmark history" in res["results"]["regime_reason"]
 
 
 from evaluation import adapters as ev_adapters

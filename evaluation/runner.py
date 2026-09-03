@@ -118,6 +118,48 @@ def _meta_label_result(trades_df: pd.DataFrame, cache: dict, threshold: float,
     return result, rows
 
 
+_REGIME_LABEL_CACHE: dict = {}
+
+
+def _regime_labels(benchmark: str, k: int):
+    """Fit (and memoize) Statistical Jump Model regime labels on `benchmark`'s
+    full history. Memoized by (benchmark, k) only -- independent of any
+    particular run's evaluated date range -- so one fit serves every run
+    instead of refitting per call; the fit itself (n_init=10 restarts) is
+    not cheap. Opt-in only via run(regime_report=True): regime.py's own PIT
+    caveat (in-sample fit, a reporting tool, not a live signal) is why this
+    tags a finished evaluation rather than gating it."""
+    key = (benchmark, k)
+    if key not in _REGIME_LABEL_CACHE:
+        import event_backtest as eb
+        from evaluation import regime as ev_regime
+
+        close = eb.load_close(benchmark)
+        labels = None
+        if close is not None and not close.empty:
+            out = ev_regime.label_regimes(close.pct_change().dropna(), k=k)
+            labels = out.get("labels")
+        _REGIME_LABEL_CACHE[key] = labels
+    return _REGIME_LABEL_CACHE[key]
+
+
+def _regime_composition(start_dt, end_dt, benchmark: str, k: int) -> "dict | None":
+    """Fraction of days in each regime within [start_dt, end_dt], plus
+    n_days (the window's own day count, excluded from registry comparison
+    via _METADATA_KEYS same as every other n_key). None if the benchmark
+    has no fit or the evaluated window has no overlap with it."""
+    labels = _regime_labels(benchmark, k)
+    if labels is None or start_dt is None or end_dt is None:
+        return None
+    window = labels[(labels.index >= start_dt) & (labels.index <= end_dt)]
+    if window.empty:
+        return None
+    counts = window.value_counts(normalize=True).sort_index()
+    out = {f"pct_regime_{int(j)}": float(v) for j, v in counts.items()}
+    out["n_days"] = int(len(window))
+    return out
+
+
 def _oriented(panel: pd.DataFrame, direction: int) -> pd.DataFrame:
     work = panel.copy()
     if direction == -1:
@@ -236,7 +278,8 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         registry_path=None, write_registry=True,
         n_boot=1000, n_perm=200, seed=0, cache=None,
         meta_label=False, meta_threshold=0.5, meta_min_train=50,
-        meta_refit_every=20, meta_l2=1.0) -> dict:
+        meta_refit_every=20, meta_l2=1.0,
+        regime_report=False, regime_benchmark="SPY", regime_k=2) -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -295,12 +338,31 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
 
     if input_type in ("signal", "event_set"):
         d = pd.to_datetime(obj.frame["date"])
-        date_range = f"{d.min():%Y-%m-%d}..{d.max():%Y-%m-%d}"
+        start_dt, end_dt = d.min(), d.max()
+        date_range = f"{start_dt:%Y-%m-%d}..{end_dt:%Y-%m-%d}"
     elif trades_df is not None and not trades_df.empty:
-        date_range = (f"{trades_df['entry_date'].min():%Y-%m-%d}.."
-                      f"{trades_df['exit_date'].max():%Y-%m-%d}")
+        start_dt = trades_df["entry_date"].min()
+        end_dt = trades_df["exit_date"].max()
+        date_range = f"{start_dt:%Y-%m-%d}..{end_dt:%Y-%m-%d}"
     else:
+        start_dt = end_dt = None
         date_range = ".."
+
+    if regime_report:
+        try:
+            composition = _regime_composition(start_dt, end_dt,
+                                              regime_benchmark, regime_k)
+        except Exception as exc:   # best-effort, never fatal to the run
+            composition = None
+            results["regime_reason"] = f"{type(exc).__name__}: {exc}"
+        if composition is not None:
+            results["regime_composition"] = composition
+            rows += _stat_rows("regime_composition", -1, composition,
+                               n_key="n_days")
+        elif "regime_reason" not in results:
+            results["regime_reason"] = ("no regime fit / evaluated window "
+                                        "does not overlap the benchmark's history")
+
     uhash = ev_registry.universe_hash(symbols)
     run_id = ev_registry.new_run_id()
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -319,7 +381,10 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                        "n_perm": n_perm, "seed": seed,
                        "start": start, "end": end,
                        "meta_label": meta_label,
-                       "meta_threshold": meta_threshold if meta_label else None}}
+                       "meta_threshold": meta_threshold if meta_label else None,
+                       "regime_report": regime_report,
+                       "regime_benchmark": regime_benchmark if regime_report else None,
+                       "regime_k": regime_k if regime_report else None}}
     with open(os.path.join(out_dir, "run_meta.json"), "w",
               encoding="utf-8") as fh:
         json.dump(_json_safe(meta), fh, indent=2, default=str)
