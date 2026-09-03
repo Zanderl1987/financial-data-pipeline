@@ -19,6 +19,14 @@ programmatically: it refuses to run if the "leaky" kwargs differ from the
 "safe" kwargs in more than one key, because a two-switch ablation can't
 attribute the inflation to either one.
 
+Three concrete probes ship here, one per switch the research names:
+  * entry_lag_leakage()          -- same-bar vs next-bar execution
+                                     (event_backtest.scenario()).
+  * feature_centering_leakage()  -- centered vs trailing feature windows
+                                     (meta_label.build_features()).
+  * pit_lag_fundamentals_leakage() -- period_end vs filed as the date a
+                                     fundamentals fact became knowable.
+
 entry_lag_leakage() is the one ready-to-use concrete probe this module
 ships: event_backtest.scenario() already exposes entry_lag as a real
 parameter (entry_lag=1 is the safe, documented default; entry_lag=0 means
@@ -33,6 +41,9 @@ this exact leak) from getting that one switch wrong.
 from __future__ import annotations
 
 from typing import Callable
+
+import numpy as np
+import pandas as pd
 
 
 def one_switch_ablation(fn: Callable, base_kwargs: dict, switch: dict,
@@ -157,3 +168,87 @@ def feature_centering_leakage(trades, cache, windows=(5, 10, 21),
                        refit_every=refit_every, l2=l2, centered=False)
     return one_switch_ablation(_run_meta_pipeline, base_kwargs,
                                {"centered": True}, _meta_lift)
+
+
+_PIT_DATE_COLS = ("filed", "period_end")
+
+
+def _fundamentals_growth_signal(symbols, metric: str, date_col: str,
+                                form: str = "10-K"):
+    """
+    [symbol, date, value] YoY-growth signal from a single fundamentals_annual
+    metric, dated by `date_col`. date_col='filed' (safe) uses the SEC filing
+    date -- the same convention analytics.features._asof_fundamentals uses
+    in production. date_col='period_end' (leaky) uses the fiscal period's
+    own end date, which for an annual filing is knowable only ~1-3 months
+    LATER at the real filing date -- production code never does this; it
+    exists only so pit_lag_fundamentals_leakage() can compare the two.
+
+    YoY growth (this year's value / last year's value - 1), not the raw
+    level, so the signal is comparable across companies of very different
+    size -- a standard earnings-surprise-proxy shape.
+    """
+    if date_col not in _PIT_DATE_COLS:
+        raise ValueError(f"date_col must be one of {_PIT_DATE_COLS}, got {date_col!r}")
+    import query as q
+
+    df = q.load("fundamentals_annual")
+    df = df[(df["metric"] == metric) & (df["form"] == form)
+            & df["symbol"].isin(list(symbols)) & df[date_col].notna()]
+    if df.empty:
+        return pd.DataFrame(columns=["symbol", "date", "value"])
+    df = (df.sort_values(["symbol", "period_end"])
+            .drop_duplicates(["symbol", "period_end"], keep="last"))
+    prior = df.groupby("symbol")["value"].shift(1)
+    growth = df["value"] / prior - 1.0
+    df = df.assign(_growth=growth.replace([np.inf, -np.inf], np.nan))
+    df = df.dropna(subset=["_growth"])
+    return (df[["symbol", date_col, "_growth"]]
+           .rename(columns={date_col: "date", "_growth": "value"})
+           .reset_index(drop=True))
+
+
+def _run_fundamentals_pipeline(symbols, metric, form, horizon, start, end,
+                               benchmark, price_table, date_col) -> "float | None":
+    from evaluation import data as ev_data
+    from evaluation import ic as ev_ic
+
+    sig = _fundamentals_growth_signal(symbols, metric=metric, date_col=date_col,
+                                      form=form)
+    if sig.empty:
+        return None
+    closes = ev_data.load_closes(sig["symbol"].unique().tolist(), start=start,
+                                 end=end, benchmark=benchmark,
+                                 price_table=price_table)
+    panel, _ = ev_data.build_return_panel(sig, closes, horizons=(horizon,),
+                                          benchmark=benchmark)
+    if panel.empty:
+        return None
+    ic_res = ev_ic.evaluate_ic(panel, direction=1, horizons=(horizon,))
+    return ic_res.get(horizon, {}).get("pooled_ic")
+
+
+def pit_lag_fundamentals_leakage(symbols, metric: str = "net_income",
+                                 form: str = "10-K", horizon: int = 21,
+                                 start: "str | None" = None,
+                                 end: "str | None" = None,
+                                 benchmark: str = "SPY",
+                                 price_table: "str | None" = None) -> dict:
+    """
+    One-switch probe on which fundamentals date column stands in for "when
+    was this fact actually knowable": safe='filed' (the real SEC filing
+    date) vs leaky='period_end' (the fiscal period's own end date). Using
+    period_end pretends the market already had a fact it would not
+    actually see for weeks to months, silently pulling the market's real
+    reaction to the eventual filing into the "forward return" window that
+    starts right after the (fake, early) signal date -- and inflating
+    measured predictive power for a reason that has nothing to do with the
+    signal's real content. Reports the inflation in pooled IC at `horizon`
+    days (evaluation/ic.evaluate_ic) from getting that one switch wrong.
+    """
+    base_kwargs = dict(symbols=symbols, metric=metric, form=form,
+                       horizon=horizon, start=start, end=end,
+                       benchmark=benchmark, price_table=price_table,
+                       date_col="filed")
+    return one_switch_ablation(_run_fundamentals_pipeline, base_kwargs,
+                               {"date_col": "period_end"}, lambda r: r)

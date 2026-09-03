@@ -169,3 +169,102 @@ class TestFeatureCenteringLeakage:
         out = lp.feature_centering_leakage(trades, cache, windows=(4,),
                                            min_train=50)
         assert out["inflation"] is None
+
+
+class TestFundamentalsGrowthSignal:
+    def test_bad_date_col_raises(self):
+        with pytest.raises(ValueError, match="date_col"):
+            lp._fundamentals_growth_signal(["AAPL"], "net_income", "made_up")
+
+    def test_empty_source_gives_empty_frame(self, monkeypatch):
+        import query as q
+        monkeypatch.setattr(q, "load", lambda table: pd.DataFrame(
+            columns=["symbol", "metric", "form", "period_end", "filed", "value"]))
+        out = lp._fundamentals_growth_signal(["AAPL"], "net_income", "filed")
+        assert out.empty
+        assert list(out.columns) == ["symbol", "date", "value"]
+
+    def test_yoy_growth_known_answer(self, monkeypatch):
+        import query as q
+        df = pd.DataFrame([
+            {"symbol": "AAA", "metric": "net_income", "form": "10-K",
+            "period_end": pd.Timestamp("2019-12-31"),
+            "filed": pd.Timestamp("2020-02-01"), "value": 100.0},
+            {"symbol": "AAA", "metric": "net_income", "form": "10-K",
+            "period_end": pd.Timestamp("2020-12-31"),
+            "filed": pd.Timestamp("2021-02-01"), "value": 150.0},
+        ])
+        monkeypatch.setattr(q, "load", lambda table: df)
+        out = lp._fundamentals_growth_signal(["AAA"], "net_income", "filed")
+        assert len(out) == 1                     # first year has no prior -> dropped
+        assert out.iloc[0]["value"] == pytest.approx(0.5)   # 150/100 - 1
+        assert out.iloc[0]["date"] == pd.Timestamp("2021-02-01")
+
+
+class TestPitLagFundamentalsLeakage:
+    @pytest.fixture
+    def fundamentals_and_prices(self, monkeypatch):
+        """
+        10 symbols, each with a year-2 net_income YoY growth of +50% (even
+        index, "good") or -50% (odd index, "bad"), and a price series that
+        jumps in the SAME direction exactly at the real filing date (the
+        market's real reaction to the eventual disclosure) -- never at
+        period_end, which lands `gap` trading days earlier. Only a signal
+        dated by period_end can have that jump land inside its forward
+        return window; a signal dated by filed enters after the jump has
+        already happened and captures none of it.
+        """
+        symbols = [f"SYM{i}" for i in range(10)]
+        idx = pd.bdate_range("2020-01-01", periods=300)
+        p_loc, gap, horizon = 100, 40, 45
+        f_loc = p_loc + gap
+        period_end_y2, filed_y2 = idx[p_loc], idx[f_loc]
+        period_end_y1 = period_end_y2 - pd.tseries.offsets.BDay(252)
+        filed_y1 = period_end_y1 + pd.tseries.offsets.BDay(30)
+
+        rng = np.random.default_rng(4)
+        rows, price_frames = [], {}
+        for i, sym in enumerate(symbols):
+            good = (i % 2 == 0)
+            close = 100.0 + np.cumsum(rng.normal(0, 0.05, 300))
+            close[f_loc:] *= 1.15 if good else 0.85
+            price_frames[sym] = pd.Series(close, index=idx, name=sym)
+
+            prior_val = 100.0
+            new_val = prior_val * (1.5 if good else 0.5)
+            rows.append({"symbol": sym, "metric": "net_income", "form": "10-K",
+                        "period_end": period_end_y1, "filed": filed_y1,
+                        "value": prior_val})
+            rows.append({"symbol": sym, "metric": "net_income", "form": "10-K",
+                        "period_end": period_end_y2, "filed": filed_y2,
+                        "value": new_val})
+        fundamentals = pd.DataFrame(rows)
+
+        import query as q
+        monkeypatch.setattr(q, "load", lambda table: fundamentals.copy())
+
+        import event_backtest as eb
+
+        def fake_matrix(syms, start=None, end=None, price_table=None):
+            return pd.DataFrame({s: price_frames[s] for s in syms
+                                 if s in price_frames})
+
+        monkeypatch.setattr(eb, "load_close_matrix", fake_matrix)
+        return symbols, horizon
+
+    def test_period_end_inflates_ic_vs_filed(self, fundamentals_and_prices):
+        symbols, horizon = fundamentals_and_prices
+        out = lp.pit_lag_fundamentals_leakage(symbols, horizon=horizon,
+                                              benchmark=None)
+        assert out["switch"] == "date_col"
+        assert out["safe_value"] == "filed" and out["leaky_value"] == "period_end"
+        assert out["safe_metric"] is not None and out["leaky_metric"] is not None
+        assert out["leaky_metric"] > out["safe_metric"]
+        assert out["inflation"] > 0
+
+    def test_bad_metric_gives_none_metric_not_error(self, fundamentals_and_prices):
+        symbols, horizon = fundamentals_and_prices
+        out = lp.pit_lag_fundamentals_leakage(symbols, metric="no_such_metric",
+                                              horizon=horizon, benchmark=None)
+        assert out["safe_metric"] is None and out["leaky_metric"] is None
+        assert out["inflation"] is None
