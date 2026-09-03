@@ -464,8 +464,8 @@ def parameter_heatmap_fig(name: str, run_id: str, mode: str = "heatmap") -> go.F
     return fig
 
 
-#: Commission levels (bps) swept by cost_sensitivity_fig. Small on purpose:
-#: each point re-simulates the full universe.
+#: Commission levels (bps) swept by cost_sensitivity_fig/cvar_sensitivity_fig.
+#: Small on purpose: each point re-simulates the full universe.
 COST_SWEEP_BPS = (0, 5, 10, 20, 30, 40, 50)
 
 
@@ -501,6 +501,51 @@ def cost_sensitivity_fig(name: str, run_id: str, bull_min: float,
         title="Cost sensitivity at current thresholds (diagnostic)",
         xaxis_title="Commission (bps)", height=320,
         yaxis=dict(title="Net P&L ($)"),
+        yaxis2=dict(title="N trades", overlaying="y", side="right"),
+        legend=dict(orientation="h"))
+    return fig
+
+
+def cvar_sensitivity_fig(name: str, run_id: str, bull_min: float,
+                         exit_long_max: float, bear_max: float,
+                         exit_short_min: float,
+                         config: "ev_execution.ExecutionConfig") -> "go.Figure | None":
+    """CVaR (95%) of the daily-return series vs commission level, the same
+    sweep as cost_sensitivity_fig but showing how TAIL RISK degrades as
+    costs rise -- a strategy whose net P&L survives higher costs can still
+    see its worst-day tail get materially worse, which net P&L alone
+    hides. Reuses tearsheet.tail_risk_metrics() (the same CVaR convention
+    already shown in the live tearsheet's headline tile) rather than a
+    third calculation of the same statistic; bridges trades -> daily
+    returns via tearsheet.daily_returns_from_trades(), matching how the
+    live tearsheet itself gets there."""
+    cvars, n_trades = [], []
+    for bps in COST_SWEEP_BPS:
+        swept = dataclasses.replace(
+            config, costs=dataclasses.replace(config.costs, commission_bps=float(bps)))
+        try:
+            trades, summary = simulate_live(name, run_id, bull_min, exit_long_max,
+                                            bear_max, exit_short_min, config=swept)
+        except ValueError:
+            return None
+        bridged = ev_tearsheet.daily_returns_from_trades(trades)
+        tail = (ev_tearsheet.tail_risk_metrics(bridged["returns"])
+               if bridged["returns"] is not None else {"cvar_pct": None})
+        cvars.append(tail.get("cvar_pct"))
+        n_trades.append(summary.get("n_trades", 0))
+    if all(c is None for c in cvars):
+        return None
+    fig = go.Figure()
+    fig.add_scatter(x=list(COST_SWEEP_BPS), y=cvars, mode="lines+markers",
+                    name="CVaR 95% (%)", line=dict(color=COLOR_CRITICAL),
+                    yaxis="y")
+    fig.add_scatter(x=list(COST_SWEEP_BPS), y=n_trades, mode="lines+markers",
+                    name="n trades", line=dict(color="#888888", dash="dot"),
+                    yaxis="y2")
+    fig.update_layout(
+        title="Tail-risk sensitivity at current thresholds (diagnostic)",
+        xaxis_title="Commission (bps)", height=320,
+        yaxis=dict(title="CVaR 95% (%, worse = higher)"),
         yaxis2=dict(title="N trades", overlaying="y", side="right"),
         legend=dict(orientation="h"))
     return fig
@@ -744,6 +789,7 @@ def build_layout(signals: "list[dict]") -> "html.Div":
         _execution_config_panel(),
         html.H4("Cost sensitivity"),
         dcc.Loading(dcc.Graph(id="cost-fig")),
+        dcc.Loading(dcc.Graph(id="cvar-fig")),
         html.H4("Trades"),
         dcc.Loading(html.Div(id="trades-table-container")),
         html.Div([
@@ -888,6 +934,7 @@ def register_callbacks(app: "dash.Dash") -> None:
     @app.callback(
         Output("trade-summary", "children"), Output("symbol-fig", "figure"),
         Output("pnl-fig", "figure"), Output("cost-fig", "figure"),
+        Output("cvar-fig", "figure"),
         Output("execution-config-error", "children"),
         Output("tearsheet-container", "children"),
         Output("trades-table-container", "children"),
@@ -913,11 +960,11 @@ def register_callbacks(app: "dash.Dash") -> None:
                           limits_max_drawdown_stop):
         empty_fig = go.Figure()
         if not store:
-            return ("select a signal", empty_fig, empty_fig, empty_fig, "",
-                    [], html.Div(""))
+            return ("select a signal", empty_fig, empty_fig, empty_fig,
+                    empty_fig, "", [], html.Div(""))
         if not has_trade_rule(store["name"]):
             return ("no trade rule defined for this signal", empty_fig,
-                    empty_fig, empty_fig, "", [], html.Div(""))
+                    empty_fig, empty_fig, empty_fig, "", [], html.Div(""))
 
         cfg, cfg_error = resolve_execution_config(
             commission_bps=commission_bps, spread_bps=spread_bps,
@@ -932,7 +979,8 @@ def register_callbacks(app: "dash.Dash") -> None:
             limits_max_drawdown_stop=limits_max_drawdown_stop)
         if cfg is None:
             return (dash.no_update, dash.no_update, dash.no_update,
-                    dash.no_update, cfg_error, dash.no_update, dash.no_update)
+                    dash.no_update, dash.no_update, cfg_error,
+                    dash.no_update, dash.no_update)
 
         try:
             trades, summary = simulate_live(store["name"], store["run_id"], bull_min,
@@ -940,7 +988,8 @@ def register_callbacks(app: "dash.Dash") -> None:
                                             config=cfg)
         except ValueError as exc:
             return (dash.no_update, dash.no_update, dash.no_update,
-                    dash.no_update, f"Execution config error: {exc}",
+                    dash.no_update, dash.no_update,
+                    f"Execution config error: {exc}",
                     dash.no_update, dash.no_update)
         baseline = store["results"].get("summary", {})
         diff = baseline_vs_live(baseline, summary)
@@ -960,10 +1009,13 @@ def register_callbacks(app: "dash.Dash") -> None:
         cost_fig = (cost_sensitivity_fig(store["name"], store["run_id"],
                                          bull_min, exit_long_max, bear_max,
                                          exit_short_min, cfg) or empty_fig)
+        cvar_fig = (cvar_sensitivity_fig(store["name"], store["run_id"],
+                                         bull_min, exit_long_max, bear_max,
+                                         exit_short_min, cfg) or empty_fig)
         tearsheet_children = render_tearsheet(live_tearsheet(trades))
         table_children = trades_table(trades)
-        return (text, sym_fig, pnl_fig, cost_fig, "", tearsheet_children,
-                table_children)
+        return (text, sym_fig, pnl_fig, cost_fig, cvar_fig, "",
+                tearsheet_children, table_children)
 
 
 app = dash.Dash(__name__)

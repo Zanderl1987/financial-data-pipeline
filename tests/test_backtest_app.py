@@ -714,6 +714,54 @@ class TestCostSensitivityFig:
         assert out is None
 
 
+class TestCvarSensitivityFig:
+    def _cfg(self):
+        return ba.build_execution_config(commission_bps=7.5)
+
+    def _trades(self, n=30, seed=0):
+        rng = np.random.default_rng(seed)
+        exit_dates = pd.bdate_range("2024-01-02", periods=n)
+        pnl = rng.normal(50.0, 200.0, n)
+        return pd.DataFrame({"exit_date": exit_dates, "pnl_dollars": pnl})
+
+    def test_sweeps_commission_and_reports_cvar(self, monkeypatch):
+        seen = []
+        trades = self._trades()
+
+        def fake_simulate_live(name, run_id, b, el, be, es, notional=None, *,
+                               config=None):
+            seen.append(config.costs.commission_bps)
+            return trades, {"n_trades": len(trades)}
+
+        monkeypatch.setattr(ba, "simulate_live", fake_simulate_live)
+        fig = ba.cvar_sensitivity_fig("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, self._cfg())
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 2                       # CVaR + trade count
+        assert list(fig.data[0].x) == list(ba.COST_SWEEP_BPS)
+        assert seen == list(ba.COST_SWEEP_BPS)          # one sim per level
+        assert all(v is not None for v in fig.data[0].y)
+        assert list(fig.data[1].y) == [len(trades)] * len(ba.COST_SWEEP_BPS)
+
+    def test_simulate_valueerror_returns_none(self, monkeypatch):
+        def raising(*a, **k):
+            raise ValueError("bad sizing combo")
+
+        monkeypatch.setattr(ba, "simulate_live", raising)
+        out = ba.cvar_sensitivity_fig("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, self._cfg())
+        assert out is None
+
+    def test_no_realized_trades_returns_none(self, monkeypatch):
+        def fake_simulate_live(*a, **k):
+            return pd.DataFrame(), {"n_trades": 0}
+
+        monkeypatch.setattr(ba, "simulate_live", fake_simulate_live)
+        out = ba.cvar_sensitivity_fig("tv_threshold", "run1", 0.5, 0.1,
+                                      -0.5, -0.1, self._cfg())
+        assert out is None
+
+
 class TestTradesTable:
     def test_empty_trades_render_message(self):
         out = ba.trades_table(pd.DataFrame())
