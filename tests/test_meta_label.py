@@ -89,6 +89,16 @@ class TestBuildFeatures:
         feats = ml.build_features(trades, {"TEST": df}, windows=(4,), centered=True)
         assert feats.isna().all(axis=1).iloc[0]
 
+    def test_default_indicator_cols_none_is_unchanged(self):
+        idx = pd.bdate_range("2020-01-01", periods=25)
+        closes = [100.0] * 24 + [110.0]
+        df = pd.DataFrame({"close": closes}, index=idx)
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[24]]})
+        default = ml.build_features(trades, {"TEST": df}, windows=(5, 10, 21))
+        explicit = ml.build_features(trades, {"TEST": df}, windows=(5, 10, 21),
+                                     indicator_cols=None)
+        pd.testing.assert_frame_equal(default, explicit)
+
     def test_no_lookahead(self):
         idx = pd.bdate_range("2020-01-01", periods=40)
         rng = np.random.default_rng(0)
@@ -101,6 +111,57 @@ class TestBuildFeatures:
         trunc = ml.build_features(trades.iloc[[1]], {"TEST": df_trunc}, windows=(5, 10))
         np.testing.assert_allclose(full.iloc[0].to_numpy(dtype=float),
                                    trunc.iloc[0].to_numpy(dtype=float))
+
+
+class TestBuildFeaturesIndicators:
+    def _ohlc(self, n=60, seed=5):
+        idx = pd.bdate_range("2020-01-01", periods=n)
+        rng = np.random.default_rng(seed)
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
+        high = close * 1.01
+        low = close * 0.99
+        return pd.DataFrame({"open": close, "high": high, "low": low,
+                             "close": close}, index=idx), idx
+
+    def test_matches_analytics_technical_indicators(self):
+        df, idx = self._ohlc()
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[40]]})
+        feats = ml.build_features(trades, {"TEST": df}, windows=(5,),
+                                  indicator_cols=["rsi14", "macd"])
+        from analytics import technical as tech
+        ind = tech.indicators(df)
+        assert feats.loc[0, "ind_rsi14"] == pytest.approx(ind.loc[idx[40], "rsi14"])
+        assert feats.loc[0, "ind_macd"] == pytest.approx(ind.loc[idx[40], "macd"])
+
+    def test_missing_ohlc_columns_gives_nan_not_error(self):
+        idx = pd.bdate_range("2020-01-01", periods=30)
+        df = pd.DataFrame({"close": [100.0] * 30}, index=idx)   # no open/high/low
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[25]]})
+        feats = ml.build_features(trades, {"TEST": df}, windows=(5,),
+                                  indicator_cols=["rsi14"])
+        assert pd.isna(feats.loc[0, "ind_rsi14"])
+
+    def test_insufficient_indicator_history_is_nan(self):
+        df, idx = self._ohlc()
+        # rsi14 needs 14 bars of history -- day 2 has none
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[2]]})
+        feats = ml.build_features(trades, {"TEST": df}, windows=(1,),
+                                  indicator_cols=["rsi14"])
+        assert pd.isna(feats.loc[0, "ind_rsi14"])
+
+    def test_missing_symbol_is_nan(self):
+        trades = pd.DataFrame({"symbol": ["GHOST"],
+                               "entry_signal_date": [pd.Timestamp("2020-01-01")]})
+        feats = ml.build_features(trades, {}, windows=(5,), indicator_cols=["rsi14"])
+        assert pd.isna(feats.loc[0, "ind_rsi14"])
+
+    def test_columns_prefixed_ind(self):
+        df, idx = self._ohlc()
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[40]]})
+        feats = ml.build_features(trades, {"TEST": df}, windows=(5,),
+                                  indicator_cols=["rsi14", "adx14"])
+        assert list(feats.columns) == ["ret_5d", "volatility", "dist_from_sma",
+                                       "ind_rsi14", "ind_adx14"]
 
 
 class TestLogisticCore:

@@ -55,9 +55,28 @@ def triple_barrier_labels(trades: pd.DataFrame) -> pd.Series:
 
 # --------------------------------------------------------------- features
 
+def _indicator_frames(cache: dict, indicator_cols) -> dict:
+    """One analytics.technical.indicators() call per symbol, memoized here
+    so build_features() doesn't recompute a symbol's whole indicator frame
+    once per trade. A symbol whose cache frame lacks OHLC columns (some
+    callers only ever populate "close") maps to None rather than raising --
+    build_features() reports that as NaN features, same as any other
+    missing-history case."""
+    from analytics import technical as ev_technical
+
+    out = {}
+    for sym, df in cache.items():
+        try:
+            out[sym] = ev_technical.indicators(df)
+        except (ValueError, KeyError):
+            out[sym] = None
+    return out
+
+
 def build_features(trades: pd.DataFrame, cache: dict,
                    windows=DEFAULT_FEATURE_WINDOWS,
-                   centered: bool = False) -> pd.DataFrame:
+                   centered: bool = False,
+                   indicator_cols: "list[str] | None" = None) -> pd.DataFrame:
     """
     Trailing return over each window in `windows` plus trailing volatility
     (the longest window) and distance from that window's SMA, computed
@@ -77,6 +96,18 @@ def build_features(trades: pd.DataFrame, cache: dict,
     measure how much it inflates the apparent meta-filter lift; never pass
     centered=True outside that probe.
 
+    indicator_cols (opt-in, default None -- no behavior change unless set):
+    names of extra columns from analytics.technical.indicators() (rsi14,
+    macd, adx14, atr14, mom10, willr14, cci20, ...) to pull as of each
+    trade's entry_signal_date, prefixed "ind_" in the output. Every one of
+    that module's indicators is rolling/shift-based -- never centered,
+    never look-ahead -- so this is a PIT-safe way to reuse the repo's real
+    technical-analysis code instead of hand-rolling more of the trio above.
+    Requires cache[symbol] to carry open/high/low/close; a symbol missing
+    them (or a date before an indicator's window has enough history) gets
+    NaN for every requested indicator column, same "never imputed"
+    contract as the rest of this function.
+
     Rows for a trade whose symbol/date isn't found in `cache`, or that
     falls before the required window has enough history on both sides,
     get NaN features and must be dropped by the caller before fitting
@@ -85,12 +116,15 @@ def build_features(trades: pd.DataFrame, cache: dict,
     """
     longest = max(windows)
     half = longest // 2
+    ind_frames = _indicator_frames(cache, indicator_cols) if indicator_cols else {}
     rows = []
     for _, t in trades.iterrows():
         sym, sig_date = t["symbol"], t["entry_signal_date"]
         feat = {w: np.nan for w in windows}
         feat["volatility"] = np.nan
         feat["dist_from_sma"] = np.nan
+        for col in (indicator_cols or ()):
+            feat[f"ind_{col}"] = np.nan
         df = cache.get(sym)
         if df is not None and "close" in df.columns and sig_date in df.index:
             loc = df.index.get_loc(sig_date)
@@ -116,8 +150,16 @@ def build_features(trades: pd.DataFrame, cache: dict,
                 feat["volatility"] = float(rets.std(ddof=0))
                 sma = float(window_px.mean())
                 feat["dist_from_sma"] = float(close.iloc[loc] / sma - 1.0) if sma else np.nan
+        if indicator_cols:
+            ind_df = ind_frames.get(sym)
+            if ind_df is not None and sig_date in ind_df.index:
+                for col in indicator_cols:
+                    if col in ind_df.columns:
+                        v = ind_df.at[sig_date, col]
+                        feat[f"ind_{col}"] = float(v) if pd.notna(v) else np.nan
         rows.append(feat)
-    cols = [*windows, "volatility", "dist_from_sma"]
+    cols = ([*windows, "volatility", "dist_from_sma"]
+            + [f"ind_{c}" for c in (indicator_cols or ())])
     out = pd.DataFrame(rows, index=trades.index,
                        columns=cols).rename(columns={w: f"ret_{w}d" for w in windows})
     return out
