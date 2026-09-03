@@ -51,7 +51,7 @@ def build_cache() -> dict:
     return cache
 
 
-def survey_one(slug: str, cache: dict) -> dict:
+def survey_one(slug: str, cache: dict, indicator_cols=None) -> dict:
     try:
         rule = strategy_ports.load_rule(slug)
     except Exception as exc:
@@ -63,7 +63,7 @@ def survey_one(slug: str, cache: dict) -> dict:
     if len(trades) < MIN_TRADES:
         return {"slug": slug, "reason": f"only {len(trades)} trades (< {MIN_TRADES})"}
 
-    feats = ev_meta.build_features(trades, cache)
+    feats = ev_meta.build_features(trades, cache, indicator_cols=indicator_cols)
     # refit_every=100 (vs. the library default 20): a survey over strategies
     # with thousands to tens of thousands of trades on this small universe
     # made the default's refit cadence prohibitively slow (a single strategy
