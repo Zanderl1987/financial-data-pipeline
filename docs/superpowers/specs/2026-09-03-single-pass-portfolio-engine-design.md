@@ -1,7 +1,9 @@
 # Single-Pass Portfolio Engine — Design Spec
 
 **Date:** 2026-09-03
-**Status:** Draft — open questions below need Zander's sign-off before implementation starts
+**Status:** Implemented (commit `f42c7c4`), per Zander's answer to Open Question 4
+("implement now"). See "Implementation notes" at the end for how the other
+three open questions were resolved.
 **Session notes:** `work-notes/financial-data-pipeline/SESSION_NOTES_2026-09-03.md`,
 `work-notes/financial-data-pipeline/TASKS.md` ("Backtesting Engine Improvements" →
 "Inverse-vol sizing / portfolio allocation")
@@ -324,3 +326,37 @@ check done and documented in work-notes; TASKS.md updated.
    in a dedicated session with nothing else changing at the same time, or
    defer until there's an actual near-term consumer (the HRP sizing mode)
    that needs it?
+
+## Implementation notes (2026-09-03, commit `f42c7c4`)
+
+Zander answered Open Question 4 directly: implement now. The other three
+were resolved as part of implementation, each documented in the commit:
+
+1. **Keep vs. delete `_portfolio_pass`**: kept, per the doc's own
+   recommendation. It is no longer called by `simulate()` or
+   `permutation_trades()` (both now go through `_simulate_single_pass`), but
+   stays in `evaluation/trades.py` as a regression marker --
+   `tests/test_execution_step_b.py::TestSinglePassPortfolio::
+   test_old_engine_shows_the_bug` runs it directly against the motivating
+   fixture and asserts it STILL shows the old, buggy behavior, so the fix is
+   legible as a fix (matching this repo's "belongs in the docstring, not a
+   later bug report" precedent).
+2. **User-facing note**: added to `backtest_app.py`'s module docstring,
+   dated, naming exactly which two config fields are affected.
+3. **Should `stage3.py` start using these limits**: not touched. Explicitly
+   out of scope, same as the spec said -- correctness and adoption are
+   different decisions.
+
+**One thing the design phase did not anticipate**: `evaluation/stats.py`'s
+`permutation_trades()` calls `tr._portfolio_pass` directly (a private
+cross-module call, found only once implementation started grepping real
+call sites) for its portfolio-constrained null. Left unfixed, the observed
+run would have used the corrected engine while the null still used the
+buggy one -- an invalid comparison, not a smaller version of the same fix.
+Updated in the same commit; see `stats.py`'s `_perm_needs_portfolio` branch.
+
+**Verification**: full suite 3082 passed / 1 skipped, zero unrelated
+assertion edits. Real-data check on a real 10-symbol SMA(10/50) crossover
+basket (2018-2025, capital=$50k/max_concurrent=2): MSFT gains one genuine
+extra trade (2020-12-17 → 2021-01-19) the old engine silently dropped;
+every other trade (53 of 54) is byte-identical between the two engines.
