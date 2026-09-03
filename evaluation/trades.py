@@ -15,7 +15,7 @@ from evaluation import execution as ev_execution
 
 TRADE_COLS = ["symbol", "side", "entry_signal_date", "entry_date", "entry_price",
               "exit_signal_date", "exit_date", "exit_price", "days_held",
-              "pnl_dollars", "pnl_pct", "exit_reason"]
+              "pnl_dollars", "pnl_pct", "exit_reason", "entry_vol_pct"]
 
 #: Window used for the close-only volatility estimate behind
 #: RiskControls.vol_stop_mult. Mirrors event_backtest.scenario()'s 14-day
@@ -211,6 +211,12 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
             "pnl_dollars": pnl_dollars,
             "pnl_pct": pnl_pct,
             "exit_reason": reason,
+            # Always computed (independent of whether vol_stop_mult risk
+            # control is enabled) so mode="inverse_vol" sizing has a trailing
+            # vol estimate to size against; reuses the exact same 14-day
+            # mean-absolute-close-change calculation _find_exit uses for a
+            # vol stop, mult=1.0 -> a plain (unscaled) trailing vol reading.
+            "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0),
         })
         next_free = exit_i + 1
     return rows
@@ -219,7 +225,7 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
 def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
     """
     Admit candidate trades in chronological entry order subject to a capital
-    budget, a concurrency cap, and fractional sizing.
+    budget, a concurrency cap, and fractional/inverse-vol sizing.
 
     APPROXIMATION, stated plainly because it is easy to over-read: this filters
     candidates that simulate_symbol already produced per symbol. The per-symbol
@@ -227,12 +233,16 @@ def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
     resolves FIRST. A trade rejected here for lack of capital therefore does not
     free its symbol to take some different trade it would have taken in a true
     single-pass portfolio simulation. This captures the first-order effect of a
-    capital constraint, not a full portfolio engine.
+    capital constraint, not a full portfolio engine. mode="inverse_vol" improves
+    the SIZING of admitted trades (real risk-parity-style weighting instead of
+    one flat fraction for every name) but does not touch this admission-order
+    limitation -- that would need restructuring simulate_symbol/_portfolio_pass
+    into one interleaved pass and is a separate, larger piece of work.
     """
     limits, sizing = cfg.limits, cfg.sizing
     capital = limits.capital
-    if sizing.mode == "fixed_fraction" and capital is None:
-        raise ValueError("sizing.mode='fixed_fraction' requires limits.capital")
+    if sizing.mode in ("fixed_fraction", "inverse_vol") and capital is None:
+        raise ValueError(f"sizing.mode={sizing.mode!r} requires limits.capital")
 
     ordered = sorted(rows, key=lambda r: (r["entry_date"], r["symbol"]))
     equity = capital if capital is not None else 0.0
@@ -256,6 +266,17 @@ def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
             size = sizing.fraction * equity
             if size <= 0:
                 continue
+        elif sizing.mode == "inverse_vol":
+            vol = r.get("entry_vol_pct")
+            # No reliable trailing-vol estimate (insufficient history before
+            # this trade's entry) -> skip rather than guess a size; a
+            # fabricated vol reading would silently over- or under-size a
+            # real position.
+            if vol is None or not np.isfinite(vol) or vol <= 0:
+                continue
+            size = sizing.fraction * equity * (sizing.vol_target_pct / vol)
+            if size <= 0:
+                continue
         else:
             size = sizing.notional
 
@@ -265,7 +286,7 @@ def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
                 continue
 
         row = dict(r)
-        if sizing.mode == "fixed_fraction":
+        if sizing.mode in ("fixed_fraction", "inverse_vol"):
             # pnl_pct is already net of costs; re-denominate onto the new size.
             row["pnl_dollars"] = round(size * row["pnl_pct"] / 100.0, 2)
         admitted.append(row)

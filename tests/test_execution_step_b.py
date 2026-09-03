@@ -302,6 +302,62 @@ class TestPortfolioLimits:
         assert capped["obs_pnl_dollars"] != free["obs_pnl_dollars"]
 
 
+class TestInverseVolSizing:
+    def _alt(self, amt, n):
+        return [100.0 + (amt if i % 2 == 0 else 0.0) for i in range(n)]
+
+    def _two_vol_cache(self):
+        # 16 pre-bars alternating by `amt` (a known, constant trailing
+        # abs-close-diff -> a known entry_vol_pct), entry signal at 16,
+        # fill at 17, flat hold, exit signal at 20, fill at 21.
+        low = self._alt(0.5, 16) + [100.0] * 4 + [110.0] * 2
+        high = self._alt(2.0, 16) + [100.0] * 4 + [110.0] * 2
+        n = len(low)
+        entries = [False] * 16 + [True] + [False] * (n - 17)
+        exits = [False] * 20 + [True] + [False] * (n - 21)
+        return {"LOW": _frame(low, entries, exits), "HIGH": _frame(high, entries, exits)}
+
+    def test_lower_vol_symbol_gets_a_bigger_size(self):
+        cache = self._two_vol_cache()
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="inverse_vol", fraction=0.1, vol_target_pct=1.0),
+            limits=ex.PortfolioLimits(capital=100_000.0))
+        out = tr.simulate(_rule(), cache, config=cfg).set_index("symbol")
+        size_low = out.loc["LOW", "pnl_dollars"] / (out.loc["LOW", "pnl_pct"] / 100.0)
+        size_high = out.loc["HIGH", "pnl_dollars"] / (out.loc["HIGH", "pnl_pct"] / 100.0)
+        # LOW's trailing vol is exactly 1/4 of HIGH's (0.5 vs 2.0 alt amplitude)
+        # -> inverse-vol sizing must give it ~4x the dollar size (tolerance
+        # only for the pnl_dollars round(size * pnl_pct/100, 2) rounding
+        # _portfolio_pass applies when re-denominating onto the new size).
+        assert size_low / size_high == pytest.approx(4.0, rel=1e-4)
+
+    def test_insufficient_vol_history_is_skipped_not_guessed(self):
+        # entry at bar 1 -- far short of the 14-bar trailing window
+        # entry_vol_pct needs, so it's None and this trade cannot be sized.
+        cache = {"AAA": _frame([100, 100, 110, 110],
+                               [True, False, False, False],
+                               [False, False, True, False])}
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="inverse_vol", fraction=0.1, vol_target_pct=1.0),
+            limits=ex.PortfolioLimits(capital=100_000.0))
+        out = tr.simulate(_rule(), cache, config=cfg)
+        assert out.empty
+
+    def test_requires_capital(self):
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="inverse_vol", fraction=0.1, vol_target_pct=1.0))
+        with pytest.raises(ValueError, match="requires limits.capital"):
+            tr.simulate(_rule(), self._two_vol_cache(), config=cfg)
+
+    def test_sizing_validation(self):
+        with pytest.raises(ValueError, match="requires 0 < fraction"):
+            ex.Sizing(mode="inverse_vol", vol_target_pct=1.0)
+        with pytest.raises(ValueError, match="requires vol_target_pct"):
+            ex.Sizing(mode="inverse_vol", fraction=0.1)
+        with pytest.raises(ValueError, match="only meaningful with mode"):
+            ex.Sizing(mode="fixed_notional", vol_target_pct=1.0)
+
+
 class TestStage3Migration:
     """
     The campaign now gets its costs from the engine via `config=`.

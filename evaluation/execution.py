@@ -41,7 +41,7 @@ import pandas as pd
 TRADING_DAYS = 252
 
 IMPACT_MODELS = (None, "sqrt", "flat")
-SIZING_MODES = ("fixed_notional", "fixed_fraction")
+SIZING_MODES = ("fixed_notional", "fixed_fraction", "inverse_vol")
 
 
 @dataclass(frozen=True)
@@ -103,14 +103,27 @@ class RiskControls:
 
 @dataclass(frozen=True)
 class Sizing:
-    """max_weight applies to the weight-matrix engine; mode/notional to the
-    discrete-trade engine. Vol targeting is deliberately absent: it is
-    well-defined for a continuously-held weight vector (backtest.py keeps its
-    own) and ambiguous for discrete trades."""
+    """max_weight applies to the weight-matrix engine; mode/notional/fraction/
+    vol_target_pct to the discrete-trade engine.
+
+    mode='inverse_vol' is entry-time-only risk parity, not continuous
+    rebalancing: size = fraction * equity * (vol_target_pct / entry_vol_pct),
+    fixed for the life of the trade from the moment it's admitted. A name
+    trading at exactly vol_target_pct daily vol gets the same size a plain
+    fixed_fraction position would; a calmer name gets sized up, a choppier
+    one sized down. This deliberately does NOT attempt to keep risk constant
+    as a trade ages (that would need marking positions to a moving vol
+    estimate mid-trade, which -- per the note this replaces -- really is
+    ambiguous for a discrete, asynchronously-held trade the way it isn't for
+    backtest.py's continuously-held weight vector). Entry-time sizing sidesteps
+    that ambiguity rather than resolving it: it's a real, well-defined
+    primitive, just a narrower one than full continuous vol targeting.
+    """
     mode: str = "fixed_notional"
     notional: float = 10_000.0
     fraction: "float | None" = None
     max_weight: "float | None" = None
+    vol_target_pct: "float | None" = None
 
     def __post_init__(self):
         if self.mode not in SIZING_MODES:
@@ -119,11 +132,17 @@ class Sizing:
             raise ValueError("notional must be > 0")
         if self.max_weight is not None and self.max_weight <= 0:
             raise ValueError("max_weight must be > 0 or None")
-        if self.mode == "fixed_fraction":
+        if self.mode in ("fixed_fraction", "inverse_vol"):
             if self.fraction is None or not (0 < self.fraction <= 1):
-                raise ValueError("mode='fixed_fraction' requires 0 < fraction <= 1")
+                raise ValueError(f"mode={self.mode!r} requires 0 < fraction <= 1")
         elif self.fraction is not None:
-            raise ValueError("fraction is only meaningful with mode='fixed_fraction'")
+            raise ValueError("fraction is only meaningful with mode="
+                             "'fixed_fraction' or 'inverse_vol'")
+        if self.mode == "inverse_vol":
+            if self.vol_target_pct is None or self.vol_target_pct <= 0:
+                raise ValueError("mode='inverse_vol' requires vol_target_pct > 0")
+        elif self.vol_target_pct is not None:
+            raise ValueError("vol_target_pct is only meaningful with mode='inverse_vol'")
 
 
 @dataclass(frozen=True)
