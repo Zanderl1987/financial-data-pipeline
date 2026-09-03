@@ -197,3 +197,89 @@ class TestExecutionCostsAndRiskControls:
         # The day AFTER, the rolling window has now seen the outlier and the
         # vol estimate jumps, sharply scaling the position down.
         assert w.iloc[11] < w.iloc[10] * 0.5
+
+
+class TestAdvParticipationCost:
+    """adv_participation_coeff -- the same per-symbol ADV market-impact model
+    event_backtest.scenario() already uses, reused here (not reinvented) for
+    the weight-matrix engine. Deliberately a DIFFERENT parameter from the
+    existing portfolio-turnover-based adv_impact_coeff (see
+    _adv_participation_cost's docstring)."""
+
+    def _oscillating_signal(self, dates):
+        """A and B swap the single top-quantile slot every day -> 100%
+        turnover on every rebalance, a large and easy-to-detect ADV cost."""
+        rows = []
+        for i, d in enumerate(dates):
+            a = 1.0 if i % 2 == 0 else 0.0
+            rows.append({"symbol": "A", "date": d, "composite": a})
+            rows.append({"symbol": "B", "date": d, "composite": 1.0 - a})
+        return pd.DataFrame(rows)
+
+    def _setup(self, monkeypatch, n=40):
+        dates = pd.bdate_range("2024-01-01", periods=n)
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B"])
+        sig = self._oscillating_signal(dates)
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        return dates, sig
+
+    def test_off_by_default(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch)
+        baseline = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False)
+        explicit_none = bt.backtest(sig, rebalance="D", quantiles=2,
+                                    long_short=False, adv_participation_coeff=None)
+        assert list(baseline.returns) == list(explicit_none.returns)
+        assert baseline.params["aum"] is None
+        assert baseline.params["adv_window"] is None
+
+    def test_increases_cost_and_degrades_return(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch)
+        import event_backtest as eb
+        thin = pd.DataFrame({"A": 1000.0, "B": 1000.0}, index=dates)
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix",
+                            lambda syms, start=None, end=None, price_table=None: thin)
+
+        baseline = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False)
+        with_adv = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                               adv_participation_coeff=50.0, aum=1_000_000.0,
+                               adv_window=5)
+        assert with_adv.metrics["total_return_pct"] < baseline.metrics["total_return_pct"]
+
+    def test_missing_volume_data_degrades_to_no_extra_cost(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch)
+        import event_backtest as eb
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix",
+                            lambda syms, start=None, end=None, price_table=None:
+                            pd.DataFrame())
+
+        baseline = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False)
+        with_adv = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                               adv_participation_coeff=50.0)
+        assert list(baseline.returns) == list(with_adv.returns)
+
+    def test_higher_coefficient_costs_more(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch)
+        import event_backtest as eb
+        thin = pd.DataFrame({"A": 1000.0, "B": 1000.0}, index=dates)
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix",
+                            lambda syms, start=None, end=None, price_table=None: thin)
+
+        low = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          adv_participation_coeff=10.0, adv_window=5)
+        high = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                           adv_participation_coeff=100.0, adv_window=5)
+        assert high.metrics["total_return_pct"] < low.metrics["total_return_pct"]
+
+    def test_params_recorded_only_when_enabled(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch)
+        import event_backtest as eb
+        thin = pd.DataFrame({"A": 1000.0, "B": 1000.0}, index=dates)
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix",
+                            lambda syms, start=None, end=None, price_table=None: thin)
+
+        res = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          adv_participation_coeff=25.0, aum=500_000.0, adv_window=10)
+        assert res.params["adv_participation_coeff"] == 25.0
+        assert res.params["aum"] == 500_000.0
+        assert res.params["adv_window"] == 10

@@ -126,6 +126,49 @@ def _max_drawdown(equity: pd.Series) -> float:
     return float((equity / peak - 1.0).min())
 
 
+def _adv_participation_cost(weights: pd.DataFrame, aum: float, coeff: float,
+                            adv_window: int, symbols, start, end,
+                            price_table: "str | None") -> pd.Series:
+    """
+    Per-symbol participation-based sqrt market-impact cost, as a fraction of
+    `aum` per day: for each symbol traded on a rebalance day, cost_rate =
+    coeff/1e4 * sqrt(dollar_traded / trailing_adv), charged on that symbol's
+    own dollar amount traded, summed across symbols.
+
+    The SAME model event_backtest.scenario()'s adv_impact_coeff already
+    uses (a real function of a symbol's own liquidity) -- reused here, not
+    reinvented -- applied to REBALANCE-DAY WEIGHT CHANGES instead of
+    per-event notional. Deliberately a DIFFERENT parameter from this
+    engine's existing adv_impact_coeff (a function of PORTFOLIO-level
+    turnover with no per-symbol liquidity concept -- see evaluation/
+    execution.py's docstring on why backtest.py's and event_backtest.py's
+    two meanings of "sqrt_impact" are kept apart). Naming this
+    adv_participation_coeff avoids repeating that exact ambiguity a third
+    way.
+
+    `aum` translates a fractional weight CHANGE into a dollar amount traded
+    -- this engine has no other concept of portfolio dollar size (it works
+    entirely in returns/weights), so aum is meaningful ONLY for this cost
+    term, nowhere else in backtest().
+
+    ADV is trailing `adv_window` days, shifted one day -- today's
+    participation is measured against liquidity known BEFORE today's own
+    (not-yet-observed) volume, the same look-ahead-safety convention
+    event_backtest.load_dollar_volume()'s callers already use.
+    """
+    import event_backtest as eb
+
+    dollar_change = weights.diff().abs() * aum
+    volumes = eb.load_dollar_volume_matrix(list(symbols), start=start, end=end,
+                                           price_table=price_table)
+    volumes = volumes.reindex(index=weights.index, columns=weights.columns)
+    adv = volumes.rolling(adv_window, min_periods=adv_window).mean().shift(1)
+    participation = (dollar_change / adv).replace([np.inf, -np.inf], np.nan)
+    cost_rate = (coeff / 1e4) * np.sqrt(participation.clip(lower=0))
+    cost_dollars = (cost_rate * dollar_change).fillna(0.0).sum(axis=1)
+    return cost_dollars / aum
+
+
 def backtest(
     signal: pd.DataFrame,
     score: str = "composite",
@@ -140,6 +183,9 @@ def backtest(
     borrow_fee_bps: float = 0.0,
     slippage_model: "str | None" = None,
     adv_impact_coeff: float = 0.1,
+    adv_participation_coeff: "float | None" = None,
+    aum: float = 1_000_000.0,
+    adv_window: int = 20,
     vol_target: "float | None" = None,
     max_weight: "float | None" = None,
     max_drawdown_stop: "float | None" = None,
@@ -147,6 +193,12 @@ def backtest(
     """
     Backtest a cross-sectional signal with advanced execution costs, risk controls,
     and performance metrics.
+
+    adv_participation_coeff (opt-in, default None -- no behavior change unless
+    set): a real per-symbol ADV market-impact cost, on top of (not instead of)
+    the existing portfolio-turnover-based adv_impact_coeff/slippage_model. See
+    _adv_participation_cost()'s docstring for the model and why it's a
+    separate parameter. `aum`/`adv_window` are only meaningful when this is set.
     """
     if not {"symbol", "date", score}.issubset(signal.columns):
         raise ValueError(f"signal must have columns symbol, date, '{score}'")
@@ -206,6 +258,10 @@ def backtest(
         slippage_model=slippage_model, impact_coeff=adv_impact_coeff,
     )
     costs = ev_execution.daily_cost(cost_model, turnover, short_exposure, ann=_ANN)
+    if adv_participation_coeff is not None and adv_participation_coeff > 0:
+        costs = costs + _adv_participation_cost(
+            weights, aum, adv_participation_coeff, adv_window, symbols,
+            start, end, pt)
 
     net = gross - costs
 
@@ -238,6 +294,9 @@ def backtest(
         "rebalance": rebalance, "long_short": long_short, "cost_bps": cost_bps,
         "spread_bps": spread_bps, "borrow_fee_bps": borrow_fee_bps,
         "slippage_model": slippage_model or "none",
+        "adv_participation_coeff": adv_participation_coeff,
+        "aum": aum if adv_participation_coeff else None,
+        "adv_window": adv_window if adv_participation_coeff else None,
         "vol_target": vol_target, "max_weight": max_weight,
         "max_drawdown_stop": max_drawdown_stop,
         "n_symbols": len(symbols), "n_days": len(net),
