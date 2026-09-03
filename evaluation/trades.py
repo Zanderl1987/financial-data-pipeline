@@ -8,6 +8,8 @@ time; realized trades only -- a position with no qualifying exit before the
 data ends is dropped and blocks later entries for that symbol.
 """
 
+import heapq
+
 import numpy as np
 import pandas as pd
 
@@ -119,47 +121,46 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
     return None, None
 
 
-def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit,
-                    symbol: str, notional: float, *,
-                    config=None) -> "list[dict]":
+def _next_candidate(entry_positions, cursor: int, close: pd.Series,
+                    long_exit, short_exit, symbol: str, notional: float,
+                    cfg, n: int) -> "dict | None":
     """
-    Low-level engine on flag arrays (Tier-2 permutation re-enters here).
+    First eligible candidate trade for one symbol, searching entry signals
+    starting at `cursor` (an index into the signal array, not a date). The
+    resumable single-trade-at-a-time core both `simulate_symbol` (eager,
+    whole-list) and `_simulate_single_pass` (lazy, portfolio-aware) build on
+    -- one implementation of the entry/exit math, two different callers
+    deciding when to resume it.
 
-    `config` is keyword-only and appended, never inserted: stats.permutation_trades
-    calls this with 8 positional arguments and strategies/stage3.py binds
-    `notional` by name through inspect.signature. Both must keep working.
-    config=None means ExecutionConfig LEGACY, which reproduces the pre-Step-B
-    behavior exactly -- no costs, no stops, no holding cap.
+    Returns None when this symbol has no further candidate EVER from this
+    point on: entry signals exhausted, or an entry found with no valid
+    completing exit before the data ends. The latter matches
+    simulate_symbol's original next_free=n case: an unresolved (never
+    closes) position is treated as permanently occupying the symbol,
+    identical in the single-pass engine as in the eager one -- this is a
+    deliberate, narrow scope decision (see _simulate_single_pass's
+    docstring), not an oversight.
 
-    Short trades additionally accrue cfg.costs.borrow_fee_bps over their actual
-    holding period (see the borrow-fee comment below) -- previously only
-    backtest.py's weight-matrix engine charged this; this engine had a real gap
-    where a short strategy's cost model silently excluded borrow fees.
+    Returns {"sig_i", "exit_i", "row"} on success. `sig_i`/`exit_i` are the
+    cursors a caller resumes from: `exit_i + 1` if this candidate is taken,
+    `sig_i + 1` if it is rejected (the fix this function exists to enable --
+    see _simulate_single_pass).
     """
-    cfg = ev_execution.resolve(config)
     risk = cfg.risk
     rate = ev_execution.round_trip_rate(cfg.costs)
     has_risk = any(getattr(risk, f) is not None
                    for f in ("stop_loss_pct", "take_profit_pct",
                              "vol_stop_mult", "max_holding_days"))
 
-    close = pd.Series(np.asarray(close, dtype=float), index=index)
-    n = len(close)
-    rows = []
-    entry_positions = sorted(
-        [(i, "long") for i in np.flatnonzero(long_entry)] +
-        [(i, "short") for i in np.flatnonzero(short_entry)]
-    )
-    next_free = 0
     for sig_i, side in entry_positions:
-        if sig_i < next_free:
-            continue                        # already in a position
+        if sig_i < cursor:
+            continue
         entry_i = sig_i + 1                 # ENGINE: next-close execution
         if entry_i >= n:
-            continue
+            return None
         entry_price = close.iloc[entry_i]
         if not np.isfinite(entry_price) or entry_price <= 0:
-            continue
+            continue                        # bad price: try the next signal
         exit_cond = long_exit if side == "long" else short_exit
         if has_risk:
             exit_sig_i, reason = _find_exit(close, exit_cond, entry_i,
@@ -171,16 +172,13 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
                     exit_sig_i, reason = j, "rule"
                     break
         if exit_sig_i is None:
-            next_free = n                   # still open: blocks further entries
-            continue
+            return None                     # still open: blocks the symbol
         exit_i = exit_sig_i + 1
         if exit_i >= n:
-            next_free = n
-            continue
+            return None
         exit_price = close.iloc[exit_i]
         if not np.isfinite(exit_price) or exit_price <= 0:
-            next_free = exit_i + 1
-            continue
+            return None
         pct = (exit_price / entry_price - 1.0) if side == "long" else \
               (1.0 - exit_price / entry_price)
         pnl_dollars = round(notional * pct, 2)
@@ -202,11 +200,11 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
             # the campaign's pnl_p. See the W1 spec.
             pnl_dollars = round(pnl_dollars - notional * total_rate, 2)
             pnl_pct = round(pnl_pct - 100 * total_rate, 3)
-        rows.append({
+        row = {
             "symbol": symbol, "side": side,
-            "entry_signal_date": index[sig_i], "entry_date": index[entry_i],
+            "entry_signal_date": close.index[sig_i], "entry_date": close.index[entry_i],
             "entry_price": float(entry_price),
-            "exit_signal_date": index[exit_sig_i], "exit_date": index[exit_i],
+            "exit_signal_date": close.index[exit_sig_i], "exit_date": close.index[exit_i],
             "exit_price": float(exit_price), "days_held": int(exit_i - entry_i),
             "pnl_dollars": pnl_dollars,
             "pnl_pct": pnl_pct,
@@ -217,27 +215,109 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
             # mean-absolute-close-change calculation _find_exit uses for a
             # vol stop, mult=1.0 -> a plain (unscaled) trailing vol reading.
             "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0),
-        })
-        next_free = exit_i + 1
+        }
+        return {"sig_i": sig_i, "exit_i": exit_i, "row": row}
+    return None
+
+
+def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit,
+                    symbol: str, notional: float, *,
+                    config=None) -> "list[dict]":
+    """
+    Low-level engine on flag arrays (Tier-2 permutation re-enters here).
+
+    `config` is keyword-only and appended, never inserted: stats.permutation_trades
+    calls this with 8 positional arguments and strategies/stage3.py binds
+    `notional` by name through inspect.signature. Both must keep working.
+    config=None means ExecutionConfig LEGACY, which reproduces the pre-Step-B
+    behavior exactly -- no costs, no stops, no holding cap.
+
+    Short trades additionally accrue cfg.costs.borrow_fee_bps over their actual
+    holding period (see the borrow-fee comment in _next_candidate) -- previously
+    only backtest.py's weight-matrix engine charged this; this engine had a
+    real gap where a short strategy's cost model silently excluded borrow fees.
+
+    Every candidate found is unconditionally taken (there is no portfolio
+    constraint at this level) -- built on the same _next_candidate core the
+    portfolio-aware single-pass engine (_simulate_single_pass) uses, just
+    driven by an unconditional "always admit, resume at exit_i + 1" loop
+    instead of an admission decision. See docs/superpowers/specs/2026-09-03-
+    single-pass-portfolio-engine-design.md.
+    """
+    cfg = ev_execution.resolve(config)
+    close = pd.Series(np.asarray(close, dtype=float), index=index)
+    n = len(close)
+    entry_positions = sorted(
+        [(i, "long") for i in np.flatnonzero(long_entry)] +
+        [(i, "short") for i in np.flatnonzero(short_entry)]
+    )
+    rows = []
+    cursor = 0
+    while True:
+        cand = _next_candidate(entry_positions, cursor, close, long_exit,
+                               short_exit, symbol, notional, cfg, n)
+        if cand is None:
+            break
+        rows.append(cand["row"])
+        cursor = cand["exit_i"] + 1
     return rows
+
+
+def _size_candidate(row: dict, sizing, equity: float) -> "float | None":
+    """
+    Notional to commit to one candidate under `sizing`, given current
+    portfolio `equity`. Returns None when the candidate cannot be sized at
+    all (no reliable trailing-vol estimate for inverse_vol, or a
+    non-positive size) -- a rejection, not a fabricated guess. Shared by
+    both the legacy filter-only _portfolio_pass and the single-pass engine
+    so sizing math has exactly one implementation.
+    """
+    if sizing.mode == "fixed_fraction":
+        size = sizing.fraction * equity
+    elif sizing.mode == "inverse_vol":
+        vol = row.get("entry_vol_pct")
+        # No reliable trailing-vol estimate (insufficient history before
+        # this trade's entry) -> reject rather than guess a size; a
+        # fabricated vol reading would silently over- or under-size a
+        # real position.
+        if vol is None or not np.isfinite(vol) or vol <= 0:
+            return None
+        size = sizing.fraction * equity * (sizing.vol_target_pct / vol)
+    else:
+        size = sizing.notional
+    return size if size > 0 else None
+
+
+def _admit_row(row: dict, size: float, sizing) -> dict:
+    """Finalize an admitted candidate: re-denominate pnl_dollars onto the
+    committed size for fractional/inverse-vol sizing (pnl_pct is already
+    net of costs, unaffected). fixed_notional rows pass through unchanged."""
+    out = dict(row)
+    if sizing.mode in ("fixed_fraction", "inverse_vol"):
+        out["pnl_dollars"] = round(size * out["pnl_pct"] / 100.0, 2)
+    return out
 
 
 def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
     """
-    Admit candidate trades in chronological entry order subject to a capital
-    budget, a concurrency cap, and fractional/inverse-vol sizing.
+    SUPERSEDED by _simulate_single_pass -- retained only as a historical
+    reference and regression marker (see
+    tests/test_execution_step_b.py::TestSinglePassPortfolio's comparison
+    against this function's known-buggy output), not called by simulate()
+    or permutation_trades() any more.
 
-    APPROXIMATION, stated plainly because it is easy to over-read: this filters
-    candidates that simulate_symbol already produced per symbol. The per-symbol
-    "one position at a time, an unclosed position blocks later entries" rule
-    resolves FIRST. A trade rejected here for lack of capital therefore does not
-    free its symbol to take some different trade it would have taken in a true
-    single-pass portfolio simulation. This captures the first-order effect of a
-    capital constraint, not a full portfolio engine. mode="inverse_vol" improves
-    the SIZING of admitted trades (real risk-parity-style weighting instead of
-    one flat fraction for every name) but does not touch this admission-order
-    limitation -- that would need restructuring simulate_symbol/_portfolio_pass
-    into one interleaved pass and is a separate, larger piece of work.
+    Admits candidate trades in chronological entry order subject to a
+    capital budget, a concurrency cap, and fractional/inverse-vol sizing.
+
+    APPROXIMATION, stated plainly because it was easy to over-read: this
+    filters candidates that simulate_symbol already produced per symbol,
+    eagerly, assuming every one of them would be taken. A trade rejected
+    here for lack of capital does NOT free its symbol to take some
+    different trade it would have taken in a true single-pass portfolio
+    simulation, because simulate_symbol had already committed that symbol's
+    candidate list before this function ever ran. See
+    docs/superpowers/specs/2026-09-03-single-pass-portfolio-engine-design.md
+    for the full bug mechanism and the fix.
     """
     limits, sizing = cfg.limits, cfg.sizing
     capital = limits.capital
@@ -262,35 +342,120 @@ def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
         if limits.max_concurrent is not None and len(open_positions) >= limits.max_concurrent:
             continue
 
-        if sizing.mode == "fixed_fraction":
-            size = sizing.fraction * equity
-            if size <= 0:
-                continue
-        elif sizing.mode == "inverse_vol":
-            vol = r.get("entry_vol_pct")
-            # No reliable trailing-vol estimate (insufficient history before
-            # this trade's entry) -> skip rather than guess a size; a
-            # fabricated vol reading would silently over- or under-size a
-            # real position.
-            if vol is None or not np.isfinite(vol) or vol <= 0:
-                continue
-            size = sizing.fraction * equity * (sizing.vol_target_pct / vol)
-            if size <= 0:
-                continue
-        else:
-            size = sizing.notional
+        size = _size_candidate(r, sizing, equity)
+        if size is None:
+            continue
 
         if capital is not None:
             committed_now = sum(c for _, c, _ in open_positions)
             if committed_now + size > capital + 1e-9:
                 continue
 
-        row = dict(r)
-        if sizing.mode in ("fixed_fraction", "inverse_vol"):
-            # pnl_pct is already net of costs; re-denominate onto the new size.
-            row["pnl_dollars"] = round(size * row["pnl_pct"] / 100.0, 2)
+        row = _admit_row(r, size, sizing)
         admitted.append(row)
         open_positions.append((row["exit_date"], size, row["pnl_dollars"]))
+
+    return admitted
+
+
+def _push_next(heap: list, sym: str, state: dict, cursor: int,
+              notional: float, cfg) -> None:
+    """Generate one more candidate for `sym` starting at `cursor` and push
+    it onto the shared heap, keyed (entry_date, symbol) -- symbol breaks
+    ties because at most one candidate per symbol is ever heap-resident at
+    once, so the tuple comparison never needs to order the candidate dicts
+    themselves. Pushes nothing when the symbol has no further candidate."""
+    cand = _next_candidate(state["entry_positions"], cursor, state["close"],
+                           state["long_exit"], state["short_exit"], sym,
+                           notional, cfg, state["n"])
+    if cand is not None:
+        heapq.heappush(heap, (cand["row"]["entry_date"], sym, cand))
+
+
+def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dict]":
+    """
+    True single-pass portfolio simulation: candidates are generated ONE AT A
+    TIME per symbol (via _next_candidate) and merged across symbols in
+    chronological (entry_date, symbol) order through a min-heap, with
+    admission (concurrency, sizing, capital) decided at the moment each
+    candidate is generated -- not after a whole per-symbol candidate list
+    has already been committed to.
+
+    This closes the admission-order limitation _portfolio_pass's own
+    docstring names: a REJECTED candidate resumes its symbol's search right
+    after the rejected candidate's own entry SIGNAL (`sig_i + 1`), not its
+    exit -- so a different entry that fired before the rejected trade's
+    would-be exit gets a real chance to be generated and admitted. An
+    ADMITTED candidate resumes at `exit_i + 1`, same as today.
+
+    Scope, deliberately narrow (see docs/superpowers/specs/2026-09-03-
+    single-pass-portfolio-engine-design.md): a candidate whose entry has NO
+    valid completing exit (position never closes before the data ends) is
+    still treated as terminal for that symbol regardless of whether it
+    would have been admitted or rejected -- identical to simulate_symbol's
+    existing behavior for the unconstrained case. Modeling a perpetually-
+    open position's capital consumption is a separate question this spec
+    does not take on.
+
+    `symbol_flags[sym] = (index, close, long_entry, long_exit, short_entry,
+    short_exit)` -- pre-built per symbol so this is reusable by both
+    simulate() (flags from the rule) and stats.permutation_trades()
+    (flags from a permutation), the null must face the same admission-order
+    fix the observed run does or the p-value comparison is invalid.
+    """
+    limits, sizing = cfg.limits, cfg.sizing
+    capital = limits.capital
+    if sizing.mode in ("fixed_fraction", "inverse_vol") and capital is None:
+        raise ValueError(f"sizing.mode={sizing.mode!r} requires limits.capital")
+
+    symbols = {}
+    heap = []
+    for sym, (index, close_raw, long_entry, long_exit, short_entry, short_exit) \
+            in symbol_flags.items():
+        close = pd.Series(np.asarray(close_raw, dtype=float), index=index)
+        n = len(close)
+        entry_positions = sorted(
+            [(i, "long") for i in np.flatnonzero(long_entry)] +
+            [(i, "short") for i in np.flatnonzero(short_entry)]
+        )
+        symbols[sym] = {"close": close, "long_exit": long_exit,
+                        "short_exit": short_exit,
+                        "entry_positions": entry_positions, "n": n}
+        _push_next(heap, sym, symbols[sym], 0, notional, cfg)
+
+    equity = capital if capital is not None else 0.0
+    open_positions = []          # (exit_date, committed, pnl_dollars)
+    admitted = []
+
+    while heap:
+        _, sym, cand = heapq.heappop(heap)
+        row = cand["row"]
+
+        still_open = []
+        for exit_date, committed, pnl in open_positions:
+            if exit_date <= row["entry_date"]:
+                equity += pnl
+            else:
+                still_open.append((exit_date, committed, pnl))
+        open_positions = still_open
+
+        admit = not (limits.max_concurrent is not None
+                    and len(open_positions) >= limits.max_concurrent)
+        size = _size_candidate(row, sizing, equity) if admit else None
+        admit = admit and size is not None
+        if admit and capital is not None:
+            committed_now = sum(c for _, c, _ in open_positions)
+            admit = committed_now + size <= capital + 1e-9
+
+        if admit:
+            out_row = _admit_row(row, size, sizing)
+            admitted.append(out_row)
+            open_positions.append((out_row["exit_date"], size, out_row["pnl_dollars"]))
+            next_cursor = cand["exit_i"] + 1
+        else:
+            next_cursor = cand["sig_i"] + 1     # THE fix: resume at entry, not exit
+
+        _push_next(heap, sym, symbols[sym], next_cursor, notional, cfg)
 
     return admitted
 
@@ -300,25 +465,36 @@ def simulate(rule, cache: dict, notional: "float | None" = None,
     """
     One realized-trade row per closed position across all cache symbols.
 
-    With config=None (LEGACY) the portfolio pass is SKIPPED ENTIRELY rather than
-    run with no-op limits, so there is no opportunity for float drift against
-    pre-Step-B results.
+    With config=None (LEGACY) the portfolio machinery is SKIPPED ENTIRELY
+    rather than run with no-op limits, so there is no opportunity for float
+    drift against pre-Step-B results -- and this includes every unconstrained
+    caller regardless of config, since needs_portfolio below is False unless
+    a caller explicitly opts into PortfolioLimits or non-fixed_notional
+    Sizing (the live TV catalog campaign never does; see the design spec).
     """
     cfg = ev_execution.resolve(config)
     notional = rule.notional if notional is None else notional
-    rows = []
-    for sym, df in cache.items():
-        if df.empty or "close" not in df.columns:
-            continue
-        le, lx, se, sx = rule_flags(rule, df)
-        rows.extend(simulate_symbol(df.index, df["close"], le, lx, se, sx,
-                                    sym, notional, config=config))
 
     needs_portfolio = (cfg.limits.capital is not None
                        or cfg.limits.max_concurrent is not None
                        or cfg.sizing.mode != "fixed_notional")
-    if needs_portfolio and rows:
-        rows = _portfolio_pass(rows, cfg)
+
+    if needs_portfolio:
+        symbol_flags = {}
+        for sym, df in cache.items():
+            if df.empty or "close" not in df.columns:
+                continue
+            le, lx, se, sx = rule_flags(rule, df)
+            symbol_flags[sym] = (df.index, df["close"], le, lx, se, sx)
+        rows = _simulate_single_pass(symbol_flags, notional, cfg) if symbol_flags else []
+    else:
+        rows = []
+        for sym, df in cache.items():
+            if df.empty or "close" not in df.columns:
+                continue
+            le, lx, se, sx = rule_flags(rule, df)
+            rows.extend(simulate_symbol(df.index, df["close"], le, lx, se, sx,
+                                        sym, notional, config=config))
 
     return pd.DataFrame(rows, columns=TRADE_COLS)
 

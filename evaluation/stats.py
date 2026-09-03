@@ -287,11 +287,11 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
 
     if _perm_needs_portfolio:
         # Configs that budget capital or cap concurrency couple symbols (the
-        # portfolio pass), so the classic single-process loop runs unchanged
+        # portfolio engine), so the classic single-process loop runs unchanged
         # -- same sequential stream, same DataFrame aggregation.
         pnl_ge = wr_ge = n_done = 0
         for _ in range(n_perm):
-            rows = []
+            symbol_flags = {}
             for sym, (index, close, (le, lx, se, sx)) in params.items():
                 n = len(index)
                 ple = np.zeros(n, dtype=bool)
@@ -302,13 +302,13 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
                 k = int(se.sum())
                 if k:
                     pse[rng.choice(n, size=k, replace=False)] = True
-                rows.extend(tr.simulate_symbol(index, close, ple, lx, pse, sx,
-                                               sym, rule.notional, config=config))
-            if rows:
-                # The null must face the SAME capital budget and concurrency cap
-                # as the observed run. Skipping this would let the null take
-                # every trade while the strategy is rationed.
-                rows = tr._portfolio_pass(rows, _cfg)
+                symbol_flags[sym] = (index, close, ple, lx, pse, sx)
+            # The null must face the SAME capital budget, concurrency cap, AND
+            # admission-order behavior as the observed run (tr.simulate() when
+            # needs_portfolio) -- both go through _simulate_single_pass, or the
+            # null and the observed run aren't a fair comparison. See
+            # docs/superpowers/specs/2026-09-03-single-pass-portfolio-engine-design.md.
+            rows = tr._simulate_single_pass(symbol_flags, rule.notional, _cfg)
             perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
             if perm.empty:
                 continue

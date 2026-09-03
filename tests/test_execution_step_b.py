@@ -495,3 +495,164 @@ class TestSignatureCompatibility:
         bound = sig.bind(None, None, None, None, None, None, "TEST", 5_000.0)
         bound.apply_defaults()
         assert bound.arguments["notional"] == 5_000.0
+
+
+class TestSinglePassPortfolio:
+    """
+    docs/superpowers/specs/2026-09-03-single-pass-portfolio-engine-design.md
+    -- the admission-order fix. _portfolio_pass (the OLD, filter-only pass,
+    retained only as a regression marker) generates candidates eagerly per
+    symbol BEFORE knowing whether they'll be admitted, so a rejected
+    candidate's phantom occupation blocks a different, later entry signal
+    on the same symbol that a true single-pass sim would have considered.
+    _simulate_single_pass (used by tr.simulate() and stats.permutation_trades()
+    whenever needs_portfolio) fixes this by generating one candidate at a
+    time and resuming a REJECTED symbol's search right after the rejected
+    candidate's own entry signal, not its exit.
+    """
+
+    def _motivating_case(self):
+        # BBB: enters day 1, exits day 3 -- occupies the single concurrent
+        # slot first (its entry_date sorts before AAA's first candidate).
+        # AAA: signals at day 2 (entry) and day 6 (entry), both exiting on
+        # the first shared exit signal at day 9. Under max_concurrent=1:
+        #   - AAA's day-2 candidate (entry idx[2]) is evaluated while BBB
+        #     (open idx[1]..idx[3]) still occupies the slot -> REJECTED.
+        #   - OLD engine: simulate_symbol already consumed AAA's day-6
+        #     signal generating that one candidate ("already in position"),
+        #     so AAA never gets a second candidate. AAA contributes 0 trades.
+        #   - NEW engine: rejection resumes AAA's search at day-6's signal,
+        #     which is admitted once BBB has released (idx[3] <= idx[6]).
+        #     AAA contributes exactly 1 trade: entry idx[6], exit idx[9].
+        n = 15
+        a_close = [100.0] * n
+        a_entries = [False] * n
+        a_entries[1] = True     # sig_i=1 -> entry_i=2
+        a_entries[5] = True     # sig_i=5 -> entry_i=6
+        a_exits = [False] * n
+        a_exits[8] = True       # sig_j=8 -> exit_i=9, first exit either entry finds
+        aaa = _frame(a_close, a_entries, a_exits)
+
+        b_close = [100.0] * n
+        b_entries = [False] * n
+        b_entries[0] = True     # sig_i=0 -> entry_i=1
+        b_exits = [False] * n
+        b_exits[2] = True       # sig_j=2 -> exit_i=3
+        bbb = _frame(b_close, b_entries, b_exits)
+
+        cache = {"AAA": aaa, "BBB": bbb}
+        cfg = ex.ExecutionConfig(limits=ex.PortfolioLimits(max_concurrent=1))
+        return cache, cfg
+
+    def test_old_engine_shows_the_bug(self):
+        """Regression marker: documents what _portfolio_pass actually does,
+        so the fix below is legible as a fix and not just a different number."""
+        cache, cfg = self._motivating_case()
+        rows = []
+        for sym, df in cache.items():
+            le, lx, se, sx = tr.rule_flags(_rule(), df)
+            rows.extend(tr.simulate_symbol(df.index, df["close"], le, lx, se, sx,
+                                           sym, 10_000.0))
+        admitted = tr._portfolio_pass(rows, cfg)
+        assert [r["symbol"] for r in admitted] == ["BBB"]
+
+    def test_new_engine_fixes_it(self):
+        cache, cfg = self._motivating_case()
+        out = tr.simulate(_rule(), cache, config=cfg)
+        assert sorted(out["symbol"]) == ["AAA", "BBB"]
+        aaa = out[out["symbol"] == "AAA"].iloc[0]
+        assert aaa["entry_date"] == cache["AAA"].index[6]
+        assert aaa["exit_date"] == cache["AAA"].index[9]
+
+    def test_no_rejections_matches_old_engine_exactly(self):
+        """When nothing is ever rejected, the new lazy engine must produce
+        IDENTICAL output to the old filter-only pass -- the two only differ
+        in what happens after a rejection."""
+        rng = np.random.default_rng(11)
+        n = 60
+        cache = {}
+        for s in ("AAA", "BBB", "CCC"):
+            px = 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, n)))
+            cache[s] = _frame(px, rng.random(n) < 0.15, rng.random(n) < 0.2)
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="fixed_fraction", fraction=0.05),
+            limits=ex.PortfolioLimits(capital=10_000_000.0))   # never binds
+
+        rows = []
+        for sym, df in cache.items():
+            le, lx, se, sx = tr.rule_flags(_rule(), df)
+            rows.extend(tr.simulate_symbol(df.index, df["close"], le, lx, se, sx,
+                                           sym, 10_000.0))
+        old = pd.DataFrame(tr._portfolio_pass(rows, cfg), columns=tr.TRADE_COLS)
+        new = tr.simulate(_rule(), cache, config=cfg)
+        pd.testing.assert_frame_equal(
+            old.reset_index(drop=True), new.reset_index(drop=True))
+
+    def test_resumed_candidate_still_sizes_off_current_equity(self):
+        """A candidate generated AFTER a rejection (the new code path) must
+        size using the ordinary formula -- entry_vol_pct and the equity it
+        sizes against are untouched by this rewrite. Uses a real price move
+        on AAA's resumed trade so the implied committed size is checkable,
+        not just "a trade exists"."""
+        n = 15
+        a_close = [100.0] * 9 + [110.0] * (n - 9)   # +10% held across idx[6]->idx[9]
+        a_entries = [False] * n
+        a_entries[1] = True
+        a_entries[5] = True
+        a_exits = [False] * n
+        a_exits[8] = True
+        aaa = _frame(a_close, a_entries, a_exits)
+
+        b_close = [100.0] * n
+        b_entries = [False] * n
+        b_entries[0] = True
+        b_exits = [False] * n
+        b_exits[2] = True
+        bbb = _frame(b_close, b_entries, b_exits)
+
+        cache = {"AAA": aaa, "BBB": bbb}
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="fixed_fraction", fraction=0.5),
+            limits=ex.PortfolioLimits(capital=20_000.0, max_concurrent=1))
+        out = tr.simulate(_rule(), cache, config=cfg).set_index("symbol")
+
+        assert "AAA" in out.index
+        # BBB (10,000 committed, sized off the initial 20,000 equity)
+        # releases before AAA's resumed candidate enters, so AAA also sizes
+        # off the full 20,000 * 0.5 = 10,000 -- the ordinary formula, not a
+        # smaller number left over from some stale partial-equity state.
+        implied_size = out.loc["AAA", "pnl_dollars"] / (out.loc["AAA", "pnl_pct"] / 100.0)
+        assert implied_size == pytest.approx(10_000.0, rel=1e-6)
+
+    def test_permutation_null_uses_the_new_engine_too(self):
+        """stats.permutation_trades' portfolio-constrained path must use the
+        same fixed engine as tr.simulate(), or the null and the observed run
+        aren't a fair comparison (see the design spec)."""
+        rng = np.random.default_rng(12)
+        n = 80
+        cache = {}
+        for s in ("AAA", "BBB", "CCC"):
+            px = 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.011, n)))
+            cache[s] = _frame(px, rng.random(n) < 0.12, rng.random(n) < 0.18)
+        cfg = ex.ExecutionConfig(limits=ex.PortfolioLimits(max_concurrent=1))
+
+        a = ev_stats.permutation_trades(_rule(), cache, n_perm=25, seed=4, config=cfg)
+        b = ev_stats.permutation_trades(_rule(), cache, n_perm=25, seed=4, config=cfg)
+        assert a == b     # deterministic under a fixed seed
+
+    def test_permutation_null_no_longer_calls_the_old_pass(self, monkeypatch):
+        called = {"hit": False}
+        orig = tr._portfolio_pass
+
+        def spy(*a, **k):
+            called["hit"] = True
+            return orig(*a, **k)
+
+        monkeypatch.setattr(tr, "_portfolio_pass", spy)
+        rng = np.random.default_rng(13)
+        n = 50
+        cache = {"AAA": _frame(100 * np.exp(np.cumsum(rng.normal(0, 0.01, n))),
+                               rng.random(n) < 0.15, rng.random(n) < 0.2)}
+        cfg = ex.ExecutionConfig(limits=ex.PortfolioLimits(max_concurrent=1))
+        ev_stats.permutation_trades(_rule(), cache, n_perm=10, seed=5, config=cfg)
+        assert called["hit"] is False

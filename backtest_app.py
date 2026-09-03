@@ -12,6 +12,15 @@ robustness diagnostics, and a 2D/3D parameter-surface toggle. Standing
 constraint unchanged: DIAGNOSIS ONLY -- nothing here writes to the registry
 or feeds the pre-registered campaign endpoints.
 
+2026-09-03: setting a capital budget or concurrency cap in the Execution
+Config panel now runs through the single-pass portfolio engine
+(evaluation/trades.py, docs/superpowers/specs/2026-09-03-single-pass-
+portfolio-engine-design.md) instead of the old admission-filter pass -- a
+trade rejected for capital can free its symbol for a different trade the
+old pass would have silently dropped. Numbers under those two limits can
+differ from what this dashboard showed before that date; every other
+config (including the default, no limits set) is unaffected.
+
 Usage
 -----
   C:\ProgramData\anaconda3\python.exe backtest_app.py
