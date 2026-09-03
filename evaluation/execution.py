@@ -49,7 +49,12 @@ class CostModel:
     """
     commission_bps : per side.
     spread_bps     : the FULL quoted spread; half of it is charged per side.
-    borrow_fee_bps : annualized, accrued daily on short exposure (weight engine).
+    borrow_fee_bps : annualized. Accrued daily on short exposure in the
+                     weight-matrix engine (daily_cost(), below); accrued over
+                     the actual holding period per short trade in the discrete
+                     trade simulator (trades.simulate_symbol) -- same rate,
+                     two different accrual shapes since one engine has a daily
+                     weight series and the other has variable-length trades.
     impact_model   : None | "sqrt" | "flat" -- see module docstring.
     impact_coeff   : for "sqrt", backtest.py's adv_impact_coeff (its own default
                      is 0.1, NOT 0.0 -- callers must pass that through);

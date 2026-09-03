@@ -193,6 +193,42 @@ class TestCosts:
         df = _frame(closes, [True, False, False, False], [False, False, True, False])
         assert _sim(df, ex.TV_CAMPAIGN)[0]["pnl_dollars"] < _sim(df)[0]["pnl_dollars"]
 
+    def test_borrow_fee_accrues_on_short_holding_period(self):
+        # short entry day 0 -> executes day 1 @ 100; exit signal day 3 ->
+        # executes day 4 @ 100 (flat price isolates the borrow fee from
+        # price P&L). days_held = 4 - 1 = 3.
+        closes = [100, 100, 100, 100, 100, 100]
+        cfg = ex.ExecutionConfig(costs=ex.CostModel(borrow_fee_bps=252 * 100))
+        rows = tr.simulate_symbol(
+            pd.bdate_range("2024-01-01", periods=6), pd.Series(closes, dtype=float),
+            np.zeros(6, bool), np.zeros(6, bool),
+            np.array([True] + [False] * 5),
+            np.array([False, False, False, True, False, False]),
+            "TEST", 10_000.0, config=cfg)
+        r = rows[0]
+        assert r["days_held"] == 3
+        # borrow_fee_bps=252*100 -> 2520%/yr -> 1%/trading day; 3 days -> 3%
+        # of notional, i.e. pnl_pct == -3.0 with flat price.
+        assert r["pnl_pct"] == pytest.approx(-3.0)
+        assert r["pnl_dollars"] == pytest.approx(-300.0)
+
+    def test_borrow_fee_does_not_apply_to_longs(self):
+        closes = [100, 100, 100, 100, 100, 100]
+        cfg = ex.ExecutionConfig(costs=ex.CostModel(borrow_fee_bps=252 * 100))
+        rows = _sim(_frame(closes, [True] + [False] * 5,
+                           [False, False, False, True, False, False]), cfg)
+        assert rows[0]["pnl_pct"] == 0.0
+
+    def test_zero_borrow_fee_is_a_no_op(self):
+        closes = [100, 100, 100, 100, 100, 100]
+        rows_default = tr.simulate_symbol(
+            pd.bdate_range("2024-01-01", periods=6), pd.Series(closes, dtype=float),
+            np.zeros(6, bool), np.zeros(6, bool),
+            np.array([True] + [False] * 5),
+            np.array([False, False, False, True, False, False]),
+            "TEST", 10_000.0, config=None)
+        assert rows_default[0]["pnl_pct"] == 0.0
+
 
 class TestPortfolioLimits:
     def _two_symbol_cache(self):

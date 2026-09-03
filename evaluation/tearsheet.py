@@ -373,6 +373,36 @@ def headline_metrics(returns) -> dict:
             **({"headline_reason": "zero return variance"} if degenerate else {})}
 
 
+def tail_risk_metrics(returns, alpha: float = 0.95) -> dict:
+    """
+    Historical (empirical) VaR and CVaR/Expected Shortfall at `alpha`.
+
+    Empirical, not parametric -- no normal-distribution assumption, matching
+    this module's house rule elsewhere. VaR is the alpha-quantile daily loss
+    (e.g. alpha=0.95: the loss not expected to be exceeded on 95% of days).
+    CVaR is the mean loss ON the tail beyond VaR -- strictly worse in
+    magnitude, and the number that actually matters: two return series can
+    share a VaR while one has a much fatter tail past it, and VaR alone can't
+    tell them apart. Both reported as positive percentages (a loss size, not
+    a signed return).
+
+    Needs at least 20 days so alpha=0.95 has a non-empty tail to average
+    (0.05 * 20 = 1 expected observation); below that, quantile estimates
+    are noise. Mirrors headline_metrics' `len(s) < 5` short-sample guard.
+    """
+    s = _clean(returns)
+    if len(s) < 20:
+        return {"var_pct": None, "cvar_pct": None,
+                "tail_risk_reason": f"only {len(s)} days (< 20)"}
+    q = float(s.quantile(1.0 - alpha))
+    tail = s[s <= q]
+    cvar = float(tail.mean()) if len(tail) else q
+    return {"var_pct": round(-q * 100.0, 2),
+            "cvar_pct": round(-cvar * 100.0, 2),
+            "alpha": alpha,
+            "n_tail_days": int(len(tail))}
+
+
 def tearsheet(returns, bench_returns=None, *, window: int = 63,
               top_n_drawdowns: int = 5) -> dict:
     """
@@ -384,7 +414,8 @@ def tearsheet(returns, bench_returns=None, *, window: int = 63,
            "monthly": monthly_returns_table(s),
            "rolling": rolling_metrics(s, window=window),
            "drawdowns": drawdown_periods(s, top_n=top_n_drawdowns),
-           "underwater": drawdown_series(s)}
+           "underwater": drawdown_series(s),
+           "tail_risk": tail_risk_metrics(s)}
     out["benchmark"] = (benchmark_stats(s, bench_returns)
                         if bench_returns is not None
                         else {"beta": None,

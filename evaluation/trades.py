@@ -130,6 +130,11 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
     `notional` by name through inspect.signature. Both must keep working.
     config=None means ExecutionConfig LEGACY, which reproduces the pre-Step-B
     behavior exactly -- no costs, no stops, no holding cap.
+
+    Short trades additionally accrue cfg.costs.borrow_fee_bps over their actual
+    holding period (see the borrow-fee comment below) -- previously only
+    backtest.py's weight-matrix engine charged this; this engine had a real gap
+    where a short strategy's cost model silently excluded borrow fees.
     """
     cfg = ev_execution.resolve(config)
     risk = cfg.risk
@@ -180,13 +185,23 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
               (1.0 - exit_price / entry_price)
         pnl_dollars = round(notional * pct, 2)
         pnl_pct = round(100 * pct, 3)
-        if rate:
+        total_rate = rate
+        if side == "short" and cfg.costs.borrow_fee_bps > 0:
+            # Annualized borrow fee accrued over the trade's actual holding
+            # period, same rate the weight-matrix engine charges daily via
+            # execution.daily_cost() -- but round_trip_rate() is a flat
+            # per-trade constant with no notion of holding period, so this
+            # engine (variable holding time per trade) needs its own accrual
+            # rather than reusing that helper.
+            total_rate += (cfg.costs.borrow_fee_bps / 1e4
+                           * (exit_i - entry_i) / ev_execution.TRADING_DAYS)
+        if total_rate:
             # Round, THEN deduct, THEN round -- the order strategies/stage3.py's
             # monkeypatch used. Deducting before the first rounding shifts
             # pnl_dollars by a cent per trade, which moves total_pnl_net and so
             # the campaign's pnl_p. See the W1 spec.
-            pnl_dollars = round(pnl_dollars - notional * rate, 2)
-            pnl_pct = round(pnl_pct - 100 * rate, 3)
+            pnl_dollars = round(pnl_dollars - notional * total_rate, 2)
+            pnl_pct = round(pnl_pct - 100 * total_rate, 3)
         rows.append({
             "symbol": symbol, "side": side,
             "entry_signal_date": index[sig_i], "entry_date": index[entry_i],

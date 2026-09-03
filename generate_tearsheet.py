@@ -120,7 +120,7 @@ def _rolling_fig(rolling: dict) -> "go.Figure | None":
 # --------------------------------------------------------------- tables
 
 
-def _headline_tiles(h: dict) -> str:
+def _headline_tiles(h: dict, tail: dict) -> str:
     if h.get("headline_reason") and h.get("sharpe") is None:
         return _tile("headline", "n/a", h["headline_reason"])
     tiles = [
@@ -132,6 +132,11 @@ def _headline_tiles(h: dict) -> str:
               f"Calmar {_fmt(h.get('calmar'))}"),
         _tile("Ann vol", _fmt(h.get("ann_vol_pct"), 2, "%"),
               f"hit rate {_fmt(h.get('hit_rate_pct'), 1, '%')}"),
+        _tile(f"CVaR {_fmt(100 * tail.get('alpha'), 0) if tail.get('alpha') else ''}%",
+              _fmt(tail.get("cvar_pct"), 2, "%"),
+              f"VaR {_fmt(tail.get('var_pct'), 2, '%')}"
+              if tail.get("cvar_pct") is not None
+              else tail.get("tail_risk_reason", "n/a")),
         _tile("Days", _fmt(h.get("n_days")), ""),
     ]
     return ('<div style="display:flex;gap:12px;flex-wrap:wrap;'
@@ -219,7 +224,7 @@ def build_html(returns, *, title: str = "Tearsheet", subtitle: str = "",
         parts.append(f'<div style="color:{INK2};font-size:12px;'
                      f'border-left:3px solid {BASE};padding:6px 10px;'
                      f'margin:10px 0">{basis_note}</div>')
-    parts.append(_headline_tiles(sheet["headline"]))
+    parts.append(_headline_tiles(sheet["headline"], sheet["tail_risk"]))
 
     for i, fig in enumerate(figs):
         parts.append(fig.to_html(full_html=False, include_plotlyjs=(i == 0)))

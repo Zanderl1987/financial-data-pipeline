@@ -581,7 +581,8 @@ class TestLiveTearsheet:
         out = ba.live_tearsheet(trades)
         assert "returns_reason" not in out
         assert set(out.keys()) == {"headline", "monthly", "rolling",
-                                   "drawdowns", "underwater", "benchmark"}
+                                   "drawdowns", "underwater", "benchmark",
+                                   "tail_risk"}
         assert out["headline"]["sharpe"] is not None or \
                "headline_reason" in out["headline"]
 

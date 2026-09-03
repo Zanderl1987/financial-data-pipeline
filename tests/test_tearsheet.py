@@ -352,6 +352,33 @@ class TestHeadline:
         assert "(< 5)" in out["headline_reason"]
 
 
+# --------------------------------------------------------------- tail risk
+
+
+class TestTailRisk:
+    def test_var_and_cvar_known_answer(self):
+        # 19 flat +1% days and one -20% day. quantile(0.05) on 20 sorted
+        # points (linear interpolation) lands just below 0, between the
+        # -20% and +1% values, so VaR is tiny -- but CVaR (mean of the tail
+        # AT OR BELOW that quantile) is the full -20% outlier: exactly the
+        # "VaR hides the fat tail" case the docstring describes.
+        out = ts.tail_risk_metrics(_ret([-0.20] + [0.01] * 19))
+        assert out["var_pct"] == pytest.approx(0.05, abs=0.01)
+        assert out["cvar_pct"] == pytest.approx(20.0, abs=0.01)
+        assert out["n_tail_days"] == 1
+        assert out["alpha"] == 0.95
+
+    def test_cvar_at_least_as_severe_as_var(self):
+        rng = np.random.default_rng(3)
+        out = ts.tail_risk_metrics(_ret(rng.normal(0.0003, 0.015, 300).tolist()))
+        assert out["cvar_pct"] >= out["var_pct"]
+
+    def test_too_short_reason(self):
+        out = ts.tail_risk_metrics(_ret([0.01] * 10))
+        assert out["cvar_pct"] is None
+        assert "(< 20)" in out["tail_risk_reason"]
+
+
 # --------------------------------------------------------------- assembly
 
 
@@ -359,8 +386,9 @@ class TestTearsheet:
     def test_all_sections_present(self):
         out = ts.tearsheet(_noise(600), bench_returns=_noise(600, seed=9))
         assert set(out) == {"headline", "monthly", "rolling", "drawdowns",
-                            "underwater", "benchmark"}
+                            "underwater", "benchmark", "tail_risk"}
         assert out["benchmark"]["beta"] is not None
+        assert out["tail_risk"]["cvar_pct"] is not None
 
     def test_missing_benchmark_says_so(self):
         out = ts.tearsheet(_noise(600))
@@ -372,6 +400,7 @@ class TestTearsheet:
         out = ts.tearsheet(_ret([0.01, 0.02]))
         assert out["headline"]["sharpe"] is None
         assert out["rolling"]["frame"] is None
+        assert out["tail_risk"]["cvar_pct"] is None
 
     def test_renderer_is_self_contained(self):
         """The report must work with no network. Plotly is inlined, so the file

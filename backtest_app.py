@@ -412,7 +412,7 @@ def render_tearsheet(sheet: dict) -> "list":
     if "returns_reason" in sheet:
         return [html.Div(f"no realized trades to compute tearsheet: "
                          f"{sheet['returns_reason']}")]
-    children = [dcc.Markdown(gt._headline_tiles(sheet["headline"]),
+    children = [dcc.Markdown(gt._headline_tiles(sheet["headline"], sheet["tail_risk"]),
                              dangerously_allow_html=True)]
     monthly_fig = gt._monthly_fig(sheet["monthly"])
     if monthly_fig is not None:
