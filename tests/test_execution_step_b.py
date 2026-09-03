@@ -656,3 +656,156 @@ class TestSinglePassPortfolio:
         cfg = ex.ExecutionConfig(limits=ex.PortfolioLimits(max_concurrent=1))
         ev_stats.permutation_trades(_rule(), cache, n_perm=10, seed=5, config=cfg)
         assert called["hit"] is False
+
+
+class TestHrpSizing:
+    """mode='hrp' -- evaluation/hrp.py's Hierarchical Risk Parity wired into
+    the single-pass engine as a sizing mode. The core HRP math (distance
+    matrix, quasi-diagonalization, recursive bisection) is exhaustively
+    covered in tests/test_hrp.py; these tests cover the WIRING: cohort
+    selection (open symbols + candidate), the PIT trailing-window boundary,
+    and graceful rejection when the cohort can't support a real estimate."""
+
+    def _state(self, sym, closes, dates):
+        return {sym: {"close": pd.Series(np.asarray(closes, dtype=float),
+                                         index=pd.DatetimeIndex(dates))}}
+
+    def test_requires_capital(self):
+        cfg = ex.ExecutionConfig(sizing=ex.Sizing(mode="hrp", fraction=0.5))
+        cache = {"AAA": _frame([100, 100, 110, 110],
+                               [True, False, False, False],
+                               [False, False, True, False])}
+        with pytest.raises(ValueError, match="requires limits.capital"):
+            tr.simulate(_rule(), cache, config=cfg)
+
+    def test_no_open_positions_gets_full_fraction_budget(self):
+        idx = pd.bdate_range("2024-01-01", periods=60)
+        symbols = self._state("AAA", 100 + np.arange(60) * 0.1, idx)
+        row = {"symbol": "AAA", "entry_date": idx[40]}
+        sizing = ex.Sizing(mode="hrp", fraction=0.4, hrp_lookback=30)
+        size = tr._hrp_size(row, sizing, symbols, set(), equity=50_000.0)
+        assert size == pytest.approx(0.4 * 50_000.0)
+
+    def test_known_weight_via_stubbed_hrp_weights(self, monkeypatch):
+        """Exact wiring check: with hrp_weights() stubbed to a known Series,
+        _hrp_size must return exactly fraction * equity * that symbol's
+        weight -- decoupled from whether the real algorithm agrees, which
+        test_hrp.py already covers on its own."""
+        idx = pd.bdate_range("2024-01-01", periods=60)
+        symbols = {}
+        symbols.update(self._state("AAA", 100 + np.random.default_rng(1).normal(0, 1, 60), idx))
+        symbols.update(self._state("BBB", 100 + np.random.default_rng(2).normal(0, 1, 60), idx))
+        row = {"symbol": "BBB", "entry_date": idx[50]}
+        sizing = ex.Sizing(mode="hrp", fraction=0.5, hrp_lookback=30)
+
+        monkeypatch.setattr(tr.ev_hrp, "hrp_weights",
+                            lambda returns: pd.Series({"AAA": 0.7, "BBB": 0.3}))
+        size = tr._hrp_size(row, sizing, symbols, {"AAA"}, equity=100_000.0)
+        assert size == pytest.approx(0.5 * 100_000.0 * 0.3)
+
+    def test_hrp_weights_valueerror_is_a_clean_rejection(self, monkeypatch):
+        idx = pd.bdate_range("2024-01-01", periods=60)
+        symbols = {}
+        symbols.update(self._state("AAA", 100 + np.random.default_rng(3).normal(0, 1, 60), idx))
+        symbols.update(self._state("BBB", 100 + np.random.default_rng(4).normal(0, 1, 60), idx))
+        row = {"symbol": "BBB", "entry_date": idx[50]}
+        sizing = ex.Sizing(mode="hrp", fraction=0.5, hrp_lookback=30)
+
+        def boom(returns):
+            raise ValueError("near-zero variance")
+
+        monkeypatch.setattr(tr.ev_hrp, "hrp_weights", boom)
+        assert tr._hrp_size(row, sizing, symbols, {"AAA"}, equity=100_000.0) is None
+
+    def test_insufficient_overlap_rejects_without_calling_hrp_weights(self, monkeypatch):
+        # AAA's history ends well before BBB's candidate window even starts --
+        # the two series share zero overlapping trading days.
+        idx_a = pd.bdate_range("2020-01-01", periods=30)
+        idx_b = pd.bdate_range("2024-01-01", periods=60)
+        symbols = {}
+        symbols.update(self._state("AAA", 100 + np.arange(30) * 0.1, idx_a))
+        symbols.update(self._state("BBB", 100 + np.arange(60) * 0.1, idx_b))
+        row = {"symbol": "BBB", "entry_date": idx_b[50]}
+        sizing = ex.Sizing(mode="hrp", fraction=0.5, hrp_lookback=30)
+
+        called = {"hit": False}
+        monkeypatch.setattr(tr.ev_hrp, "hrp_weights",
+                            lambda returns: called.__setitem__("hit", True))
+        assert tr._hrp_size(row, sizing, symbols, {"AAA"}, equity=100_000.0) is None
+        assert called["hit"] is False   # rejected before ever calling hrp_weights
+
+    def test_pit_boundary_excludes_the_entry_bar_itself(self):
+        """A price shock exactly ON the candidate's entry_date must not
+        affect its own sizing -- the trailing window is strictly before
+        entry_date, the same boundary entry_vol_pct already uses."""
+        idx = pd.bdate_range("2024-01-01", periods=60)
+        a_close = 100 + np.cumsum(np.random.default_rng(7).normal(0, 0.5, 60))
+        b_close = 100 + np.cumsum(np.random.default_rng(8).normal(0, 0.5, 60))
+        symbols_normal = {}
+        symbols_normal.update(self._state("AAA", a_close, idx))
+        symbols_normal.update(self._state("BBB", b_close, idx))
+
+        b_close_shocked = b_close.copy()
+        b_close_shocked[50] *= 5.0    # a huge shock exactly AT entry_date
+        symbols_shocked = {}
+        symbols_shocked.update(self._state("AAA", a_close, idx))
+        symbols_shocked.update(self._state("BBB", b_close_shocked, idx))
+
+        row = {"symbol": "BBB", "entry_date": idx[50]}
+        sizing = ex.Sizing(mode="hrp", fraction=0.5, hrp_lookback=30)
+        size_normal = tr._hrp_size(row, sizing, symbols_normal, {"AAA"}, 100_000.0)
+        size_shocked = tr._hrp_size(row, sizing, symbols_shocked, {"AAA"}, 100_000.0)
+        assert size_normal is not None
+        # The shock never enters the trailing window (strictly < entry_date),
+        # so it must not move the computed size at all.
+        assert size_shocked == pytest.approx(size_normal)
+
+    def test_lower_variance_symbol_gets_bigger_hrp_weight_end_to_end(self):
+        """Real end-to-end check (no mocking): two symbols held concurrently,
+        one visibly calmer than the other over the trailing window feeding
+        the second one's entry -- the calmer one's own later entry (once it
+        becomes the candidate relative to an already-open choppier name)
+        should be sized up, mirroring inverse_vol's own directional test."""
+        n = 220
+        rng_calm = 100 + np.cumsum(np.random.default_rng(5).normal(0, 0.2, n))
+        rng_choppy = 100 + np.cumsum(np.random.default_rng(6).normal(0, 2.0, n))
+
+        # CHOPPY enters early and stays open a long time.
+        choppy_entries = [False] * n
+        choppy_entries[9] = True
+        choppy_exits = [False] * n
+        choppy_exits[199] = True
+        choppy = _frame(rng_choppy, choppy_entries, choppy_exits)
+
+        # CALM enters at bar 100 (choppy still open), a short hold.
+        calm_entries = [False] * n
+        calm_entries[99] = True
+        calm_exits = [False] * n
+        calm_exits[119] = True
+        calm = _frame(rng_calm, calm_entries, calm_exits)
+
+        cache = {"CALM": calm, "CHOPPY": choppy}
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="hrp", fraction=0.3, hrp_lookback=60),
+            limits=ex.PortfolioLimits(capital=200_000.0, max_concurrent=2))
+        out = tr.simulate(_rule(), cache, config=cfg).set_index("symbol")
+        assert "CALM" in out.index
+        # CALM's implied committed size should exceed a naive equal split
+        # (0.3 * 200,000 / 2 = 30,000) since it carries less risk than its
+        # open cohort-mate -- HRP overweights it accordingly.
+        implied_size = out.loc["CALM", "pnl_dollars"] / (out.loc["CALM", "pnl_pct"] / 100.0)
+        assert implied_size > 0.3 * 200_000.0 / 2.0
+
+    def test_permutation_with_hrp_mode_is_deterministic(self):
+        rng = np.random.default_rng(14)
+        n = 100
+        cache = {}
+        for s in ("AAA", "BBB", "CCC"):
+            px = 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.012, n)))
+            cache[s] = _frame(px, rng.random(n) < 0.15, rng.random(n) < 0.2)
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="hrp", fraction=0.2, hrp_lookback=30),
+            limits=ex.PortfolioLimits(capital=500_000.0, max_concurrent=3))
+        a = ev_stats.permutation_trades(_rule(), cache, n_perm=15, seed=6, config=cfg)
+        b = ev_stats.permutation_trades(_rule(), cache, n_perm=15, seed=6, config=cfg)
+        assert a == b

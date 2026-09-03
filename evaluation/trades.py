@@ -14,10 +14,18 @@ import numpy as np
 import pandas as pd
 
 from evaluation import execution as ev_execution
+from evaluation import hrp as ev_hrp
 
 TRADE_COLS = ["symbol", "side", "entry_signal_date", "entry_date", "entry_price",
               "exit_signal_date", "exit_date", "exit_price", "days_held",
               "pnl_dollars", "pnl_pct", "exit_reason", "entry_vol_pct"]
+
+#: Minimum SHARED trading days across a candidate's HRP cohort before a
+#: correlation estimate is trusted -- same order as tearsheet.tail_risk_
+#: metrics' 20-day floor and roughly VOL_WINDOW's own scale, not a
+#: precisely-derived number. Below this, mode="hrp" rejects the candidate
+#: (see _hrp_size) rather than fit a correlation matrix on noise.
+MIN_HRP_OVERLAP_DAYS = 20
 
 #: Window used for the close-only volatility estimate behind
 #: RiskControls.vol_stop_mult. Mirrors event_backtest.scenario()'s 14-day
@@ -271,7 +279,16 @@ def _size_candidate(row: dict, sizing, equity: float) -> "float | None":
     non-positive size) -- a rejection, not a fabricated guess. Shared by
     both the legacy filter-only _portfolio_pass and the single-pass engine
     so sizing math has exactly one implementation.
+
+    mode='hrp' is NOT handled here -- it needs the open-position cohort and
+    a trailing returns panel, neither of which this function has access
+    to. See _hrp_size, called directly from _simulate_single_pass instead.
     """
+    if sizing.mode == "hrp":
+        raise ValueError("mode='hrp' requires the open-position cohort; "
+                         "call _hrp_size via _simulate_single_pass, not "
+                         "this function (see evaluation/hrp.py and the "
+                         "2026-09-03 single-pass-portfolio-engine spec)")
     if sizing.mode == "fixed_fraction":
         size = sizing.fraction * equity
     elif sizing.mode == "inverse_vol":
@@ -288,12 +305,68 @@ def _size_candidate(row: dict, sizing, equity: float) -> "float | None":
     return size if size > 0 else None
 
 
+def _hrp_size(row: dict, sizing, symbols: dict, open_symbols: set,
+             equity: float) -> "float | None":
+    """
+    HRP-weighted size for one candidate (mode='hrp'), given the OTHER
+    currently-open symbols (see evaluation/hrp.py). Recomputes
+    hrp.hrp_weights() over {open symbols} u {candidate symbol} from each
+    member's trailing sizing.hrp_lookback daily returns ending STRICTLY
+    BEFORE the candidate's entry_date -- the same PIT boundary
+    entry_vol_pct already uses for inverse_vol (data available as of the
+    fill, never the future).
+
+    Entry-time-only, same philosophy as mode='inverse_vol' (see Sizing's
+    docstring): already-open positions are NOT re-sized when a new one
+    joins the cohort.
+
+    Returns None (reject, not a fabricated size) when the cohort can't
+    support a real correlation estimate: fewer than MIN_HRP_OVERLAP_DAYS
+    trading days of SHARED history across every member, or hrp.hrp_weights
+    itself raises (e.g. near-zero variance in some member). The n=1 case
+    (no other open positions) is not ambiguous, though -- HRP is undefined
+    for a single asset, but a one-name book has nothing to diversify
+    against yet, so it gets the whole fraction * equity budget, same as
+    fixed_fraction would.
+    """
+    sym = row["symbol"]
+    cohort = sorted(open_symbols | {sym})
+    if len(cohort) < 2:
+        size = sizing.fraction * equity
+        return size if size > 0 else None
+
+    entry_date = row["entry_date"]
+    returns = {}
+    for s in cohort:
+        close = symbols[s]["close"]
+        window = close[close.index < entry_date].tail(sizing.hrp_lookback + 1)
+        r = window.pct_change().dropna()
+        if not r.empty:
+            returns[s] = r
+    if len(returns) < 2:
+        return None
+
+    panel = pd.DataFrame(returns)
+    if len(panel.dropna()) < MIN_HRP_OVERLAP_DAYS:
+        return None
+    try:
+        weights = ev_hrp.hrp_weights(panel)
+    except ValueError:
+        return None
+    if sym not in weights.index:
+        return None
+
+    size = sizing.fraction * equity * float(weights.loc[sym])
+    return size if size > 0 else None
+
+
 def _admit_row(row: dict, size: float, sizing) -> dict:
     """Finalize an admitted candidate: re-denominate pnl_dollars onto the
-    committed size for fractional/inverse-vol sizing (pnl_pct is already
-    net of costs, unaffected). fixed_notional rows pass through unchanged."""
+    committed size for fractional/inverse-vol/hrp sizing (pnl_pct is
+    already net of costs, unaffected). fixed_notional rows pass through
+    unchanged."""
     out = dict(row)
-    if sizing.mode in ("fixed_fraction", "inverse_vol"):
+    if sizing.mode in ("fixed_fraction", "inverse_vol", "hrp"):
         out["pnl_dollars"] = round(size * out["pnl_pct"] / 100.0, 2)
     return out
 
@@ -402,10 +475,16 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
     simulate() (flags from the rule) and stats.permutation_trades()
     (flags from a permutation), the null must face the same admission-order
     fix the observed run does or the p-value comparison is invalid.
+
+    `sizing.mode='hrp'` is the reason `open_positions` tracks each open
+    trade's symbol (not just exit_date/committed/pnl_dollars): _hrp_size
+    needs the live set of currently-open symbols to know what cohort to
+    compute correlation-aware weights over at each admission decision. See
+    evaluation/hrp.py and Sizing's own docstring for the full design.
     """
     limits, sizing = cfg.limits, cfg.sizing
     capital = limits.capital
-    if sizing.mode in ("fixed_fraction", "inverse_vol") and capital is None:
+    if sizing.mode in ("fixed_fraction", "inverse_vol", "hrp") and capital is None:
         raise ValueError(f"sizing.mode={sizing.mode!r} requires limits.capital")
 
     symbols = {}
@@ -424,7 +503,7 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
         _push_next(heap, sym, symbols[sym], 0, notional, cfg)
 
     equity = capital if capital is not None else 0.0
-    open_positions = []          # (exit_date, committed, pnl_dollars)
+    open_positions = []          # (exit_date, committed, pnl_dollars, symbol)
     admitted = []
 
     while heap:
@@ -432,25 +511,33 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
         row = cand["row"]
 
         still_open = []
-        for exit_date, committed, pnl in open_positions:
+        for exit_date, committed, pnl, osym in open_positions:
             if exit_date <= row["entry_date"]:
                 equity += pnl
             else:
-                still_open.append((exit_date, committed, pnl))
+                still_open.append((exit_date, committed, pnl, osym))
         open_positions = still_open
 
         admit = not (limits.max_concurrent is not None
                     and len(open_positions) >= limits.max_concurrent)
-        size = _size_candidate(row, sizing, equity) if admit else None
+        if admit:
+            if sizing.mode == "hrp":
+                open_symbols = {osym for _, _, _, osym in open_positions}
+                size = _hrp_size(row, sizing, symbols, open_symbols, equity)
+            else:
+                size = _size_candidate(row, sizing, equity)
+        else:
+            size = None
         admit = admit and size is not None
         if admit and capital is not None:
-            committed_now = sum(c for _, c, _ in open_positions)
+            committed_now = sum(c for _, c, _, _ in open_positions)
             admit = committed_now + size <= capital + 1e-9
 
         if admit:
             out_row = _admit_row(row, size, sizing)
             admitted.append(out_row)
-            open_positions.append((out_row["exit_date"], size, out_row["pnl_dollars"]))
+            open_positions.append((out_row["exit_date"], size,
+                                   out_row["pnl_dollars"], sym))
             next_cursor = cand["exit_i"] + 1
         else:
             next_cursor = cand["sig_i"] + 1     # THE fix: resume at entry, not exit

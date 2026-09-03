@@ -41,7 +41,7 @@ import pandas as pd
 TRADING_DAYS = 252
 
 IMPACT_MODELS = (None, "sqrt", "flat")
-SIZING_MODES = ("fixed_notional", "fixed_fraction", "inverse_vol")
+SIZING_MODES = ("fixed_notional", "fixed_fraction", "inverse_vol", "hrp")
 
 
 @dataclass(frozen=True)
@@ -118,12 +118,27 @@ class Sizing:
     backtest.py's continuously-held weight vector). Entry-time sizing sidesteps
     that ambiguity rather than resolving it: it's a real, well-defined
     primitive, just a narrower one than full continuous vol targeting.
+
+    mode='hrp' extends the same entry-time-only philosophy to a real,
+    correlation-aware Hierarchical Risk Parity allocation (Lopez de Prado;
+    see evaluation/hrp.py) across whatever is concurrently held: a
+    candidate's size is fraction * equity * its own HRP weight within the
+    cohort of {currently open symbols} u {this candidate}, recomputed fresh
+    at each admission decision from trailing hrp_lookback daily returns.
+    Already-open positions are NOT re-sized when a new one joins -- the
+    same "no continuous rebalancing" line inverse_vol already draws, for
+    the same reason (this engine's admit-once bookkeeping has no concept
+    of mutating a recorded trade's committed capital). Requires the
+    single-pass engine (evaluation/trades._simulate_single_pass) -- the
+    legacy filter-only _portfolio_pass has no open-position/correlation
+    context to compute a cohort from and raises if asked for mode='hrp'.
     """
     mode: str = "fixed_notional"
     notional: float = 10_000.0
     fraction: "float | None" = None
     max_weight: "float | None" = None
     vol_target_pct: "float | None" = None
+    hrp_lookback: int = 126
 
     def __post_init__(self):
         if self.mode not in SIZING_MODES:
@@ -132,17 +147,19 @@ class Sizing:
             raise ValueError("notional must be > 0")
         if self.max_weight is not None and self.max_weight <= 0:
             raise ValueError("max_weight must be > 0 or None")
-        if self.mode in ("fixed_fraction", "inverse_vol"):
+        if self.mode in ("fixed_fraction", "inverse_vol", "hrp"):
             if self.fraction is None or not (0 < self.fraction <= 1):
                 raise ValueError(f"mode={self.mode!r} requires 0 < fraction <= 1")
         elif self.fraction is not None:
             raise ValueError("fraction is only meaningful with mode="
-                             "'fixed_fraction' or 'inverse_vol'")
+                             "'fixed_fraction', 'inverse_vol', or 'hrp'")
         if self.mode == "inverse_vol":
             if self.vol_target_pct is None or self.vol_target_pct <= 0:
                 raise ValueError("mode='inverse_vol' requires vol_target_pct > 0")
         elif self.vol_target_pct is not None:
             raise ValueError("vol_target_pct is only meaningful with mode='inverse_vol'")
+        if self.hrp_lookback < 20:
+            raise ValueError("hrp_lookback must be >= 20")
 
 
 @dataclass(frozen=True)
