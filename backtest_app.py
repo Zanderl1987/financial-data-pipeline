@@ -27,6 +27,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from evaluation import registry as ev_registry
+from evaluation import regime as ev_regime
 from evaluation import robustness as ev_robustness
 from evaluation import trades as ev_trades
 from evaluation import adapters as ev_adapters
@@ -374,6 +375,70 @@ def cumulative_pnl_fig(trades_df: "pd.DataFrame") -> "go.Figure | None":
                                  "(%{customdata[2]:.2f}%%)<extra></extra>")
     fig.update_layout(title="Cumulative P&L (current thresholds)", height=320)
     return fig
+
+
+#: Regime overlay defaults: k=2 (calm/stressed) on SPY, per the 2026-09-02
+#: k=2-vs-k=3 comparison (experiments/2026-09-02_regime-k2-vs-k3-comparison.md)
+#: -- k=2 reproduced a stable split on two independent halves of 33 years of
+#: SPY history, k=3's third cluster did not. Not user-configurable here; if
+#: that changes, revisit alongside a fresh k comparison rather than trusting
+#: an untested k on the live dashboard.
+REGIME_OVERLAY_BENCHMARK = "SPY"
+REGIME_OVERLAY_K = 2
+
+_REGIME_CACHE: dict = {}
+
+
+def regime_labels_cached(benchmark: str = REGIME_OVERLAY_BENCHMARK,
+                         k: int = REGIME_OVERLAY_K) -> "pd.Series | None":
+    """Fit (and memoize) Statistical Jump Model regime labels for the equity-
+    curve overlay. Depends only on (benchmark, k) -- never on the current
+    trade-rule thresholds -- so one fit serves every slider change instead
+    of refitting per callback; the fit itself (n_init=10 restarts over the
+    full benchmark history) is not cheap enough to redo on every drag.
+    Returns None if the benchmark has no price history or too little of it
+    (see regime.label_regimes' own *_reason gate)."""
+    key = (benchmark, k)
+    if key in _REGIME_CACHE:
+        return _REGIME_CACHE[key]
+    import event_backtest as eb
+
+    close = eb.load_close(benchmark)
+    labels = None
+    if close is not None and not close.empty:
+        out = ev_regime.label_regimes(close.pct_change().dropna(), k=k)
+        labels = out.get("labels")
+    _REGIME_CACHE[key] = labels
+    return labels
+
+
+def _regime_color(rank: int, k: int) -> str:
+    """Worst regime (0) -> red, best (k-1) -> green, low-opacity fill so
+    trade/P&L lines stay legible drawn on top."""
+    t = rank / max(k - 1, 1)
+    r = int(208 * (1 - t) + 12 * t)
+    g = int(59 * (1 - t) + 163 * t)
+    b = int(59 * (1 - t) + 12 * t)
+    return f"rgba({r},{g},{b},0.12)"
+
+
+def regime_overlay_shapes(labels: "pd.Series | None", k: int = REGIME_OVERLAY_K) -> list:
+    """Plotly `shapes` list: one full-height vrect per contiguous regime run,
+    colored by regime rank. Empty list (a legal, no-op shapes value) if
+    labels is unavailable."""
+    if labels is None or labels.empty:
+        return []
+    s = labels.dropna()
+    if s.empty:
+        return []
+    run_id = s.ne(s.shift()).cumsum()
+    shapes = []
+    for _, run in s.groupby(run_id):
+        shapes.append(dict(type="rect", xref="x", yref="paper",
+                           x0=run.index[0], x1=run.index[-1], y0=0, y1=1,
+                           fillcolor=_regime_color(int(run.iloc[0]), k),
+                           line=dict(width=0), layer="below"))
+    return shapes
 
 
 def render_risk_card(metrics: dict) -> "html.Div":
@@ -1006,6 +1071,8 @@ def register_callbacks(app: "dash.Dash") -> None:
         sym_fig = (symbol_price_fig(symbol, cache[symbol], trades)
                   if symbol and symbol in cache else empty_fig)
         pnl_fig = cumulative_pnl_fig(trades) or empty_fig
+        if pnl_fig is not empty_fig:
+            pnl_fig.update_layout(shapes=regime_overlay_shapes(regime_labels_cached()))
         cost_fig = (cost_sensitivity_fig(store["name"], store["run_id"],
                                          bull_min, exit_long_max, bear_max,
                                          exit_short_min, cfg) or empty_fig)

@@ -460,6 +460,58 @@ class TestCharts:
         assert list(fig.data[0].y) == [200.0, 150.0]
 
 
+class TestRegimeOverlay:
+    def test_regime_labels_cached_none_history_returns_none(self, monkeypatch):
+        ba._REGIME_CACHE.clear()
+        import event_backtest as eb
+        monkeypatch.setattr(eb, "load_close", lambda symbol: pd.Series(dtype=float))
+        assert ba.regime_labels_cached("NOHIST", k=2) is None
+
+    def test_regime_labels_cached_memoizes(self, monkeypatch):
+        ba._REGIME_CACHE.clear()
+        calls = {"n": 0}
+
+        def fake_label_regimes(returns, k=2):
+            calls["n"] += 1
+            idx = pd.bdate_range("2020-01-01", periods=len(returns))
+            return {"labels": pd.Series([0] * len(returns), index=idx)}
+
+        idx = pd.bdate_range("2020-01-01", periods=300)
+        rng = np.random.default_rng(0)
+        close = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, 300)), index=idx)
+        import event_backtest as eb
+        monkeypatch.setattr(eb, "load_close", lambda symbol: close)
+        monkeypatch.setattr(ba.ev_regime, "label_regimes", fake_label_regimes)
+
+        first = ba.regime_labels_cached("SPY", k=2)
+        second = ba.regime_labels_cached("SPY", k=2)
+        assert calls["n"] == 1              # second call hit the cache
+        assert first is second
+
+    def test_regime_color_worst_is_reddish_best_is_greenish(self):
+        worst = ba._regime_color(0, 2)
+        best = ba._regime_color(1, 2)
+        assert worst != best
+        assert "208" in worst      # red channel dominant at rank 0
+        assert "163" in best       # green channel dominant at rank k-1
+
+    def test_overlay_shapes_empty_on_none_labels(self):
+        assert ba.regime_overlay_shapes(None) == []
+
+    def test_overlay_shapes_empty_on_empty_labels(self):
+        assert ba.regime_overlay_shapes(pd.Series(dtype=float)) == []
+
+    def test_overlay_shapes_one_rect_per_contiguous_run(self):
+        idx = pd.bdate_range("2020-01-01", periods=10)
+        labels = pd.Series([0, 0, 0, 1, 1, 0, 0, 1, 1, 1], index=idx)
+        shapes = ba.regime_overlay_shapes(labels, k=2)
+        assert len(shapes) == 4          # 0,0,0 | 1,1 | 0,0 | 1,1,1
+        assert shapes[0]["x0"] == idx[0] and shapes[0]["x1"] == idx[2]
+        assert shapes[1]["x0"] == idx[3] and shapes[1]["x1"] == idx[4]
+        for sh in shapes:
+            assert sh["yref"] == "paper" and sh["y0"] == 0 and sh["y1"] == 1
+
+
 class TestRenderRiskCard:
     def test_renders_all_metric_labels(self):
         metrics = {
