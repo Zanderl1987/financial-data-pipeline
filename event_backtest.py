@@ -115,6 +115,56 @@ def load_close_matrix(symbols, start=None, end=None,
     return pd.DataFrame(out).sort_index()
 
 
+@lru_cache(maxsize=None)
+def load_dollar_volume(symbol: str, start: "str | None" = None,
+                       end: "str | None" = None,
+                       price_table: "str | None" = None) -> pd.Series:
+    """
+    Daily dollar volume (close * share volume) for one symbol.
+
+    Used only by scenario()'s impact_model="sqrt" to estimate a trade's
+    participation rate against the symbol's own liquidity -- a materially
+    different model from backtest.py's sqrt impact, which is a function of
+    portfolio-level weight turnover and has no concept of a single symbol's
+    ADV (see evaluation/execution.py's docstring on the two meanings of
+    "sqrt_impact"; this is deliberately a third thing, not a third meaning
+    of that same flag, which is why it lives here rather than in CostModel).
+
+    Same table-preference order and "longest series wins" rule as
+    load_close(), except here "longest" means most non-null dollar-volume
+    rows specifically -- a table can carry a symbol's close history without
+    carrying (or fully populating) its volume column.
+    """
+    tables = [price_table] if price_table else list(_PRICE_TABLES)
+    best = pd.Series(dtype=float, name=symbol)
+    for t in tables:
+        try:
+            df = q.load(t, symbol=symbol, start=start, end=end)
+        except Exception:
+            continue
+        if df.empty or "close" not in df.columns or "volume" not in df.columns:
+            continue
+        df = (df.assign(date=pd.to_datetime(df["date"]))
+                .drop_duplicates("date").sort_values("date"))
+        s = (df.set_index("date")["close"].astype(float)
+             * df.set_index("date")["volume"].astype(float)).dropna()
+        if len(s) > len(best):
+            s.name = symbol
+            best = s
+    return best
+
+
+def load_dollar_volume_matrix(symbols, start=None, end=None,
+                              price_table: "str | None" = None) -> pd.DataFrame:
+    """Wide dollar-volume matrix (date x symbol), mirroring load_close_matrix()."""
+    out = {}
+    for sym in dict.fromkeys(symbols):
+        s = load_dollar_volume(sym, start, end, price_table)
+        if not s.empty:
+            out[sym] = s
+    return pd.DataFrame(out).sort_index()
+
+
 # ------------------------------------------------------------ event studies
 
 @dataclass
@@ -337,9 +387,28 @@ def scenario(
     atr_stop_mult: "float | None" = None,
     price_table: "str | None" = None,
     min_gap_days: int = 0,
+    notional: float = 10_000.0,
+    adv_impact_coeff: "float | None" = None,
+    adv_window: int = 20,
 ) -> ScenarioResult:
     """
     Simulate trading every event with cost models, ATR trailing stops, and risk metrics.
+
+    adv_impact_coeff (opt-in, default None -- no behavior change unless set):
+    a genuine square-root market-impact model, `impact_coeff/1e4 * sqrt(participation)`
+    where participation = notional / (trailing adv_window-day mean dollar volume as of
+    day0), applied per event using THAT event's own symbol and date. This is a
+    different model from backtest.py's sqrt impact (portfolio-level weight
+    turnover, no per-symbol liquidity) and from this function's own flat
+    slippage_model="sqrt_impact" (a constant 10bps, no root at all) -- see
+    evaluation/execution.py's docstring on why those two are kept apart, and
+    load_dollar_volume()'s docstring on why this is a third thing rather than
+    a third meaning of that flag. Stacks additively with cost_bps/spread_bps/
+    slippage_model, which still cover commission/spread/flat impact via the
+    shared evaluation/execution.py rate. A symbol with no volume data in any
+    price table gets zero ADV impact (participation treated as 0), same as
+    the "insufficient history" guards elsewhere in this module -- it is not
+    excluded from the scenario.
     """
     from evaluation import stats as ev_stats
 
@@ -362,6 +431,9 @@ def scenario(
     trades = []
     daily_rets: dict[pd.Timestamp, list] = {}
     closes = load_close_matrix(res.events["symbol"].unique(), price_table=price_table)
+    volumes = (load_dollar_volume_matrix(res.events["symbol"].unique(),
+                                         price_table=price_table)
+              if adv_impact_coeff else None)
 
     for i, e in res.events.iterrows():
         path = res.car.loc[i]                      # cum return from entry close
@@ -393,7 +465,18 @@ def scenario(
                 break
 
         gross = sign * path[exit_rel]
-        net = gross - (effective_cost * 2.0)  # entry + exit friction
+        event_cost = effective_cost
+        if adv_impact_coeff and volumes is not None and e["symbol"] in volumes.columns:
+            adv_series = volumes[e["symbol"]].dropna()
+            if e["day0"] in adv_series.index:
+                loc0 = adv_series.index.get_loc(e["day0"])
+                if loc0 >= adv_window:
+                    adv = adv_series.iloc[loc0 - adv_window: loc0].mean()
+                    if adv > 0:
+                        participation = notional / adv
+                        event_cost = event_cost + (adv_impact_coeff / 1e4
+                                                    * math.sqrt(participation))
+        net = gross - (event_cost * 2.0)  # entry + exit friction
 
         if symbol_closes is not None and e["day0"] in symbol_closes.index:
             loc = symbol_closes.index.get_loc(e["day0"])
@@ -447,7 +530,9 @@ def scenario(
     params = {"holding_days": holding_days, "side": side, "entry_lag": entry_lag,
               "stop_loss_pct": stop_loss_pct, "take_profit_pct": take_profit_pct,
               "cost_bps": cost_bps, "spread_bps": spread_bps,
-              "slippage_model": slippage_model or "none", "atr_stop_mult": atr_stop_mult}
+              "slippage_model": slippage_model or "none", "atr_stop_mult": atr_stop_mult,
+              "notional": notional, "adv_impact_coeff": adv_impact_coeff,
+              "adv_window": adv_window}
     return ScenarioResult(trades=tdf, equity=equity, metrics=metrics,
                           params=params, event_study=res)
 

@@ -63,11 +63,14 @@ class TestTechnical:
 class TestEventStudy:
     @pytest.fixture
     def patched_prices(self, monkeypatch):
-        px = _synthetic_ohlcv(n=300, seed=3)["close"]
+        ohlcv = _synthetic_ohlcv(n=300, seed=3)
+        px = ohlcv["close"]
         px.name = "TEST"
+        dollar_vol = (ohlcv["close"] * ohlcv["volume"]).rename("TEST")
         bench = _synthetic_ohlcv(n=300, seed=4)["close"]
         bench.name = "BENCH"
         series = {"TEST": px, "BENCH": bench}
+        volumes = {"TEST": dollar_vol}
 
         def fake_load_close(symbol, start=None, end=None, price_table=None):
             return series.get(symbol, pd.Series(dtype=float)).copy()
@@ -76,8 +79,13 @@ class TestEventStudy:
             return pd.DataFrame({s: series[s] for s in dict.fromkeys(symbols)
                                  if s in series})
 
+        def fake_volume_matrix(symbols, start=None, end=None, price_table=None):
+            return pd.DataFrame({s: volumes[s] for s in dict.fromkeys(symbols)
+                                 if s in volumes})
+
         monkeypatch.setattr(eb, "load_close", fake_load_close)
         monkeypatch.setattr(eb, "load_close_matrix", fake_matrix)
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix", fake_volume_matrix)
         return px
 
     def test_car_matches_manual_return(self, patched_prices):
@@ -127,6 +135,35 @@ class TestEventStudy:
         costly_rets = costly.trades.set_index(["symbol", "entry_date"])["return_pct"]
         assert (costly_rets <= base_rets + 1e-9).all()
         assert (costly_rets < base_rets).any()
+
+    def test_adv_impact_is_a_noop_by_default(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        base = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1)
+        same = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                           notional=999_999_999.0)  # huge size, but coeff unset
+        assert (base.trades["return_pct"] == same.trades["return_pct"]).all()
+
+    def test_adv_impact_scales_with_participation(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        small = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                            notional=1_000.0, adv_impact_coeff=10.0)
+        big = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                          notional=10_000_000.0, adv_impact_coeff=10.0)
+        small_rets = small.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        big_rets = big.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        # a much larger order against the same liquidity costs strictly more
+        assert (big_rets < small_rets).all()
+
+    def test_adv_impact_needs_history_before_day0(self, patched_prices):
+        # day0 = first bar in the fixture: no adv_window of history exists
+        # yet, so the event should fall back to zero ADV impact rather than
+        # crash or apply a garbage estimate.
+        ev = pd.DataFrame({"date": [patched_prices.index[0]]})
+        sc = eb.scenario(ev, symbols="TEST", holding_days=5, entry_lag=1,
+                         notional=10_000_000.0, adv_impact_coeff=10.0)
+        no_impact = eb.scenario(ev, symbols="TEST", holding_days=5, entry_lag=1)
+        assert sc.trades["return_pct"].iloc[0] == \
+            no_impact.trades["return_pct"].iloc[0]
 
     def test_scenario_atr_stop_does_not_crash_and_produces_trades(self, patched_prices):
         ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
