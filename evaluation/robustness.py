@@ -89,8 +89,27 @@ def _noisy_frame(df: pd.DataFrame, rng, sigma: float) -> pd.DataFrame:
     return out
 
 
+def _tail_risk(arr: np.ndarray, alpha: float) -> "tuple[float, float]":
+    """
+    VaR/CVaR of a distribution of trial outcomes (net P&L across noise
+    trials or price permutations) at confidence `alpha`.
+
+    Deliberately NOT tearsheet.tail_risk_metrics: that function operates on
+    a daily-return TIME SERIES (autocorrelated, one observation per trading
+    day). This operates on a cross-trial distribution of independent
+    re-simulations -- same VaR/CVaR mathematics (mean of the outcomes at or
+    below the (1-alpha) percentile), different sampling unit, so it is kept
+    as its own small helper rather than reusing that function on data it
+    was not built for.
+    """
+    cut = float(np.percentile(arr, (1.0 - alpha) * 100.0))
+    tail = arr[arr <= cut]
+    cvar = float(tail.mean()) if len(tail) else cut
+    return cut, cvar
+
+
 def noise_test(rule, cache: dict, *, n_trials: int = 100, sigma_bps: float = 5.0,
-               seed: int = 0, config=None) -> dict:
+               seed: int = 0, config=None, alpha: float = 0.95) -> dict:
     """
     Re-run the rule on price series perturbed by per-bar lognormal noise.
 
@@ -105,7 +124,10 @@ def noise_test(rule, cache: dict, *, n_trials: int = 100, sigma_bps: float = 5.0
     re-run, not a re-pricing of fixed trades.
 
     A strategy whose net P&L flips sign under a few bps of jitter is fitted to
-    accidents of the exact price path.
+    accidents of the exact price path. `noise_cvar_pnl_dollars` (see
+    _tail_risk) answers a question `noise_pct_profitable` cannot: not just
+    how OFTEN noise flips the sign, but how BAD the P&L gets in the worst
+    `1-alpha` share of trials when it does.
     """
     from evaluation import trades as tr
 
@@ -132,13 +154,17 @@ def noise_test(rule, cache: dict, *, n_trials: int = 100, sigma_bps: float = 5.0
         return {"noise_pct_profitable": None,
                 "noise_reason": f"only {len(arr)} usable trials"}
     lo, hi = np.percentile(arr, [5.0, 95.0])
+    var_cut, cvar = _tail_risk(arr, alpha)
     return {"observed_pnl_dollars": round(observed, 2),
             "noise_mean_pnl_dollars": round(float(arr.mean()), 2),
             "noise_median_pnl_dollars": round(float(np.median(arr)), 2),
             "noise_p5_pnl_dollars": round(float(lo), 2),
             "noise_p95_pnl_dollars": round(float(hi), 2),
+            "noise_var_pnl_dollars": round(var_cut, 2),
+            "noise_cvar_pnl_dollars": round(cvar, 2),
             "noise_pct_profitable": round(100.0 * float((arr > 0).mean()), 1),
             "sigma_bps": float(sigma_bps),
+            "alpha": float(alpha),
             "n_trials": int(len(arr))}
 
 
@@ -181,7 +207,7 @@ def _shuffled_frame(df: pd.DataFrame, rng) -> "pd.DataFrame | None":
 
 
 def price_mcpt(rule, cache: dict, *, n_perm: int = 200, seed: int = 0,
-               config=None) -> dict:
+               config=None, alpha: float = 0.95) -> dict:
     """
     Monte Carlo permutation test on the PRICE SERIES, not on the trades.
 
@@ -197,6 +223,11 @@ def price_mcpt(rule, cache: dict, *, n_perm: int = 200, seed: int = 0,
     itself evidence of skill. Read it beside stats.permutation_trades, which
     nulls the signal while leaving the real price path -- autocorrelation
     included -- untouched. Either one alone is weak; the pair is informative.
+
+    `price_mcpt_cvar_pnl_dollars` (see _tail_risk) is the mean null-world P&L
+    in the worst `1-alpha` share of permutations -- how bad a plausible
+    no-edge outcome looks in its own tail, not just whether the observed
+    result beats the null on average.
     """
     from evaluation import trades as tr
 
@@ -208,6 +239,7 @@ def price_mcpt(rule, cache: dict, *, n_perm: int = 200, seed: int = 0,
     observed = _net_pnl(tr.simulate(rule, cache, config=config))
     rng = np.random.default_rng(seed)
 
+    pnls = []
     ge = n_done = 0
     for _ in range(n_perm):
         synth = {}
@@ -218,15 +250,25 @@ def price_mcpt(rule, cache: dict, *, n_perm: int = 200, seed: int = 0,
         if not synth:
             continue
         n_done += 1
-        if _net_pnl(tr.simulate(rule, synth, config=config)) >= observed:
+        pnl = _net_pnl(tr.simulate(rule, synth, config=config))
+        pnls.append(pnl)
+        if pnl >= observed:
             ge += 1
 
     if n_done < max(20, n_perm // 4):
         return {"price_mcpt_p": None,
                 "price_mcpt_reason": f"only {n_done} usable permutations"}
-    return {"observed_pnl_dollars": round(observed, 2),
-            "price_mcpt_p": round((1 + ge) / (n_done + 1), 4),
-            "n_perm": int(n_done)}
+    arr = np.asarray(pnls, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    out = {"observed_pnl_dollars": round(observed, 2),
+           "price_mcpt_p": round((1 + ge) / (n_done + 1), 4),
+           "n_perm": int(n_done)}
+    if len(arr) >= max(10, n_done // 4):
+        var_cut, cvar = _tail_risk(arr, alpha)
+        out["price_mcpt_var_pnl_dollars"] = round(var_cut, 2)
+        out["price_mcpt_cvar_pnl_dollars"] = round(cvar, 2)
+        out["alpha"] = float(alpha)
+    return out
 
 
 # --------------------------------------------------------------- 3. trade order

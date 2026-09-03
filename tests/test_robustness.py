@@ -118,6 +118,22 @@ class TestNoise:
         assert out["noise_pct_profitable"] is None
         assert "positive" in out["noise_reason"]
 
+    def test_reports_tail_risk_and_cvar_is_worse_than_var(self, rule, cache):
+        out = rb.noise_test(rule, cache, n_trials=30, sigma_bps=20.0, seed=0)
+        assert "noise_var_pnl_dollars" in out and "noise_cvar_pnl_dollars" in out
+        assert out["alpha"] == 0.95
+        # CVaR is the mean of the tail at-or-below the VaR cutoff, so it can
+        # only be equal to or worse (lower) than VaR, never better
+        assert out["noise_cvar_pnl_dollars"] <= out["noise_var_pnl_dollars"] + 1e-9
+
+
+class TestTailRisk:
+    def test_known_answer(self):
+        arr = np.arange(1, 101, dtype=float)
+        var_cut, cvar = rb._tail_risk(arr, alpha=0.95)
+        assert var_cut == pytest.approx(5.95)
+        assert cvar == pytest.approx(3.0)   # mean of [1, 2, 3, 4, 5]
+
 
 # --------------------------------------------------------------- price MCPT
 
@@ -165,6 +181,12 @@ class TestPriceMCPT:
         out = rb.price_mcpt(rule, {}, n_perm=5)
         assert out["price_mcpt_p"] is None
         assert "no usable symbols" in out["price_mcpt_reason"]
+
+    def test_reports_tail_risk_and_cvar_is_worse_than_var(self, rule, cache):
+        out = rb.price_mcpt(rule, cache, n_perm=40, seed=0)
+        assert "price_mcpt_var_pnl_dollars" in out
+        assert "price_mcpt_cvar_pnl_dollars" in out
+        assert out["price_mcpt_cvar_pnl_dollars"] <= out["price_mcpt_var_pnl_dollars"] + 1e-9
 
     def test_too_few_usable_permutations_reason(self, rule):
         short = {"AAA": _frame([100.0, 101.0])}
