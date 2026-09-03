@@ -115,6 +115,75 @@ class TestLabelRegimes:
         assert out["n_switches"] < len(out["labels"])  # not chattering every day
 
 
+class TestWalkForwardRegimes:
+    def _series(self, n, seed=0):
+        idx = pd.bdate_range("2015-01-01", periods=n)
+        rng = np.random.default_rng(seed)
+        return pd.Series(rng.normal(0.0004, 0.012, n), index=idx)
+
+    def test_too_short_history_reason(self):
+        returns = self._series(100)
+        out = rg.walk_forward_regimes(returns, min_train=756)
+        assert out["labels"] is None
+        assert "regime_reason" in out
+
+    def test_no_lookahead_on_the_causal_portion(self):
+        """The definitive causality check, same technique as
+        TestRegimeFeatures.test_columns_and_no_lookahead but run through
+        the whole walk-forward labeling pipeline: truncated right at a
+        refit boundary (feats length exactly 300 for vol_window=21 at
+        return-series length 320), so every refit the truncated run
+        performs trains on IDENTICAL data to the corresponding refit in
+        the full run. Labels on the shared date range must match exactly
+        -- proving nothing after the truncation point ever leaked back."""
+        full = self._series(600)
+        truncated = full.iloc[:320]
+        kwargs = dict(k=2, jump_penalty=5.0, vol_window=21, min_train=200,
+                     refit_every=50, n_init=3, seed=1)
+        out_full = rg.walk_forward_regimes(full, **kwargs)
+        out_trunc = rg.walk_forward_regimes(truncated, **kwargs)
+        assert "regime_reason" not in out_trunc
+        common = out_trunc["labels"].index
+        assert len(common) > 0
+        pd.testing.assert_series_equal(
+            out_full["labels"].loc[common], out_trunc["labels"].loc[common],
+            check_names=False)
+
+    def test_warmup_boundary_reported(self):
+        full = self._series(900)
+        out = rg.walk_forward_regimes(full, min_train=300, refit_every=60,
+                                      n_init=3, seed=2)
+        feats = rg.regime_features(full, vol_window=21)
+        assert out["warmup_end"] == feats.index[299]
+        assert out["walk_forward_start"] == feats.index[300]
+
+    def test_labels_cover_the_entire_feature_index(self):
+        full = self._series(900)
+        out = rg.walk_forward_regimes(full, min_train=300, refit_every=60,
+                                      n_init=3, seed=2)
+        feats = rg.regime_features(full, vol_window=21)
+        assert len(out["labels"]) == len(feats)
+        assert list(out["labels"].index) == list(feats.index)
+        assert out["n_refits"] >= 2
+
+    def test_n_switches_and_regime_stats_present(self):
+        full = self._series(900)
+        out = rg.walk_forward_regimes(full, min_train=300, refit_every=60,
+                                      n_init=3, seed=2)
+        assert out["n_switches"] >= 0
+        assert out["n_switches"] < len(out["labels"])
+        assert set(out["regime_stats"]) == {0, 1}
+
+    def test_single_window_when_history_barely_meets_min_train(self):
+        full = self._series(300)
+        feats = rg.regime_features(full, vol_window=21)
+        out = rg.walk_forward_regimes(full, min_train=len(feats),
+                                      refit_every=60, n_init=3, seed=2)
+        assert out["n_refits"] == 1
+        assert len(out["labels"]) == len(feats)
+        assert out["walk_forward_start"] is None   # nothing after warmup
+
+
 class TestRegimeReport:
     def test_reuses_tearsheet_headline_metrics_per_regime(self):
         idx = pd.bdate_range("2020-01-01", periods=100)

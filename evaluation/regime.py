@@ -192,6 +192,117 @@ def label_regimes(returns, k: int = 2, jump_penalty: float = 5.0,
                       "vol_window": vol_window, "converged": fit["converged"]}}
 
 
+def walk_forward_regimes(returns, k: int = 2, jump_penalty: float = 5.0,
+                         vol_window: int = 21, min_train: int = 756,
+                         refit_every: int = 63, n_init: int = 5,
+                         seed: "int | None" = 0) -> dict:
+    """
+    PIT-safe regime labels via periodic refitting on an EXPANDING window.
+
+    label_regimes() fits fit_jump_model() on the WHOLE sample at once --
+    its own docstring says plainly that makes it "a segmentation/
+    diagnostic tool for reporting on results you already have... not a
+    live regime-prediction signal." This is the walk-forward variant that
+    caveat calls for: refit periodically as history accrues, and use only
+    the NEWLY-added date range from each refit's own labels.
+
+    Mechanics: starting once `min_train` feature-days exist, refit
+    fit_jump_model() every `refit_every` trading days on features[:cutoff]
+    -- an EXPANDING window, never fixed-length or rolling, matching
+    meta_label.walk_forward_meta_labels' own choice for the same reason
+    (more history characterizes a rare regime like a genuine crash better
+    than a short rolling window would). Each fit's Viterbi decode jointly
+    optimizes over its WHOLE training window, so early dates within one
+    fit's window ARE influenced by later dates in that SAME window -- but
+    only the labels for the newest slice of dates (right at that window's
+    own trailing edge) are ever kept in the final output; everything
+    earlier was already labeled by a PRIOR, earlier-cutoff fit and is not
+    touched again. A date's final label therefore only ever depends on
+    data up to and including the refit that produced it -- the same
+    causality discipline meta_label.walk_forward_meta_labels uses, applied
+    to a clustering model instead of a classifier.
+
+    ONE EXCEPTION, stated plainly rather than hidden: the very FIRST
+    `min_train`-day window has no prior fit to walk forward from, so its
+    labels come from an in-sample fit over that whole window -- the same
+    PIT caveat label_regimes() carries, but confined to the warmup period
+    only. `warmup_end`/`walk_forward_start` in the return dict mark that
+    boundary explicitly so a caller who needs a strictly causal series can
+    slice it out.
+
+    Cluster ranking (which raw cluster index means "worst"/"best") is
+    recomputed at EVERY refit from ONLY that fit's own training-window
+    returns, never from data past its cutoff -- so "regime 0" stays "the
+    worst-performing cluster as of what was knowable at that refit," not a
+    fixed global ranking only knowable in hindsight.
+
+    n_init defaults lower than label_regimes' (5 vs 10): a walk-forward run
+    does roughly len(feats) / refit_every fits, so the per-fit random-
+    restart speed/quality tradeoff matters more here than for a single
+    one-off fit.
+
+    Returns {"labels", "n_switches", "regime_stats" (computed post-hoc over
+    the assembled series -- descriptive only, never fed back into a fit),
+    "n_refits", "n_converged", "warmup_end", "walk_forward_start", "params"}
+    or a "*_reason" dict when there isn't enough history for even one fit.
+    """
+    feats = regime_features(returns, vol_window=vol_window)
+    if len(feats) < min_train:
+        return {"labels": None,
+                "regime_reason": f"only {len(feats)} feature days "
+                                 f"(< min_train={min_train})"}
+
+    s = pd.Series(returns).reindex(feats.index).astype(float)
+    X = feats.to_numpy()
+
+    label_chunks = []
+    n_refits = n_converged = 0
+    prev_cutoff = 0
+    cutoff = min_train
+    while prev_cutoff < len(feats):
+        cutoff = min(cutoff, len(feats))
+        Xz = _standardize(X[:cutoff])
+        fit = fit_jump_model(Xz, k=k, jump_penalty=jump_penalty,
+                             n_init=n_init, seed=seed)
+        n_refits += 1
+        n_converged += int(fit["converged"])
+
+        # Rank clusters using ONLY returns up to THIS fit's own cutoff --
+        # the same PIT boundary the fit itself was trained on.
+        raw_full = pd.Series(fit["labels"], index=feats.index[:cutoff])
+        order = (s.iloc[:cutoff].groupby(raw_full).mean()
+                 .sort_values().index.tolist())
+        rank = {old: new for new, old in enumerate(order)}
+
+        new_slice = raw_full.iloc[prev_cutoff:cutoff]
+        label_chunks.append(new_slice.map(rank))
+
+        prev_cutoff = cutoff
+        cutoff = prev_cutoff + refit_every
+
+    labels = pd.concat(label_chunks).rename("regime")
+
+    stats = {}
+    for j in range(k):
+        sub = s.reindex(labels.index)[labels == j]
+        n = len(sub)
+        stats[int(j)] = {
+            "n_days": int(n),
+            "ann_return_pct": round(float(sub.mean() * TRADING_DAYS * 100), 2) if n else None,
+            "ann_vol_pct": round(float(sub.std(ddof=1) * math.sqrt(TRADING_DAYS) * 100), 2)
+                          if n > 1 else None,
+        }
+    n_switches = int((labels.diff().fillna(0) != 0).sum())
+    return {"labels": labels, "n_switches": n_switches, "regime_stats": stats,
+           "n_refits": n_refits, "n_converged": n_converged,
+           "warmup_end": feats.index[min_train - 1],
+           "walk_forward_start": (feats.index[min_train]
+                                  if min_train < len(feats) else None),
+           "params": {"k": k, "jump_penalty": jump_penalty,
+                      "vol_window": vol_window, "min_train": min_train,
+                      "refit_every": refit_every, "n_init": n_init}}
+
+
 def regime_report(returns, labels: pd.Series) -> dict:
     """
     Per-regime headline_metrics() from tearsheet.py -- Sharpe/Sortino/
