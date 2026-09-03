@@ -111,3 +111,61 @@ class TestEntryLagLeakage:
         # variance -> the degenerate-sd guard returns None on both sides,
         # so inflation is None, not a spurious nonzero number
         assert out["inflation"] is None
+
+
+class TestFeatureCenteringLeakage:
+    def test_centered_window_inflates_apparent_lift(self):
+        # A centered feature window can see 2 bars past entry_signal_date;
+        # bake each trade's own outcome into the price exactly there, so a
+        # centered feature is (almost) a direct readout of the label while
+        # a trailing feature sees nothing informative. The probe should
+        # show the centered (leaky) run producing more apparent win-rate
+        # lift than the trailing (safe) run.
+        rng = np.random.default_rng(3)
+        n_trades = 120
+        spacing = 8
+        total_bars = n_trades * spacing + 20
+        idx = pd.bdate_range("2020-01-01", periods=total_bars)
+        close = np.full(total_bars, 100.0)
+        labels = rng.integers(0, 2, n_trades)
+        entry_locs = [10 + i * spacing for i in range(n_trades)]
+        for loc, label in zip(entry_locs, labels):
+            close[loc + 2] = close[loc] * (1.10 if label else 0.90)
+        cache = {"TEST": pd.DataFrame({"close": close}, index=idx)}
+
+        entry_signal_dates = idx[entry_locs]
+        pnl_pct = np.where(labels == 1, 5.0, -5.0)
+        trades = pd.DataFrame({
+            "symbol": ["TEST"] * n_trades,
+            "entry_signal_date": entry_signal_dates,
+            "pnl_pct": pnl_pct,
+            "pnl_dollars": pnl_pct * 100,
+            "side": ["long"] * n_trades,
+            "days_held": [5] * n_trades,
+        })
+
+        out = lp.feature_centering_leakage(trades, cache, windows=(4,),
+                                           min_train=20, refit_every=5)
+        assert out["switch"] == "centered"
+        assert out["safe_value"] is False and out["leaky_value"] is True
+        assert out["safe_metric"] is not None and out["leaky_metric"] is not None
+        assert out["leaky_metric"] > out["safe_metric"]
+        assert out["inflation"] > 0
+
+    def test_no_scored_trades_gives_none_metric(self):
+        # min_train larger than the whole trade count -> no OOS-scored
+        # trades on either side -> both metrics (and inflation) are None,
+        # not a spurious 0.
+        idx = pd.bdate_range("2020-01-01", periods=100)
+        cache = {"TEST": pd.DataFrame({"close": [100.0] * 100}, index=idx)}
+        trades = pd.DataFrame({
+            "symbol": ["TEST"] * 5,
+            "entry_signal_date": idx[[10, 20, 30, 40, 50]],
+            "pnl_pct": [1.0, -1.0, 1.0, -1.0, 1.0],
+            "pnl_dollars": [100.0, -100.0, 100.0, -100.0, 100.0],
+            "side": ["long"] * 5,
+            "days_held": [5] * 5,
+        })
+        out = lp.feature_centering_leakage(trades, cache, windows=(4,),
+                                           min_train=50)
+        assert out["inflation"] is None

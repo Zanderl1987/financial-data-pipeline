@@ -61,6 +61,34 @@ class TestBuildFeatures:
         feats = ml.build_features(trades, {"TEST": df}, windows=(21,))
         assert feats.isna().all(axis=1).iloc[0]
 
+    def test_centered_uses_future_bars_known_answer(self):
+        idx = pd.bdate_range("2020-01-01", periods=41)
+        closes = [100.0] * 41
+        closes[22] = 120.0   # two bars AFTER loc=20 -- visible only if centered
+        df = pd.DataFrame({"close": closes}, index=idx)
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[20]]})
+        trailing = ml.build_features(trades, {"TEST": df}, windows=(4,), centered=False)
+        centered = ml.build_features(trades, {"TEST": df}, windows=(4,), centered=True)
+        assert trailing.loc[0, "ret_4d"] == pytest.approx(0.0)
+        assert centered.loc[0, "ret_4d"] == pytest.approx(0.20)
+
+    def test_centered_default_is_false_backward_compatible(self):
+        idx = pd.bdate_range("2020-01-01", periods=25)
+        closes = [100.0] * 24 + [110.0]
+        df = pd.DataFrame({"close": closes}, index=idx)
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[24]]})
+        default = ml.build_features(trades, {"TEST": df}, windows=(5, 10, 21))
+        explicit = ml.build_features(trades, {"TEST": df}, windows=(5, 10, 21),
+                                     centered=False)
+        pd.testing.assert_frame_equal(default, explicit)
+
+    def test_centered_insufficient_future_history_is_nan(self):
+        idx = pd.bdate_range("2020-01-01", periods=25)
+        df = pd.DataFrame({"close": [100.0] * 25}, index=idx)
+        trades = pd.DataFrame({"symbol": ["TEST"], "entry_signal_date": [idx[24]]})
+        feats = ml.build_features(trades, {"TEST": df}, windows=(4,), centered=True)
+        assert feats.isna().all(axis=1).iloc[0]
+
     def test_no_lookahead(self):
         idx = pd.bdate_range("2020-01-01", periods=40)
         rng = np.random.default_rng(0)

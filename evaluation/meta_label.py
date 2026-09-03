@@ -56,7 +56,8 @@ def triple_barrier_labels(trades: pd.DataFrame) -> pd.Series:
 # --------------------------------------------------------------- features
 
 def build_features(trades: pd.DataFrame, cache: dict,
-                   windows=DEFAULT_FEATURE_WINDOWS) -> pd.DataFrame:
+                   windows=DEFAULT_FEATURE_WINDOWS,
+                   centered: bool = False) -> pd.DataFrame:
     """
     Trailing return over each window in `windows` plus trailing volatility
     (the longest window) and distance from that window's SMA, computed
@@ -66,12 +67,24 @@ def build_features(trades: pd.DataFrame, cache: dict,
     entry_date instead would leak the fill price the meta-model is meant
     to be deciding whether to accept.
 
+    centered=False (default, PIT-safe): every window is TRAILING -- ends
+    at entry_signal_date, drawn only from bars up to and including the
+    decision point. centered=True is the leaky switch
+    leakage_probe.feature_centering_leakage() ablates: each window is
+    instead CENTERED on entry_signal_date, i.e. half the window is drawn
+    from bars that had not happened yet at decision time -- the classic
+    `rolling(window, center=True)` bug. This exists only so that probe can
+    measure how much it inflates the apparent meta-filter lift; never pass
+    centered=True outside that probe.
+
     Rows for a trade whose symbol/date isn't found in `cache`, or that
-    falls before the longest window has enough history, get NaN features
-    and must be dropped by the caller before fitting (never silently
-    imputed -- a fabricated feature value is worse than a dropped row).
+    falls before the required window has enough history on both sides,
+    get NaN features and must be dropped by the caller before fitting
+    (never silently imputed -- a fabricated feature value is worse than a
+    dropped row).
     """
     longest = max(windows)
+    half = longest // 2
     rows = []
     for _, t in trades.iterrows():
         sym, sig_date = t["symbol"], t["entry_signal_date"]
@@ -82,7 +95,20 @@ def build_features(trades: pd.DataFrame, cache: dict,
         if df is not None and "close" in df.columns and sig_date in df.index:
             loc = df.index.get_loc(sig_date)
             close = df["close"]
-            if loc >= longest:
+            n = len(close)
+            if centered:
+                if loc - half >= 0 and loc + half < n:
+                    for w in windows:
+                        wh = w // 2
+                        lo_i, hi_i = loc - wh, loc + wh
+                        if lo_i >= 0 and hi_i < n:
+                            feat[w] = float(close.iloc[hi_i] / close.iloc[lo_i] - 1.0)
+                    window_px = close.iloc[loc - half: loc + half + 1]
+                    rets = window_px.pct_change().dropna()
+                    feat["volatility"] = float(rets.std(ddof=0))
+                    sma = float(window_px.mean())
+                    feat["dist_from_sma"] = float(close.iloc[loc] / sma - 1.0) if sma else np.nan
+            elif loc >= longest:
                 for w in windows:
                     feat[w] = float(close.iloc[loc] / close.iloc[loc - w] - 1.0)
                 window_px = close.iloc[loc - longest: loc + 1]
