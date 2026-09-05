@@ -63,6 +63,7 @@ _METADATA_KEYS = {
     "n", "ic_days", "top_n", "bottom_n", "oriented",
     "n_boot", "boot_days", "n_days", "n_trials", "n_population", "n_perm",
     "n_trades", "n_long", "n_short", "n_symbols", "n_scored", "n_kept",
+    "n_wash_events",
 }
 
 
@@ -279,7 +280,8 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         n_boot=1000, n_perm=200, seed=0, cache=None,
         meta_label=False, meta_threshold=0.5, meta_min_train=50,
         meta_refit_every=20, meta_l2=1.0,
-        regime_report=False, regime_benchmark="SPY", regime_k=2) -> dict:
+        regime_report=False, regime_benchmark="SPY", regime_k=2,
+        tax=False) -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -327,6 +329,15 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                     {"meta_reason": f"{type(exc).__name__}: {exc}"}, [])
             results["meta_filtered"] = meta_result
             rows += meta_rows
+        if tax and not trades_df.empty:
+            from evaluation import taxes as ev_taxes   # cheap, opt-in
+            try:
+                tax_sum_dict = ev_taxes.tax_summary(trades_df)
+                results["tax"] = tax_sum_dict
+                rows += _stat_rows("trades_tax", -1, tax_sum_dict,
+                                   n_key="n_trades")
+            except Exception as exc:   # best-effort, never fatal to the run
+                results["tax"] = {"tax_reason": f"{type(exc).__name__}: {exc}"}
     else:
         raise TypeError(f"cannot evaluate object of type {type(obj).__name__}"
                         " -- expected Signal, EventSet, or TradeRule")
@@ -384,7 +395,8 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                        "meta_threshold": meta_threshold if meta_label else None,
                        "regime_report": regime_report,
                        "regime_benchmark": regime_benchmark if regime_report else None,
-                       "regime_k": regime_k if regime_report else None}}
+                       "regime_k": regime_k if regime_report else None,
+                       "tax": tax}}
     with open(os.path.join(out_dir, "run_meta.json"), "w",
               encoding="utf-8") as fh:
         json.dump(_json_safe(meta), fh, indent=2, default=str)

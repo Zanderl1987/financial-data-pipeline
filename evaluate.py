@@ -85,6 +85,16 @@ def _print_trades_summary(res):
                   f"({100 * meta['kept_fraction']:.1f}%) "
                   f"win_rate {_fmt(u.get('win_rate_pct'))}% -> "
                   f"{_fmt(f.get('win_rate_pct'))}%")
+    taxd = res["results"].get("tax")
+    if taxd:
+        if taxd.get("tax_reason"):
+            print(f"tax: {taxd['tax_reason']}")
+        else:
+            print(f"tax: pnl ${_fmt(taxd.get('total_pnl_dollars'))} -> "
+                  f"after-tax ${_fmt(taxd.get('after_tax_pnl_dollars'))} "
+                  f"(tax ${_fmt(taxd.get('tax_due_total'))}, "
+                  f"drag {_fmt(taxd.get('tax_drag_pct'))}%, "
+                  f"wash events {taxd.get('n_wash_events', 0)})")
 
 
 def main(argv=None) -> int:
@@ -140,6 +150,11 @@ def main(argv=None) -> int:
                          "of the evaluated window fell in each regime")
     ap.add_argument("--regime-benchmark", default="SPY")
     ap.add_argument("--regime-k", type=int, default=2)
+    ap.add_argument("--tax", action="store_true",
+                    help="trade-rule runs only: compute wash-sale tax "
+                         "accounting (evaluation/taxes.py) over the realized "
+                         "trades and register after-tax + wash stats as its "
+                         "own trades_tax evaluation")
     ap.add_argument("--out-root", default=None)
     ap.add_argument("--registry-path", default=None)
     ap.add_argument("--no-registry", action="store_true",
@@ -224,7 +239,8 @@ def main(argv=None) -> int:
                   n_boot=args.n_boot, n_perm=args.n_perm,
                   meta_label=args.meta_label, meta_threshold=args.meta_threshold,
                   regime_report=args.regime_report,
-                  regime_benchmark=args.regime_benchmark, regime_k=args.regime_k)
+                  regime_benchmark=args.regime_benchmark, regime_k=args.regime_k,
+                  tax=args.tax)
     if cache is not None:
         kwargs["cache"] = cache
     if args.out_root:
