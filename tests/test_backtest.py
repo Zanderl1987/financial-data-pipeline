@@ -6,6 +6,7 @@ score strongly positive, and its negation must mirror it. This proves the sign
 convention and the one-day weight lag are wired correctly.
 """
 
+import math
 import os
 import sys
 
@@ -283,3 +284,52 @@ class TestAdvParticipationCost:
         assert res.params["adv_participation_coeff"] == 25.0
         assert res.params["aum"] == 500_000.0
         assert res.params["adv_window"] == 10
+
+    @pytest.mark.parametrize("vol_mult", [1.0, 2.0])
+    def test_sqrt_law_cost_is_vol_proportional(self, monkeypatch, vol_mult):
+        # Alternating +/-1% daily returns -> trailing-2-day PIT sample std
+        # (pandas ddof=1) is EXACTLY 0.01*sqrt(2) (2*x% -> 2*x%). With aum and
+        # ADV chosen so participation = 1.0 on every rebalance, the per-symbol
+        # sqrt_law cost = ADV_SQRT_LAW_K * vol * sqrt(1.0); both quantile slots
+        # trade every day, so the daily cost is exactly
+        # 2 * ADV_SQRT_LAW_K * (0.01*sqrt(2)*vol_mult) once the warm-up fills.
+        # Closed-form ground truth, not a ratio-of-the-run assertion (sqrt(2)
+        # and the sum across symbols document pandas' ddof=1 default).
+        dates, sig = self._setup(monkeypatch, n=12)
+        n = len(dates)
+        alt = np.where(np.arange(n) % 2 == 0, 0.01, -0.01) * vol_mult
+        R = pd.DataFrame({"A": alt, "B": alt}, index=dates)
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        import event_backtest as eb
+        aum = 100_000.0
+        thin = pd.DataFrame({"A": 100_000.0, "B": 100_000.0}, index=dates)
+        monkeypatch.setattr(eb, "load_dollar_volume_matrix",
+                            lambda syms, start=None, end=None, price_table=None: thin)
+
+        baseline = bt.backtest(sig, rebalance="D", quantiles=2,
+                               long_short=False, aum=aum)
+        adv = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          adv_participation_coeff="sqrt_law", aum=aum,
+                          adv_window=2)
+        diff = baseline.returns - adv.returns
+        assert diff.iloc[:2].abs().max() < 1e-12
+        expected = 2 * eb.ADV_SQRT_LAW_K * (0.01 * math.sqrt(2) * vol_mult)
+        assert (diff.iloc[2:] - expected).abs().max() < 1e-12
+
+    def test_sqrt_law_requires_returns_matrix(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch, n=10)
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B"])
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        with pytest.raises(ValueError):
+            bt._adv_participation_cost(
+                pd.DataFrame(0.0, index=dates, columns=["A", "B"]),
+                aum=1e6, coeff="sqrt_law", adv_window=5, symbols=["A", "B"],
+                start=None, end=None, price_table=None, returns=None)
+
+    def test_invalid_adv_participation_mode_raises(self, monkeypatch):
+        dates, sig = self._setup(monkeypatch, n=10)
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B"])
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        with pytest.raises(ValueError):
+            bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                        adv_participation_coeff="linear_magic")

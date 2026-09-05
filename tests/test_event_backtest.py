@@ -165,6 +165,46 @@ class TestEventStudy:
         assert sc.trades["return_pct"].iloc[0] == \
             no_impact.trades["return_pct"].iloc[0]
 
+    def test_adv_impact_sqrt_law_adds_nonzero_cost(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        base = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1)
+        sqrt = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                           notional=10_000_000.0, adv_impact_coeff="sqrt_law")
+        base_rets = base.trades["return_pct"]
+        sqrt_rets = sqrt.trades["return_pct"]
+        # opt-in: strictly lower than baseline, and a visible charge at this
+        # size (participation ~ 10M / (100 * 5e5) ~ 20% -> ~0.6*1%*sqrt(.2)
+        # ~ 27 bps per side, one-way on a 21-day hold).
+        assert (sqrt_rets < base_rets).all()
+        assert float((base_rets - sqrt_rets).abs().mean()) > 0.1
+
+    def test_adv_impact_sqrt_law_scales_with_participation(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
+        small = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                            notional=1_000.0, adv_impact_coeff="sqrt_law")
+        big = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                          notional=10_000_000.0, adv_impact_coeff="sqrt_law")
+        small_rets = small.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        big_rets = big.trades.set_index(["symbol", "entry_date"])["return_pct"]
+        assert (big_rets <= small_rets).all()
+        assert (big_rets < small_rets).any()
+
+    def test_adv_impact_sqrt_law_no_history_degrades_gracefully(self, patched_prices):
+        # day0 = first bar: realized-vol history is empty, sqrt_law must fall
+        # back to zero impact identical to the baseline instead of crashing.
+        ev = pd.DataFrame({"date": [patched_prices.index[0]]})
+        sc = eb.scenario(ev, symbols="TEST", holding_days=5, entry_lag=1,
+                         notional=10_000_000.0, adv_impact_coeff="sqrt_law")
+        no_impact = eb.scenario(ev, symbols="TEST", holding_days=5, entry_lag=1)
+        assert sc.trades["return_pct"].iloc[0] == \
+            no_impact.trades["return_pct"].iloc[0]
+
+    def test_adv_impact_invalid_mode_raises(self, patched_prices):
+        ev = pd.DataFrame({"date": patched_prices.index[[100]]})
+        with pytest.raises(ValueError):
+            eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,
+                        adv_impact_coeff="flat_linear")
+
     def test_scenario_atr_stop_does_not_crash_and_produces_trades(self, patched_prices):
         ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
         sc = eb.scenario(ev, symbols="TEST", holding_days=21, entry_lag=1,

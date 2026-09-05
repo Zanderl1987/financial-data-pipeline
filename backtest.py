@@ -126,9 +126,10 @@ def _max_drawdown(equity: pd.Series) -> float:
     return float((equity / peak - 1.0).min())
 
 
-def _adv_participation_cost(weights: pd.DataFrame, aum: float, coeff: float,
+def _adv_participation_cost(weights: pd.DataFrame, aum: float, coeff,
                             adv_window: int, symbols, start, end,
-                            price_table: "str | None") -> pd.Series:
+                            price_table: "str | None",
+                            returns: "pd.DataFrame | None" = None) -> pd.Series:
     """
     Per-symbol participation-based sqrt market-impact cost, as a fraction of
     `aum` per day: for each symbol traded on a rebalance day, cost_rate =
@@ -155,6 +156,16 @@ def _adv_participation_cost(weights: pd.DataFrame, aum: float, coeff: float,
     participation is measured against liquidity known BEFORE today's own
     (not-yet-observed) volume, the same look-ahead-safety convention
     event_backtest.load_dollar_volume()'s callers already use.
+
+    coeff may ALSO be the string "sqrt_law" (same participation surface, but
+    the flat scalar is replaced by the calibrated square-root-law form
+    `event_backtest.ADV_SQRT_LAW_K * realized_daily_vol_bps * sqrt(p)`):
+    realized daily vol per symbol per day comes from `returns`, measured over
+    the trailing `adv_window` days SHIFTED one day (PIT -- today's own
+    not-yet-realized return excluded), exactly like ADV itself. Requires
+    `returns` (the engine already holds it; re-passing avoids re-deriving it
+    from prices). The legacy numeric path is byte-identical when `returns`
+    is unused/the scalar form is chosen.
     """
     import event_backtest as eb
 
@@ -164,7 +175,17 @@ def _adv_participation_cost(weights: pd.DataFrame, aum: float, coeff: float,
     volumes = volumes.reindex(index=weights.index, columns=weights.columns)
     adv = volumes.rolling(adv_window, min_periods=adv_window).mean().shift(1)
     participation = (dollar_change / adv).replace([np.inf, -np.inf], np.nan)
-    cost_rate = (coeff / 1e4) * np.sqrt(participation.clip(lower=0))
+    if coeff == "sqrt_law":
+        if returns is None:
+            raise ValueError("sqrt_law mode requires the returns matrix "
+                             "(returns=...) to measure per-symbol realized "
+                             "daily volatility")
+        realized_vol = returns.rolling(
+            adv_window, min_periods=adv_window).std().shift(1)
+        cost_rate = (eb.ADV_SQRT_LAW_K * realized_vol
+                     * np.sqrt(participation.clip(lower=0)))
+    else:
+        cost_rate = (coeff / 1e4) * np.sqrt(participation.clip(lower=0))
     cost_dollars = (cost_rate * dollar_change).fillna(0.0).sum(axis=1)
     return cost_dollars / aum
 
@@ -183,7 +204,7 @@ def backtest(
     borrow_fee_bps: float = 0.0,
     slippage_model: "str | None" = None,
     adv_impact_coeff: float = 0.1,
-    adv_participation_coeff: "float | None" = None,
+    adv_participation_coeff: "float | str | None" = None,
     aum: float = 1_000_000.0,
     adv_window: int = 20,
     vol_target: "float | None" = None,
@@ -199,9 +220,18 @@ def backtest(
     the existing portfolio-turnover-based adv_impact_coeff/slippage_model. See
     _adv_participation_cost()'s docstring for the model and why it's a
     separate parameter. `aum`/`adv_window` are only meaningful when this is set.
+    Set it to the string "sqrt_law" to replace the flat scalar with the
+    calibration-backed square-root-law form `ADV_SQRT_LAW_K * realized_daily_
+    vol_bps * sqrt(p)` (per-symbol realized vol measured PIT from `R`); any
+    other string raises.
     """
     if not {"symbol", "date", score}.issubset(signal.columns):
         raise ValueError(f"signal must have columns symbol, date, '{score}'")
+
+    if adv_participation_coeff is not None and adv_participation_coeff != "sqrt_law" \
+            and not isinstance(adv_participation_coeff, (int, float)):
+        raise ValueError(f"adv_participation_coeff must be a number, "
+                         f"'sqrt_law', or None; got {adv_participation_coeff!r}")
 
     sig = signal[["symbol", "date", score]].copy()
     sig["date"] = pd.to_datetime(sig["date"])
@@ -258,10 +288,13 @@ def backtest(
         slippage_model=slippage_model, impact_coeff=adv_impact_coeff,
     )
     costs = ev_execution.daily_cost(cost_model, turnover, short_exposure, ann=_ANN)
-    if adv_participation_coeff is not None and adv_participation_coeff > 0:
+    if adv_participation_coeff is not None and (
+            adv_participation_coeff == "sqrt_law"
+            or (isinstance(adv_participation_coeff, (int, float))
+                and adv_participation_coeff > 0)):
         costs = costs + _adv_participation_cost(
             weights, aum, adv_participation_coeff, adv_window, symbols,
-            start, end, pt)
+            start, end, pt, returns=R)
 
     net = gross - costs
 

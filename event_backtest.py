@@ -54,6 +54,23 @@ from evaluation import execution as ev_execution
 
 HORIZONS = (1, 3, 5, 10, 21, 63)
 
+# Square-root-law market-impact prefactor, measured in units of the target's
+# OWN daily volatility. Cross-sectional calibrations across U.S. large-caps
+# (Bouchaud-class meta-studies) put the worldwide prefactor in the band
+# [0.5, 1.0]; an anonymous-tape SRL calibration on AAPL (Vasaikar,
+# arXiv:2606.24019, Nasdaq TotalView-ITCH 2024-25) fitted c_raw ~ 0.69
+# (bias-corrected ~0.34) with a free exponent indistinguishable from 1/2.
+# 0.6 is the conventional mid-band point. Impact bps of traded notional:
+#
+#     bps = ADV_SQRT_LAW_K * realized_daily_vol_bps * sqrt(participation)
+#
+# Impact is therefore proportional to the symbol's OWN realized daily vol at
+# the trade date times the root of participation -- the volatility term the
+# legacy `coeff/1e4 * sqrt(p)` form lacks. Pass adv_impact_coeff /
+# adv_participation_coeff = "sqrt_law" to swap the blind flat scalar for this
+# data-driven, calibrated form.
+ADV_SQRT_LAW_K: float = 0.6
+
 # price tables searched in order; (table, close preference)
 _PRICE_TABLES = ("tiingo_prices", "yfinance_universe_prices", "prices",
                  "market_history", "sector_etfs")
@@ -373,6 +390,24 @@ class ScenarioResult:
                 f"pf={m.get('profit_factor')}>")
 
 
+def _trailing_realized_vol(closes: "pd.Series | None", loc: int,
+                           window: int) -> float:
+    """Realized daily volatility (decimal) of `closes` over the `window` days
+    STRICTLY BEFORE position `loc` -- point-in-time: loc itself (the trade
+    day's own, not-yet-realized return) is excluded. Returns 0.0 when fewer
+    than min_periods returns exist so the caller degrades to zero ADV impact
+    instead of applying a garbage estimate, matching the "needs history before
+    day0" guards used for ADV and ATR."""
+    if closes is None or loc < 2:
+        return 0.0
+    min_periods = max(5, window // 2)
+    seg = closes.iloc[max(0, loc - window): loc]
+    rets = seg.pct_change().dropna()
+    if len(rets) < min_periods:
+        return 0.0
+    return float(rets.std(ddof=1))  # sample std, matching backtest()._adv_participation_cost()
+
+
 def scenario(
     events: pd.DataFrame,
     symbols: "list[str] | str | None" = None,
@@ -388,8 +423,9 @@ def scenario(
     price_table: "str | None" = None,
     min_gap_days: int = 0,
     notional: float = 10_000.0,
-    adv_impact_coeff: "float | None" = None,
+    adv_impact_coeff: "float | str | None" = None,
     adv_window: int = 20,
+    vol_window: int = 20,
 ) -> ScenarioResult:
     """
     Simulate trading every event with cost models, ATR trailing stops, and risk metrics.
@@ -409,7 +445,22 @@ def scenario(
     price table gets zero ADV impact (participation treated as 0), same as
     the "insufficient history" guards elsewhere in this module -- it is not
     excluded from the scenario.
+
+    adv_impact_coeff may ALSO be the string "sqrt_law" (opt-in, same as
+    setting a number -- numeric behavior unchanged): the calibrated
+    square-root-law form `ADV_SQRT_LAW_K * realized_daily_vol_bps * sqrt(p)`
+    (bps), where realized daily vol is measured per event on THAT event's own
+    symbol over the trailing `vol_window` days before day0 (point-in-time,
+    the trade day itself excluded). This is the volatility layer the flat
+    scalar lacks -- same participation surface, but impact now scales with
+    the symbol's own realized vol, so the free scalar becomes a
+    literature-anchored prefactor instead of a guess. See ADV_SQRT_LAW_K's
+    docstring for the citation. The legacy numeric path is unchanged.
     """
+    if adv_impact_coeff is not None and adv_impact_coeff != "sqrt_law" \
+            and not isinstance(adv_impact_coeff, (int, float)):
+        raise ValueError(f"adv_impact_coeff must be a number, 'sqrt_law', or "
+                         f"None; got {adv_impact_coeff!r}")
     from evaluation import stats as ev_stats
 
     res = event_study(events, symbols=symbols, window=(0, holding_days),
@@ -474,8 +525,18 @@ def scenario(
                     adv = adv_series.iloc[loc0 - adv_window: loc0].mean()
                     if adv > 0:
                         participation = notional / adv
-                        event_cost = event_cost + (adv_impact_coeff / 1e4
-                                                    * math.sqrt(participation))
+                        if adv_impact_coeff == "sqrt_law":
+                            vol = 0.0
+                            if symbol_closes is not None and e["day0"] in symbol_closes.index:
+                                vol = _trailing_realized_vol(
+                                    symbol_closes,
+                                    symbol_closes.index.get_loc(e["day0"]),
+                                    vol_window)
+                            event_cost = event_cost + (
+                                ADV_SQRT_LAW_K * vol * math.sqrt(participation))
+                        else:
+                            event_cost = event_cost + (adv_impact_coeff / 1e4
+                                                        * math.sqrt(participation))
         net = gross - (event_cost * 2.0)  # entry + exit friction
 
         if symbol_closes is not None and e["day0"] in symbol_closes.index:
