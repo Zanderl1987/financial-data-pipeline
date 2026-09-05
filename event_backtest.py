@@ -182,6 +182,38 @@ def load_dollar_volume_matrix(symbols, start=None, end=None,
     return pd.DataFrame(out).sort_index()
 
 
+def load_borrow_fee(symbol, start=None, end=None) -> pd.Series:
+    """Load per-symbol borrow fee rate (annualized bps) from the IBKR feed.
+
+    Returns a Series indexed by date with values in bps (fee_rate column from
+    ibkr_borrow_fee table). The IBKR feed is snapshot-only (daily accumulator),
+    so history only exists from the day the pipeline started running.
+    """
+    try:
+        df = q.load("ibkr_borrow_fee", symbol=symbol, start=start, end=end,
+                    columns=["date", "fee_rate", "fetched_at"])
+    except Exception:
+        return pd.Series(dtype=float)
+    if df.empty:
+        return pd.Series(dtype=float)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    # fee_rate may be None for some rows; drop those
+    s = df["fee_rate"].dropna()
+    s.name = symbol
+    return s
+
+
+def load_borrow_fee_matrix(symbols, start=None, end=None) -> pd.DataFrame:
+    """Wide borrow-fee matrix (date x symbol, annualized bps)."""
+    out = {}
+    for sym in dict.fromkeys(symbols):
+        s = load_borrow_fee(sym, start, end)
+        if not s.empty:
+            out[sym] = s
+    return pd.DataFrame(out).sort_index()
+
+
 # ------------------------------------------------------------ event studies
 
 @dataclass
@@ -426,6 +458,8 @@ def scenario(
     adv_impact_coeff: "float | str | None" = None,
     adv_window: int = 20,
     vol_window: int = 20,
+    borrow_fee_bps: float = 0.0,
+    borrow_fee_matrix: "pd.DataFrame | None" = None,
 ) -> ScenarioResult:
     """
     Simulate trading every event with cost models, ATR trailing stops, and risk metrics.
@@ -456,6 +490,16 @@ def scenario(
     the symbol's own realized vol, so the free scalar becomes a
     literature-anchored prefactor instead of a guess. See ADV_SQRT_LAW_K's
     docstring for the citation. The legacy numeric path is unchanged.
+
+    borrow_fee_bps (flat, default 0.0): annualized borrow fee in bps applied to
+    short trades over their holding period. Used only when borrow_fee_matrix
+    is not provided.
+
+    borrow_fee_matrix (opt-in, default None): per-symbol annualized borrow fees
+    (bps) as a DataFrame (date x symbol). If provided, replaces the flat
+    `borrow_fee_bps` for short trades by looking up the rate at each trade's
+    entry date. If None and `borrow_fee_bps == 0`, attempts to auto-load from
+    the `ibkr_borrow_fee` table for the event symbols/dates.
     """
     if adv_impact_coeff is not None and adv_impact_coeff != "sqrt_law" \
             and not isinstance(adv_impact_coeff, (int, float)):
@@ -483,8 +527,16 @@ def scenario(
     daily_rets: dict[pd.Timestamp, list] = {}
     closes = load_close_matrix(res.events["symbol"].unique(), price_table=price_table)
     volumes = (load_dollar_volume_matrix(res.events["symbol"].unique(),
-                                         price_table=price_table)
-              if adv_impact_coeff else None)
+                                          price_table=price_table)
+                                        if adv_impact_coeff else None)
+    # Per-symbol borrow fees (opt-in): load matrix if not provided
+    bf_matrix = borrow_fee_matrix
+    if bf_matrix is None and borrow_fee_bps == 0:
+        try:
+            bf_matrix = load_borrow_fee_matrix(
+                res.events["symbol"].unique(), start=None, end=None)
+        except Exception:
+            bf_matrix = None
 
     for i, e in res.events.iterrows():
         path = res.car.loc[i]                      # cum return from entry close
@@ -538,6 +590,17 @@ def scenario(
                             event_cost = event_cost + (adv_impact_coeff / 1e4
                                                         * math.sqrt(participation))
         net = gross - (event_cost * 2.0)  # entry + exit friction
+        # Per-symbol borrow fee for short trades (opt-in)
+        if sign < 0 and exit_rel > 0:  # short side
+            bf_bps = 0.0
+            if bf_matrix is not None and e["symbol"] in bf_matrix.columns:
+                # Look up rate at entry date (day0)
+                if e["day0"] in bf_matrix.index:
+                    bf_bps = bf_matrix.loc[e["day0"], e["symbol"]]
+            elif borrow_fee_bps > 0:
+                bf_bps = borrow_fee_bps
+            if bf_bps > 0:
+                net -= bf_bps / 1e4 * (exit_rel / TRADING_DAYS)
 
         if symbol_closes is not None and e["day0"] in symbol_closes.index:
             loc = symbol_closes.index.get_loc(e["day0"])
@@ -593,7 +656,8 @@ def scenario(
               "cost_bps": cost_bps, "spread_bps": spread_bps,
               "slippage_model": slippage_model or "none", "atr_stop_mult": atr_stop_mult,
               "notional": notional, "adv_impact_coeff": adv_impact_coeff,
-              "adv_window": adv_window}
+              "adv_window": adv_window, "borrow_fee_bps": borrow_fee_bps,
+              "borrow_fee_matrix": borrow_fee_matrix is not None}
     return ScenarioResult(trades=tdf, equity=equity, metrics=metrics,
                           params=params, event_study=res)
 

@@ -312,6 +312,8 @@ CATALOG: dict[str, str] = {
     "yfinance_universe_prices": _glob("yfinance/**/yfinance_universe_*.parquet"),
     # ── TradingView technical-rating snapshots ───────────────────────────────
     "tv_ratings":              _glob("tradingview/**/*.parquet"),
+    # ── IBKR borrow-fee snapshots ──────────────────────────────────────────────
+    "ibkr_borrow_fee":         _glob("ibkr/borrow_fee/**/*.parquet"),
     # ── SEC EDGAR filing index (8-K, 10-K/Q, S-1, 13D/G, proxies) ────────────
     "sec_filings":             _glob("sec_filings/**/*.parquet"),
     # ── Schwab intraday bars, movers, and portfolio mirror ───────────────────

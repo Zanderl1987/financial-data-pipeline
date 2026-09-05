@@ -61,6 +61,7 @@ PIPELINE_MODULES = [
     "jmic_pipeline",
     "yfinance_pipeline",
     "tradingview_pipeline",
+    "ibkr_borrow_fee_pipeline",
     "sec_filings_pipeline",
     "schwab_intraday_pipeline",
     "schwab_movers_pipeline",

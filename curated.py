@@ -143,6 +143,7 @@ KEYS: dict[str, list[str]] = {
     "fundamentals_quarterly": ["cik", "metric", "period_end", "fiscal_period", "form", "unit"],
     # Events / disclosures
     "earnings_calendar":      ["symbol", "date"],
+    "ibkr_borrow_fee":       ["symbol", "date"],
     "insider_transactions":   ["id"],
     "institutional_holdings": ["cik", "cusip", "filed_date", "put_call"],
     "finnhub_recommendations":["symbol", "period"],

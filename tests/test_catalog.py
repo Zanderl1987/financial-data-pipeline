@@ -92,6 +92,8 @@ EXPECTED_TABLES = [
     "yfinance_universe_prices",
     # TradingView technical-rating snapshots
     "tv_ratings",
+    # IBKR borrow-fee snapshots
+    "ibkr_borrow_fee",
     # SEC EDGAR filing index
     "sec_filings",
     # Schwab intraday, movers, portfolio mirror
@@ -433,6 +435,7 @@ class TestCatalogPaths:
         "alpha_vantage_income_statement",
         "alpha_vantage_balance_sheet",
         "alpha_vantage_cash_flow",
+        "ibkr_borrow_fee",  # IBKR FTP port 21 blocked from this network; pipeline ready but not backfilled
     }
 
     def test_storage_dirs_exist(self):

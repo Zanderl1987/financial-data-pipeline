@@ -950,6 +950,12 @@ SCHEMAS: dict[str, dict] = {
         "value_ranges": {"rating_all": (-1, 1), "rating_ma": (-1, 1),
                          "rating_osc": (-1, 1)},
     },
+    # ── IBKR borrow-fee snapshots ──────────────────────────────────────────
+    "ibkr_borrow_fee": {
+        "required":    ["symbol", "date", "fee_rate", "fetched_at"],
+        "critical_nn": ["symbol", "date", "fee_rate"],
+        "date_col":    "date",
+    },
     # ── SEC EDGAR filing index ────────────────────────────────────────────────
     "sec_filings": {
         "required":    ["form", "company", "cik", "filed", "url", "fetched_at"],

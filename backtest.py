@@ -202,6 +202,7 @@ def backtest(
     cost_bps: float = 0.0,
     spread_bps: float = 0.0,
     borrow_fee_bps: float = 0.0,
+    borrow_fee_matrix: "pd.DataFrame | None" = None,
     slippage_model: "str | None" = None,
     adv_impact_coeff: float = 0.1,
     adv_participation_coeff: "float | str | None" = None,
@@ -224,6 +225,12 @@ def backtest(
     calibration-backed square-root-law form `ADV_SQRT_LAW_K * realized_daily_
     vol_bps * sqrt(p)` (per-symbol realized vol measured PIT from `R`); any
     other string raises.
+
+    borrow_fee_matrix (opt-in, default None): per-symbol annualized borrow fees
+    (bps) as a DataFrame (date x symbol). If provided, replaces the flat
+    `borrow_fee_bps` for short-cost calculation using per-symbol short exposure.
+    If None and `borrow_fee_bps == 0`, attempts to auto-load from the
+    `ibkr_borrow_fee` table for the signal's symbols/dates.
     """
     if not {"symbol", "date", score}.issubset(signal.columns):
         raise ValueError(f"signal must have columns symbol, date, '{score}'")
@@ -282,12 +289,23 @@ def backtest(
     # definition of a cost rate; see that module's docstring for why the two
     # meanings of "sqrt_impact" are kept apart rather than merged.
     turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
-    short_exposure = weights.clip(upper=0.0).abs().sum(axis=1)
+    short_exposure_df = weights.clip(upper=0.0).abs()  # per-symbol DataFrame
+    short_exposure = short_exposure_df.sum(axis=1)      # legacy Series for flat rate
     cost_model = ev_execution.costs_from_legacy_kwargs(
         cost_bps=cost_bps, spread_bps=spread_bps, borrow_fee_bps=borrow_fee_bps,
         slippage_model=slippage_model, impact_coeff=adv_impact_coeff,
     )
-    costs = ev_execution.daily_cost(cost_model, turnover, short_exposure, ann=_ANN)
+    # Per-symbol borrow fees (opt-in): load matrix if not provided
+    bf_matrix = borrow_fee_matrix
+    if bf_matrix is None and borrow_fee_bps == 0:
+        try:
+            import event_backtest as eb
+            bf_matrix = eb.load_borrow_fee_matrix(symbols, start, end)
+        except Exception:
+            bf_matrix = None
+    costs = ev_execution.daily_cost(
+        cost_model, turnover, short_exposure_df if bf_matrix is not None else short_exposure,
+        borrow_fee_matrix=bf_matrix, ann=_ANN)
     if adv_participation_coeff is not None and (
             adv_participation_coeff == "sqrt_law"
             or (isinstance(adv_participation_coeff, (int, float))
@@ -326,6 +344,7 @@ def backtest(
         "price_table": pt, "score": score, "quantiles": quantiles,
         "rebalance": rebalance, "long_short": long_short, "cost_bps": cost_bps,
         "spread_bps": spread_bps, "borrow_fee_bps": borrow_fee_bps,
+        "borrow_fee_matrix": borrow_fee_matrix is not None,
         "slippage_model": slippage_model or "none",
         "adv_participation_coeff": adv_participation_coeff,
         "aum": aum if adv_participation_coeff else None,

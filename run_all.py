@@ -689,6 +689,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="ibkr_borrow_fee",
+        file="ibkr_borrow_fee_pipeline.py",
+        desc="IBKR public stock-loan database (usa.txt FTP) — per-symbol borrow fees (keyless)",
+        stage=1,
+        tables=["ibkr_borrow_fee"],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="sec_filings",
         file="sec_filings_pipeline.py",
         desc="SEC EDGAR daily filing index — 8-K, 10-K/Q, S-1, SC 13D/G, DEF 14A metadata",
