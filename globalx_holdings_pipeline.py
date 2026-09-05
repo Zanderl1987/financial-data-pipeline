@@ -59,41 +59,40 @@ NON_SECURITY_NAME_RE = re.compile(
     re.IGNORECASE
 )
 
-# Global X publishes monthly holdings at month-end. Use the last month-end date.
-def get_latest_month_end() -> str:
-    """Get the most recent month-end date in YYYYMMDD format."""
+# Global X publishes monthly holdings at month-end with a lag.
+# The filename date is the *as-of* date (month-end), not the publication date.
+# Try the last 3 month-ends since publication lags vary.
+def get_candidate_dates() -> list[str]:
+    """Get the last 3 month-end dates in YYYYMMDD format."""
+    dates = []
     today = date.today()
-    first_of_month = today.replace(day=1)
-    last_month_end = first_of_month - timedelta(days=1)
-    return last_month_end.strftime("%Y%m%d")
+    for i in range(1, 4):
+        first_of_month = today.replace(day=1)
+        month_end = first_of_month - timedelta(days=1)
+        dates.append(month_end.strftime("%Y%m%d"))
+        today = month_end - timedelta(days=1)
+    return dates
 
 
-def fetch_globalx_holdings(ticker: str, date_str: str, max_retries: int = 3) -> pd.DataFrame | None:
-    """Fetch holdings CSV for a single Global X ETF with retry logic."""
+def fetch_globalx_holdings(ticker: str, date_str: str) -> pd.DataFrame | None:
+    """Fetch holdings CSV for a single Global X ETF."""
     url = f"https://assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{date_str}.csv"
     log.info(f"[{ticker}] Fetching from Global X ({date_str})...")
     
-    for attempt in range(max_retries):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=30)
-            if r.status_code == 200:
-                # Skip first 2 rows (fund name + "Fund Holdings Data as of...")
-                df = pd.read_csv(StringIO(r.text), skiprows=2)
-                log.info(f"[{ticker}] Raw: {len(df)} rows, cols: {list(df.columns)}")
-                return df
-            elif r.status_code == 404:
-                log.warning(f"[{ticker}] Not found (404) for date {date_str} (attempt {attempt+1}/{max_retries})")
-            else:
-                log.warning(f"[{ticker}] HTTP {r.status_code} (attempt {attempt+1}/{max_retries})")
-        except Exception as e:
-            log.warning(f"[{ticker}] Fetch error: {e} (attempt {attempt+1}/{max_retries})")
-        
-        if attempt < max_retries - 1:
-            wait = 5 * (attempt + 1)  # 5s, 10s, 15s backoff
-            log.info(f"[{ticker}] Retrying in {wait}s...")
-            time.sleep(wait)
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        if r.status_code == 200:
+            # Skip first 2 rows (fund name + "Fund Holdings Data as of...")
+            df = pd.read_csv(StringIO(r.text), skiprows=2)
+            log.info(f"[{ticker}] Raw: {len(df)} rows, cols: {list(df.columns)}")
+            return df
+        elif r.status_code == 404:
+            log.warning(f"[{ticker}] Not found (404) for date {date_str}")
+        else:
+            log.warning(f"[{ticker}] HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[{ticker}] Fetch error: {e}")
     
-    log.error(f"[{ticker}] All retries exhausted")
     return None
 
 
@@ -291,23 +290,29 @@ def main():
     log.info("Global X Holdings Pipeline — %s", SNAPSHOT_DATE)
     log.info("=" * 60)
 
-    # Use latest month-end date (Global X publishes monthly)
-    date_str = get_latest_month_end()
-    log.info(f"Using holdings date: {date_str}")
+    # Try the last 3 month-ends (Global X publishes monthly with variable lag)
+    candidate_dates = get_candidate_dates()
+    log.info(f"Trying holdings dates: {candidate_dates}")
 
     frames = []
-    for i, ticker in enumerate(GLOBALX_TICKERS):
-        try:
-            raw_df = fetch_globalx_holdings(ticker, date_str)
-            if raw_df is not None and not raw_df.empty:
-                frames.append(parse_globalx_holdings(ticker, raw_df))
-            else:
-                log.warning(f"[{ticker}] No data for date {date_str}")
-        except Exception as e:
-            log.error(f"[{ticker}] FAILED: {e}")
-        # Rate limiting: longer delay between requests to avoid 429s
-        if i < len(GLOBALX_TICKERS) - 1:
-            time.sleep(10)
+    for ticker in GLOBALX_TICKERS:
+        raw_df = None
+        used_date = None
+        for date_str in candidate_dates:
+            try:
+                raw_df = fetch_globalx_holdings(ticker, date_str)
+                if raw_df is not None and not raw_df.empty:
+                    used_date = date_str
+                    break
+            except Exception as e:
+                log.warning(f"[{ticker}] Error for date {date_str}: {e}")
+            time.sleep(2)  # Small delay between date attempts
+        if raw_df is not None and not raw_df.empty:
+            log.info(f"[{ticker}] Found data for date {used_date}")
+            frames.append(parse_globalx_holdings(ticker, raw_df))
+        else:
+            log.warning(f"[{ticker}] No data for any candidate date")
+        time.sleep(10)  # Rate limiting between tickers
 
     if frames:
         combined = pd.concat(frames, ignore_index=True)

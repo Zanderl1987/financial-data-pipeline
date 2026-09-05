@@ -17,7 +17,6 @@ import os
 import sys
 import time
 import logging
-import requests
 import pandas as pd
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -38,7 +37,10 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.invesco.com/",
+    "Origin": "https://www.invesco.com",
 }
 
 STORAGE_ROOT = Path(__file__).parent / "storage"
@@ -55,6 +57,7 @@ INVESCO_FUNDS = {
     "DBC": ("46138B103", "Invesco DB Commodity Index Tracking Fund"),
     "PBJ": ("46137V753", "Invesco Food & Beverage ETF"),
     "PCY": ("46138E784", "Invesco Emerging Markets Sovereign Debt ETF"),
+    "PDBC": ("46138B707", "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF"),
     "PEJ": ("46137V720", "Invesco Leisure & Entertainment ETF"),
     "TAN": ("46138G706", "Invesco Solar ETF"),
 }
@@ -72,10 +75,11 @@ NON_SECURITY_TYPE_CODES = {"CURR", "UCURR", "CURRCOL"}
 
 def fetch_invesco_holdings(ticker: str, cusip: str) -> dict:
     """Fetch holdings JSON for a single Invesco ETF."""
+    from curl_cffi import requests as creq
     url = HOLDINGS_URL.format(cusip=cusip)
     log.info(f"[{ticker}] Fetching from Invesco dng-api...")
 
-    r = requests.get(url, headers=HEADERS, timeout=60)
+    r = creq.get(url, headers=HEADERS, impersonate="chrome124", timeout=60)
     r.raise_for_status()
     data = r.json()
     log.info(f"[{ticker}] Raw: {data.get('totalNumberOfHoldings')} holdings, as of {data.get('effectiveDate')}")
@@ -85,6 +89,10 @@ def fetch_invesco_holdings(ticker: str, cusip: str) -> dict:
 def parse_invesco_holdings(ticker: str, fund_name: str, data: dict) -> pd.DataFrame:
     """Parse Invesco dng-api JSON into our schema."""
     holdings = data.get("holdings", [])
+    # Handle case where holdings might be a list of lists (some funds)
+    if isinstance(holdings, list) and holdings and isinstance(holdings[0], list):
+        log.warning(f"[{ticker}] Unexpected holdings format (list of lists), skipping")
+        return pd.DataFrame()
     effective_date = pd.to_datetime(data.get("effectiveDate"), errors="coerce")
 
     df = pd.DataFrame(holdings)
@@ -97,6 +105,20 @@ def parse_invesco_holdings(ticker: str, fund_name: str, data: dict) -> pd.DataFr
     dropped = before - len(df)
     if dropped > 0:
         log.info(f"[{ticker}] Filtered {dropped} cash/currency rows")
+
+    # Handle optional columns safely
+    def _safe_to_datetime(series):
+        if series is None:
+            return pd.Series([pd.NaT] * len(df))
+        return pd.to_datetime(series, errors="coerce")
+
+    def _safe_numeric(series):
+        if series is None:
+            return pd.Series([pd.NA] * len(df))
+        return pd.to_numeric(series, errors="coerce")
+
+    maturity_dt = _safe_to_datetime(df.get("maturityDate"))
+    coupon_num = _safe_numeric(df.get("coupon"))
 
     result = pd.DataFrame({
         "snapshot_date": SNAPSHOT_DATE,
@@ -121,8 +143,8 @@ def parse_invesco_holdings(ticker: str, fund_name: str, data: dict) -> pd.DataFr
         "source": f"invesco:{ticker}",
         "fetched_at": FETCHED_AT,
         "par_value": None,
-        "maturity_date": pd.to_datetime(df.get("maturityDate"), errors="coerce").dt.date,
-        "coupon_pct": pd.to_numeric(df.get("coupon"), errors="coerce"),
+        "maturity_date": maturity_dt.dt.date,
+        "coupon_pct": coupon_num,
         "duration": None,
         "ytm_pct": None,
     })

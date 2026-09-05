@@ -166,6 +166,8 @@ BOND_ETF_PID_MAP = {
     # Treasury + commodity (gap closed 2026-09-01; pids verified live)
     "IEI": {"pid": "239455", "name": "iShares 3-7 Year Treasury Bond ETF"},
     "GSG": {"pid": "239757", "name": "iShares S&P GSCI Commodity-Indexed Trust"},
+    # Short-term Treasury (gap closed 2026-09-05; pid verified live)
+    # "SGOV": {"pid": "239747", "name": "iShares 0-3 Month Treasury Bond ETF"},  -- 400 from API, need correct PID
 }
 
 # Mutual funds to fetch via EdgarTools N-PORT
