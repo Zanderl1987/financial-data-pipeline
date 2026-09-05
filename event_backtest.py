@@ -204,14 +204,42 @@ def load_borrow_fee(symbol, start=None, end=None) -> pd.Series:
     return s
 
 
+def _table_has_data(table: str) -> bool:
+    """Fast check if a catalog table has any data on disk."""
+    try:
+        return not q.load(table, limit=1).empty
+    except Exception:
+        return False
+
+
 def load_borrow_fee_matrix(symbols, start=None, end=None) -> pd.DataFrame:
-    """Wide borrow-fee matrix (date x symbol, annualized bps)."""
-    out = {}
-    for sym in dict.fromkeys(symbols):
-        s = load_borrow_fee(sym, start, end)
-        if not s.empty:
-            out[sym] = s
-    return pd.DataFrame(out).sort_index()
+    """Wide borrow-fee matrix (date x symbol, annualized bps).
+
+    Optimized: single query with symbol IN (...) instead of N queries.
+    """
+    symbols = list(dict.fromkeys(symbols))
+    if not symbols:
+        return pd.DataFrame()
+    # Fast path: if table has no data yet, skip the query entirely
+    if not _table_has_data("ibkr_borrow_fee"):
+        return pd.DataFrame()
+    try:
+        df = q.load("ibkr_borrow_fee", symbol=symbols, start=start, end=end,
+                    columns=["symbol", "date", "fee_rate", "fetched_at"])
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
+    df["date"] = pd.to_datetime(df["date"])
+    # fee_rate may be None for some rows; drop those
+    df = df.dropna(subset=["fee_rate"])
+    if df.empty:
+        return pd.DataFrame()
+    # Pivot to wide format (date x symbol)
+    wide = df.pivot_table(index="date", columns="symbol", values="fee_rate",
+                          aggfunc="last").sort_index()
+    wide.columns.name = None
+    return wide
 
 
 # ------------------------------------------------------------ event studies
