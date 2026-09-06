@@ -386,3 +386,102 @@ class TestRatingChanges:
         assert ev["symbol"].iloc[0] == "AAPL"
         assert ev["source"].iloc[0] == "tv_snapshot"
         assert ev["direction"].iloc[0] == "upgrade"
+
+
+class TestLoadCloseMatrix:
+    """load_close_matrix()'s batched (one query per price table) rewrite --
+    the fix for event_backtest's documented wide-universe scaling problem.
+    q.load is mocked per-table rather than registering real CATALOG views,
+    both to stay isolated from real stored data and because the point of
+    these tests is the function's OWN batching/merge logic, not the query
+    layer underneath it."""
+
+    def _frame(self, rows):
+        df = pd.DataFrame(rows)
+        df["date"] = pd.to_datetime(df["date"])
+        return df
+
+    def test_query_count_is_flat_not_per_symbol(self, monkeypatch):
+        calls = []
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            calls.append(table)
+            return pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        eb.load_close_matrix(["AAA", "BBB"])
+        n_two = len(calls)
+        calls.clear()
+        eb.load_close_matrix([f"SYM{i}" for i in range(200)])
+        n_many = len(calls)
+
+        assert n_two == len(eb._PRICE_TABLES)
+        assert n_many == len(eb._PRICE_TABLES)   # flat, not 200x more
+
+    def test_price_table_override_queries_only_that_table(self, monkeypatch):
+        calls = []
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            calls.append(table)
+            return pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        eb.load_close_matrix(["AAA"], price_table="prices")
+        assert calls == ["prices"]
+
+    def test_longest_series_per_symbol_wins_across_tables(self, monkeypatch):
+        short_table = self._frame({
+            "symbol": ["AAA"] * 3,
+            "date": pd.bdate_range("2024-01-02", periods=3),
+            "close": [10.0, 10.1, 10.2],
+        })
+        long_table = self._frame({
+            "symbol": ["AAA"] * 6,
+            "date": pd.bdate_range("2024-01-02", periods=6),
+            "close": [10.0, 10.1, 10.2, 10.3, 10.4, 10.5],
+        })
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            return {"tiingo_prices": short_table,
+                   "yfinance_universe_prices": long_table}.get(
+                table, pd.DataFrame())
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        out = eb.load_close_matrix(["AAA"])
+        assert len(out) == 6
+        assert out["AAA"].iloc[-1] == pytest.approx(10.5)
+
+    def test_split_factor_adjusted_per_symbol_independently(self, monkeypatch):
+        # BBB has a 2:1 split on its 3rd day; AAA has none. A per-symbol
+        # groupby bug (e.g. computing future_factor across BOTH symbols'
+        # rows concatenated) would leak BBB's split into AAA's prices too.
+        df = self._frame({
+            "symbol":       ["AAA", "AAA", "AAA", "BBB", "BBB", "BBB"],
+            "date":         list(pd.bdate_range("2024-01-02", periods=3)) * 2,
+            "close":        [10.0, 10.1, 10.2, 40.0, 42.0, 20.0],
+            "split_factor": [1.0, 1.0, 1.0, 1.0, 1.0, 2.0],
+        })
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            return df if table == "tiingo_prices" else pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        out = eb.load_close_matrix(["AAA", "BBB"])
+        # AAA untouched by BBB's split
+        assert out["AAA"].tolist() == pytest.approx([10.0, 10.1, 10.2])
+        # BBB's pre-split closes divided by the 2.0 future factor
+        assert out["BBB"].tolist() == pytest.approx([20.0, 21.0, 20.0])
+
+    def test_empty_symbols_returns_empty_frame(self):
+        assert eb.load_close_matrix([]).empty
+
+    def test_missing_close_or_symbol_column_is_skipped_not_fatal(self, monkeypatch):
+        malformed = pd.DataFrame({"date": pd.bdate_range("2024-01-02", periods=3),
+                                  "close": [1.0, 2.0, 3.0]})   # no symbol col
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            return malformed if table == "tiingo_prices" else pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        out = eb.load_close_matrix(["AAA"])
+        assert out.empty

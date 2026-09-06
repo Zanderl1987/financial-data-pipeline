@@ -123,13 +123,42 @@ def load_close(symbol: str, start: "str | None" = None,
 
 def load_close_matrix(symbols, start=None, end=None,
                       price_table: "str | None" = None) -> pd.DataFrame:
-    """Wide close matrix (date x symbol) from whichever tables carry each symbol."""
-    out = {}
-    for sym in dict.fromkeys(symbols):          # dedupe, keep order
-        s = load_close(sym, start, end, price_table)
-        if not s.empty:
-            out[sym] = s
-    return pd.DataFrame(out).sort_index()
+    """
+    Wide close matrix (date x symbol): ONE batched query per price table
+    (`symbol IN (...)`) instead of load_close()'s per-symbol lru_cache loop
+    -- the documented event_backtest wide-universe scaling fix (a
+    2,935-symbol study issued ~22,000 single-symbol queries and took ~90
+    min; see CLAUDE.md and experiments/2026-08-28_congressional-disclosure-
+    null-result.md). Same "longest non-null series per symbol wins across
+    tables" rule as load_close(), computed in-memory per table via groupby
+    instead of a separate q.load() call per (symbol, table) pair. Symbol
+    count doesn't change the query count: len(_PRICE_TABLES) queries total
+    (5 today) whether called with 3 symbols or 3,000.
+    """
+    from analytics.technical import _split_only_adjust
+    symbols = list(dict.fromkeys(symbols))       # dedupe, keep order
+    if not symbols:
+        return pd.DataFrame()
+    tables = [price_table] if price_table else list(_PRICE_TABLES)
+
+    best: "dict[str, pd.Series]" = {}
+    for t in tables:
+        try:
+            df = q.load(t, symbol=symbols, start=start, end=end)
+        except Exception:
+            continue
+        if df.empty or "close" not in df.columns or "symbol" not in df.columns:
+            continue
+        df = (df.assign(date=pd.to_datetime(df["date"]))
+                .drop_duplicates(["symbol", "date"]))
+        for sym, g in df.groupby("symbol", sort=False):
+            g = _split_only_adjust(g.sort_values("date"))
+            s = g.set_index("date")["close"].astype(float).dropna()
+            if len(s) > len(best.get(sym, pd.Series(dtype=float))):
+                s.name = sym
+                best[sym] = s
+
+    return pd.DataFrame(best).sort_index()
 
 
 @lru_cache(maxsize=None)
