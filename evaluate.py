@@ -155,6 +155,12 @@ def main(argv=None) -> int:
     ap.add_argument("--min-dollar-volume", type=float, default=None,
                     help="signal-panel adapter: point-in-time trailing-21d dollar-"
                          "volume floor (no look-ahead) -- see evaluation/universe.py")
+    ap.add_argument("--sp500-only", action="store_true",
+                    help="signal-panel adapter: restrict eligibility to actual "
+                         "point-in-time S&P 500 membership (evaluation/universe.py "
+                         "sp500_eligible(), reconstructed from Wikipedia's change "
+                         "log) instead of applying today's list to all history -- "
+                         "fixes index-inclusion look-ahead")
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
     ap.add_argument("--benchmark", default="SPY")
@@ -212,7 +218,7 @@ def main(argv=None) -> int:
         if args.adapter == "signal-panel":
             symbols = args.universe
             eligible = None
-            if args.exclude_otc or args.min_dollar_volume is not None:
+            if args.exclude_otc or args.min_dollar_volume is not None or args.sp500_only:
                 from evaluation import universe as _universe
                 # Route through the eligible= path (light feature_matrix, no
                 # fundamentals/short-interest/insider/sentiment blocks) any
@@ -228,6 +234,19 @@ def main(argv=None) -> int:
                 eligible = _universe.point_in_time_eligible(
                     symbols, min_dollar_volume=floor,
                     start=args.start, end=args.end)
+                if args.sp500_only:
+                    # AND the two date-varying eligibility frames on
+                    # (symbol, date) -- a row must clear BOTH the liquidity
+                    # floor and actual index membership on that date.
+                    sp500 = _universe.sp500_eligible(
+                        symbols, start=args.start, end=args.end)
+                    eligible = eligible.merge(
+                        sp500.rename(columns={"eligible": "sp500_eligible"}),
+                        on=["symbol", "date"], how="left")
+                    eligible["sp500_eligible"] = eligible["sp500_eligible"].fillna(False)
+                    eligible["eligible"] = (eligible["eligible"]
+                                            & eligible["sp500_eligible"])
+                    eligible = eligible.drop(columns=["sp500_eligible"])
             obj = adapters.from_signal_panel(factor=args.factor,
                                              symbols=symbols,
                                              start=args.start, end=args.end,

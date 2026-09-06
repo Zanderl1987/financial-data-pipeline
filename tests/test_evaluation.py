@@ -1402,10 +1402,54 @@ class TestRunner:
                             n_perm=10, seed=0, robustness=True)
         assert ("synthetic robustness failure"
                in res["results"]["robustness_noise"]["robustness_reason"])
-        assert ("synthetic robustness failure"
-               in res["results"]["robustness_mcpt"]["robustness_reason"])
-        assert ("synthetic robustness failure"
-               in res["results"]["robustness_order"]["robustness_reason"])
+        # Fixed 2026-09-06 (code review): a shared try/except used to catch
+        # ALL THREE calls, so noise_test raising meant mcpt/order were never
+        # attempted but still got labeled with noise_test's own error. Each
+        # now has its own try/except -- mcpt/order must actually compute
+        # (or fail on their OWN terms), never inherit noise_test's message.
+        assert "robustness_reason" not in res["results"]["robustness_mcpt"]
+        assert "robustness_reason" not in res["results"]["robustness_order"]
+        # This fixture is too small for price_mcpt's own usable-trial floor
+        # (n_perm=10 on 40 days) -- it legitimately returns price_mcpt_p=None
+        # with ITS OWN price_mcpt_reason, which is exactly the point: that's
+        # a different, real reason, not noise_test's exception leaking over.
+        assert "price_mcpt_reason" in res["results"]["robustness_mcpt"]
+        # Same story: only 2 trades in this fixture, below trade_order_mc's
+        # own n>=5 floor -- its own order_reason, not a robustness_reason.
+        assert "order_reason" in res["results"]["robustness_order"]
+
+    def test_robustness_failures_are_independent_per_subtest(self, tmp_path,
+                                                              monkeypatch):
+        """Three distinct failures, one per sub-test, each surfaced under
+        its own reason -- not just 'the first one poisons the rest'."""
+        idx = pd.bdate_range("2024-01-02", periods=250)
+        n = len(idx)
+        ent = np.zeros(n, dtype=bool)
+        exi = np.zeros(n, dtype=bool)
+        for start in range(10, 240, 10):
+            ent[start] = True
+            exi[start + 5] = True
+        rng = np.random.default_rng(0)
+        close = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, n)), index=idx)
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="mixed_failure_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        import evaluation.robustness as ev_robustness_mod
+
+        def boom_mcpt(*a, **k):
+            raise RuntimeError("mcpt boom")
+
+        monkeypatch.setattr(ev_robustness_mod, "price_mcpt", boom_mcpt)
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=str(tmp_path / "reg.parquet"),
+                            n_perm=20, seed=0, robustness=True,
+                            robustness_n_trials=20)
+        # noise_test and trade_order_mc are untouched by mcpt's failure
+        assert "robustness_reason" not in res["results"]["robustness_noise"]
+        assert "robustness_reason" not in res["results"]["robustness_order"]
+        assert "mcpt boom" in res["results"]["robustness_mcpt"]["robustness_reason"]
 
 
 from evaluation import adapters as ev_adapters
@@ -1572,6 +1616,75 @@ class TestCliAdapters:
                           "--n-boot", "20", "--n-perm", "5"])
         assert rc == 0
         assert "factor_composite" in capsys.readouterr().out
+
+    def test_cli_sp500_only_ands_with_liquidity_eligibility(self, tmp_path,
+                                                            monkeypatch, capsys):
+        """--sp500-only must AND onto whatever --min-dollar-volume already
+        computed, not replace it -- a (symbol, date) row only survives if
+        BOTH are true."""
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        import analytics.signals as sig_mod
+        dates = closes.index[:260]
+        syms = [c for c in closes.columns if c != "SPY"]
+        rng = np.random.default_rng(11)
+        rows = [{"symbol": s, "date": d, "composite": float(rng.normal())}
+                for d in dates for s in syms]
+        # eligible= routes from_signal_panel through feature_matrix() +
+        # signal_panel(fm=...) instead of signal_panel(symbols=...) -- mock
+        # both so this test targets the eligibility AND-merge, not the
+        # full-universe feature pipeline underneath it.
+        import analytics.features as feat_mod
+        monkeypatch.setattr(feat_mod, "feature_matrix",
+                            lambda *a, **kw: pd.DataFrame())
+        monkeypatch.setattr(sig_mod, "signal_panel",
+                            lambda *a, **kw: pd.DataFrame(rows))
+
+        import evaluation.universe as _universe
+        captured = {}
+
+        def fake_pit_eligible(symbols, min_dollar_volume, start=None, end=None):
+            out = pd.DataFrame([{"symbol": s, "date": d, "eligible": True}
+                                for s in symbols for d in dates])
+            captured["pit_symbols"] = symbols
+            return out
+
+        def fake_sp500_eligible(symbols, start=None, end=None):
+            # Only the FIRST symbol is ever an S&P 500 member -- if the AND
+            # didn't apply, every symbol would still show eligible=True.
+            first = symbols[0]
+            out = pd.DataFrame([{"symbol": s, "date": d,
+                                 "eligible": (s == first)}
+                               for s in symbols for d in dates])
+            captured["sp500_symbols"] = symbols
+            return out
+
+        monkeypatch.setattr(_universe, "point_in_time_eligible", fake_pit_eligible)
+        monkeypatch.setattr(_universe, "sp500_eligible", fake_sp500_eligible)
+        monkeypatch.setattr(_universe, "exchange_listed_symbols",
+                            lambda exclude_otc=True: syms)
+
+        captured_obj = {}
+        import evaluation.adapters as ad_mod
+        real_from_signal_panel = ad_mod.from_signal_panel
+
+        def spy_from_signal_panel(**kw):
+            captured_obj["eligible"] = kw.get("eligible")
+            return real_from_signal_panel(**kw)
+
+        monkeypatch.setattr(ad_mod, "from_signal_panel", spy_from_signal_panel)
+
+        rc = ev_cli.main(["--adapter", "signal-panel", "--factor", "composite",
+                          "--min-dollar-volume", "1000000", "--sp500-only",
+                          "--out-root", str(tmp_path / "reports"),
+                          "--registry-path", str(tmp_path / "reg.parquet"),
+                          "--n-boot", "20", "--n-perm", "5"])
+        assert rc == 0
+        elig = captured_obj["eligible"]
+        assert "sp500_eligible" not in elig.columns   # dropped after AND
+        first = captured["sp500_symbols"][0]
+        assert elig[elig["symbol"] == first]["eligible"].all()
+        assert not elig[elig["symbol"] != first]["eligible"].any()
 
     def test_cli_requires_exactly_one_source(self):
         with pytest.raises(SystemExit):

@@ -475,6 +475,21 @@ class TestLoadCloseMatrix:
     def test_empty_symbols_returns_empty_frame(self):
         assert eb.load_close_matrix([]).empty
 
+    def test_table_level_failure_is_logged_not_silent(self, monkeypatch, capsys):
+        """A batched query failure costs the whole table for the whole
+        batch (unlike the old per-symbol loop, where one symbol's failure
+        cost only that symbol) -- must not be silently swallowed."""
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            if table == "tiingo_prices":
+                raise RuntimeError("synthetic table failure")
+            return pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        out = eb.load_close_matrix(["AAA", "BBB"])
+        assert out.empty
+        err = capsys.readouterr().out
+        assert "tiingo_prices" in err and "synthetic table failure" in err
+
     def test_missing_close_or_symbol_column_is_skipped_not_fatal(self, monkeypatch):
         malformed = pd.DataFrame({"date": pd.bdate_range("2024-01-02", periods=3),
                                   "close": [1.0, 2.0, 3.0]})   # no symbol col

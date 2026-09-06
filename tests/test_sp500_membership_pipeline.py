@@ -128,6 +128,40 @@ class TestReconstructMembership:
         # a normal current member untouched by any gap keeps exactly one row
         assert len(out[out["symbol"] == "OTHER"]) == 1
 
+    def test_non_current_add_with_no_later_removal_is_dropped_not_guessed(self):
+        """Fixed 2026-09-06 (code review caught it): a non-current symbol
+        whose addition is logged but whose eventual removal never is (real
+        example: NCC/National City, added 1994, acquired by PNC 2008, its
+        own removal never logged) must NOT default to an open/current-ish
+        interval -- that would silently claim it as a member for its whole
+        real, multi-decade absence. It should be dropped entirely rather
+        than assigned a guessed end date."""
+        current = {"A"}
+        changes = _changes([
+            ("1994-09-30", "NCC", None),   # NCC's only log appearance, ever
+        ])
+        out = reconstruct_membership(current, changes)
+        assert "NCC" not in set(out["symbol"])
+        # A (the only current ticker) still gets its normal left-censored row
+        assert len(out) == 1
+        assert out.iloc[0]["symbol"] == "A"
+        assert pd.isna(out.iloc[0]["start_date"]) and pd.isna(out.iloc[0]["end_date"])
+
+    def test_non_current_add_later_resolved_by_a_removal_still_works(self):
+        """Contrast case: a non-current symbol's add DOES get resolved by a
+        later (chronologically earlier, since the log walks newest-first)
+        removal event -- must still produce a normal, real closed interval,
+        not be dropped."""
+        current = {"A"}
+        changes = _changes([
+            ("2020-01-01", "A", "X"),    # X removed when A (re)joins
+            ("2010-01-01", "X", None),   # X added in 2010
+        ])
+        out = reconstruct_membership(current, changes)
+        x_row = out[out["symbol"] == "X"].iloc[0]
+        assert x_row["start_date"] == pd.Timestamp("2010-01-01")
+        assert x_row["end_date"] == pd.Timestamp("2020-01-01")
+
     def test_empty_changes_leaves_current_fully_left_censored(self):
         out = reconstruct_membership({"A", "B"}, _changes([]))
         assert len(out) == 2

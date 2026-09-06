@@ -68,6 +68,40 @@ class TestLoadRun:
         assert trades is None
 
 
+class TestBuildHtmlRobustnessTile:
+    """Added 2026-09-06 (code review): --robustness's results reached
+    evaluate.py's console output but never this persisted report. build_html()
+    itself had no test coverage before this (see module docstring) --
+    scoped narrowly to the new tile, not a full backfill."""
+
+    def _meta(self):
+        return {"input_name": "test_rule", "input_type": "trade_rule",
+               "run_id": "r1", "date_range": "2024-01-01..2024-06-01",
+               "git_commit": "abc123", "created_at": "2026-09-06T00:00:00"}
+
+    def test_robustness_tile_appears_when_present(self):
+        results = {
+            "summary": {"n_trades": 10, "win_rate_pct": 50.0,
+                       "total_pnl_dollars": 100.0},
+            "permutation": {"pnl_p": 0.05},
+            "robustness_noise": {"noise_pct_profitable": 80.0},
+            "robustness_mcpt": {"price_mcpt_p": 0.02},
+            "robustness_order": {"observed_mdd_percentile": 40.0},
+        }
+        html = ger.build_html(results, self._meta(), trades=None)
+        assert "robustness" in html
+        assert "0.020" in html          # price_mcpt_p
+        assert "80.0" in html           # noise_pct_profitable
+        assert "40.0" in html           # observed_mdd_percentile
+
+    def test_robustness_tile_absent_when_not_requested(self):
+        results = {"summary": {"n_trades": 10, "win_rate_pct": 50.0,
+                              "total_pnl_dollars": 100.0},
+                  "permutation": {"pnl_p": 0.05}}
+        html = ger.build_html(results, self._meta(), trades=None)
+        assert "robustness" not in html
+
+
 class TestClassifySignificance:
     def test_none_inputs_are_noise(self):
         assert ger.classify_significance(None, None) == "noise"

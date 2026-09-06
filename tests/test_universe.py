@@ -15,7 +15,7 @@ sys.path.insert(0, REPO_ROOT)
 import query as q
 from evaluation.universe import (
     clean_symbols, exchange_listed_symbols, flag_price_jumps,
-    historical_constituents, point_in_time_eligible,
+    historical_constituents, point_in_time_eligible, sp500_eligible,
 )
 
 
@@ -185,3 +185,39 @@ class TestHistoricalConstituents:
     def test_unsupported_index_raises(self):
         with pytest.raises(ValueError, match="SPX"):
             historical_constituents("2020-01-01", index="NDX")
+
+
+class TestSp500Eligible:
+    def _register(self, con, name, df):
+        con.register(name, df)
+        return name
+
+    def test_eligible_true_only_within_membership_window(self):
+        con = q._con()
+        membership = pd.DataFrame([
+            {"symbol": "AAA", "start_date": "2010-01-01", "end_date": "2020-01-01"},
+        ])
+        prices = pd.DataFrame({
+            "symbol": ["AAA"] * 3,
+            "date": ["2005-06-01", "2015-06-01", "2022-06-01"],
+        })
+        mname = self._register(con, "test_sp500_elig_membership", membership)
+        pname = self._register(con, "test_sp500_elig_prices", prices)
+        try:
+            out = sp500_eligible(["AAA"], price_table=pname, table=mname)
+        finally:
+            con.unregister(mname)
+            con.unregister(pname)
+        out = out.set_index("date")["eligible"]
+        assert bool(out.loc["2005-06-01"]) is False   # before start
+        assert bool(out.loc["2015-06-01"]) is True     # inside window
+        assert bool(out.loc["2022-06-01"]) is False    # after end (exclusive)
+
+    def test_empty_symbols_returns_empty_frame(self):
+        out = sp500_eligible([])
+        assert out.empty
+        assert list(out.columns) == ["symbol", "date", "eligible"]
+
+    def test_unsupported_index_raises(self):
+        with pytest.raises(ValueError, match="SPX"):
+            sp500_eligible(["AAA"], index="NDX")

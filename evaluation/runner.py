@@ -346,24 +346,35 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
             # backtest_app.py's manual "run robustness" button -- this is
             # the same battery, opt-in here too, not a new statistical
             # method. Each of the three functions already reports its own
-            # *_reason on bad input rather than raising; this try/except
-            # only guards against a genuinely unexpected failure, matching
-            # the meta-label/tax best-effort convention above.
+            # *_reason on bad input rather than raising; each gets its OWN
+            # try/except (fixed 2026-09-06, code review caught a shared one
+            # that let a failure in noise_test skip mcpt/order entirely and
+            # misattribute noise_test's exception to both) so one failing
+            # doesn't block or mislabel the other two, matching the
+            # meta-label/tax best-effort convention above.
+            from evaluation import robustness as ev_robust
             try:
-                from evaluation import robustness as ev_robust
                 noise_res = ev_robust.noise_test(
                     obj, cache, n_trials=robustness_n_trials,
                     sigma_bps=robustness_sigma_bps, seed=seed,
                     alpha=robustness_alpha)
+            except Exception as exc:   # best-effort, never fatal to the run
+                noise_res = {"robustness_reason": f"{type(exc).__name__}: {exc}"}
+            try:
                 mcpt_res = ev_robust.price_mcpt(
                     obj, cache, n_perm=n_perm, seed=seed,
                     alpha=robustness_alpha)
+            except Exception as exc:
+                mcpt_res = {"robustness_reason": f"{type(exc).__name__}: {exc}"}
+            try:
+                # trade_order_mc keeps its own n_trials default (1000) rather
+                # than robustness_n_trials: it's pure shuffling of already-
+                # realized trades (no re-simulation), so it's cheap enough
+                # not to need the same trial-count throttle noise_test/
+                # price_mcpt do -- an intentional asymmetry, not an oversight.
                 order_res = ev_robust.trade_order_mc(trades_df, seed=seed)
-            except Exception as exc:   # best-effort, never fatal to the run
-                reason = f"{type(exc).__name__}: {exc}"
-                noise_res = {"robustness_reason": reason}
-                mcpt_res = {"robustness_reason": reason}
-                order_res = {"robustness_reason": reason}
+            except Exception as exc:
+                order_res = {"robustness_reason": f"{type(exc).__name__}: {exc}"}
             results["robustness_noise"] = noise_res
             results["robustness_mcpt"] = mcpt_res
             results["robustness_order"] = order_res

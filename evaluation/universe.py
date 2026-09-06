@@ -194,3 +194,58 @@ def historical_constituents(
     """
     out = q._con().execute(sql, [as_of_date, as_of_date]).df()
     return sorted(out["symbol"].dropna().unique().tolist())
+
+
+def sp500_eligible(
+    symbols: "list[str]",
+    start: "str | None" = None,
+    end: "str | None" = None,
+    price_table: str = "prices",
+    index: str = "SPX",
+    table: str = "sp500_membership",
+) -> pd.DataFrame:
+    """
+    Date-varying counterpart to historical_constituents(): (symbol, date,
+    eligible) for every (symbol, date) row in `price_table` within range,
+    True iff that symbol was an actual index member on that date. Same
+    membership convention as historical_constituents() (start<=date<end,
+    both bounds nullable/open).
+
+    Added 2026-09-06 (code review caught historical_constituents() had zero
+    production call sites) so evaluate.py's --sp500-only flag can join this
+    onto a signal panel the same way --min-dollar-volume already joins
+    point_in_time_eligible() -- fixing the index-inclusion look-ahead this
+    audit's Phase 2 named, not just building the capability to fix it later.
+    """
+    if index not in _SUPPORTED_INDICES:
+        raise ValueError(f"sp500_eligible only supports "
+                         f"{sorted(_SUPPORTED_INDICES)}, got {index!r}")
+    if not symbols:
+        return pd.DataFrame(columns=["symbol", "date", "eligible"])
+
+    clauses = ["symbol = ANY(?)"]
+    params: list = [list(symbols)]
+    if start is not None:
+        clauses.append("date >= ?")
+        params.append(start)
+    if end is not None:
+        clauses.append("date <= ?")
+        params.append(end)
+    where = " AND ".join(clauses)
+
+    sql = f"""
+        SELECT p.symbol, CAST(p.date AS DATE) AS date,
+               EXISTS (
+                   SELECT 1 FROM {table} m
+                   WHERE m.symbol = p.symbol
+                     AND (m.start_date IS NULL
+                          OR CAST(m.start_date AS DATE) <= CAST(p.date AS DATE))
+                     AND (m.end_date IS NULL
+                          OR CAST(m.end_date AS DATE) > CAST(p.date AS DATE))
+               ) AS eligible
+        FROM {price_table} p
+        WHERE {where}
+    """
+    out = q._con().execute(sql, params).df()
+    out["date"] = pd.to_datetime(out["date"])
+    return out

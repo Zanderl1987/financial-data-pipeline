@@ -331,6 +331,21 @@ def build_html(results: dict, meta: dict, trades, baselines=None) -> str:
                            f"win rate {_fmt(s.get('win_rate_pct'), 1)}% - "
                            f"P&L ${_fmt(s.get('total_pnl_dollars'), 0)} - "
                            f"perm p={_fmt(p.get('pnl_p'), 3)}"))
+        # Added 2026-09-06 (code review caught --robustness's results were
+        # computed and printed by evaluate.py's CLI but never reached this
+        # persisted report -- the console-only path meant anyone reviewing
+        # a saved run later never saw the robustness verdict at all).
+        noise, mcpt, order = (results.get("robustness_noise"),
+                              results.get("robustness_mcpt"),
+                              results.get("robustness_order"))
+        if noise or mcpt or order:
+            noise, mcpt, order = noise or {}, mcpt or {}, order or {}
+            parts.append(_tile(
+                "robustness",
+                _fmt(mcpt.get("price_mcpt_p"), 3),
+                f"price-MCPT p - noise {_fmt(noise.get('noise_pct_profitable'), 1)}% "
+                f"profitable - drawdown at percentile "
+                f"{_fmt(order.get('observed_mdd_percentile'), 1)} of shuffled order"))
     parts.append(_fdr_table(results))
     parts.append(_baseline_table(baselines))
     if meta.get("dropped"):

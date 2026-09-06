@@ -145,7 +145,14 @@ def load_close_matrix(symbols, start=None, end=None,
     for t in tables:
         try:
             df = q.load(t, symbol=symbols, start=start, end=end)
-        except Exception:
+        except Exception as exc:
+            # A single-symbol failure in the old per-symbol loop only cost
+            # that one symbol; a batched failure here costs the WHOLE table
+            # for the WHOLE batch (fixed 2026-09-06, code review caught this
+            # silent-degradation trade-off had no visibility at all).
+            print(f"load_close_matrix: query for table '{t}' failed "
+                 f"({type(exc).__name__}: {exc}) -- skipping this table "
+                 f"for all {len(symbols)} symbols in this batch")
             continue
         if df.empty or "close" not in df.columns or "symbol" not in df.columns:
             continue

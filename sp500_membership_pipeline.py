@@ -30,17 +30,34 @@ addition, is LEFT-CENSORED at the log's own floor (1976-07-01) -- treated as
 comparable community reconstruction of this table does, not a gap specific
 to this pipeline.
 
-CONFIRMED LIVE 2026-09-06: the log itself has holes. MCK (McKesson) and T
-(AT&T) are both current members whose ONLY appearance anywhere in the
-407-row log is a REMOVAL (1994-09-30 and 2005-11-18 respectively) with no
-later re-addition row -- Wikipedia's own history for these two genuinely
-loses the thread. reconstruct_membership() repairs this the conservative
-way (tiles a second "current, since the recorded closure date" interval
-onto the gap rather than inventing an unknown real re-entry date or
-dropping a verified-current member outright) -- see its docstring. Treat
-`historical_constituents()` results for MCK/T (and any other symbol this
-pattern is later found to affect) between their recorded closure and their
-real, undocumented re-entry as approximate, not exact.
+CONFIRMED LIVE 2026-09-06: the log itself has holes, in BOTH directions.
+
+MCK (McKesson) and T (AT&T) are both current members whose ONLY appearance
+anywhere in the 407-row log is a REMOVAL (1994-09-30 and 2005-11-18
+respectively) with no later re-addition row -- Wikipedia's own history for
+these two genuinely loses the thread. reconstruct_membership() repairs
+this the conservative way (tiles a second "current, since the recorded
+closure date" interval onto the gap rather than inventing an unknown real
+re-entry date or dropping a verified-current member outright) -- see its
+docstring. Treat `historical_constituents()` results for MCK/T (and any
+other symbol this pattern is later found to affect) between their recorded
+closure and their real, undocumented re-entry as approximate, not exact.
+
+The mirror image (caught by code review 2026-09-06, not this pipeline's
+own live verification): NCC (National City, added 1994-09-30 when MCK was
+removed, acquired by PNC in 2008) is NOT a current member, but NCC's own
+eventual removal is never logged as a `rem_ticker` anywhere in the table
+either. An earlier version of this pipeline defaulted such a symbol's end
+to the log's own most recent date -- which, since that date sits only
+weeks before whenever the pipeline happens to run, silently claimed NCC
+(and ~19 other symbols in the same bucket) as a real S&P 500 member for
+essentially its entire multi-decade absence. Fixed: reconstruct_membership()
+now DROPS an addition event entirely when the symbol isn't current AND no
+later removal resolves it, rather than guessing an end date. This means
+NCC's real 1994-2008 membership goes UNRECORDED (a real loss of history)
+rather than wrongly extended to the present (a real corruption of every
+downstream universe filter) -- the same "understate, never overstate"
+principle as the MCK/T repair above, applied to the opposite-direction gap.
 
 A milder, harmless variant of the same source looseness: IR (Ingersoll
 Rand) has TWO "added" rows (2010-11-17, 2020-03-02) with no removal of IR
@@ -68,6 +85,16 @@ Output: storage/raw/sp500_membership/year=YYYY/month=MM/*.parquet
   Columns: symbol, start_date (NaT = left-censored, member since before
   1976-07-01), end_date (NaT = still a current member), fetched_at.
 
+OPERATIONAL NOTE (code review 2026-09-06): this table is FULLY regenerated
+every run, but curated.py's dedup is additive over the natural key
+(symbol, start_date, end_date) across every raw file ever written -- it
+never retracts a row whose key no longer appears in the latest run. Two
+runs on the SAME day overwrite the same raw file (harmless), but if this
+pipeline's own RECONSTRUCTION LOGIC changes on a later day, the old raw
+file's now-superseded rows persist in curated output forever unless
+deleted by hand. Delete prior files under storage/raw/sp500_membership/
+before rerunning after any change to reconstruct_membership() itself.
+
 CLI:
   python sp500_membership_pipeline.py             # incremental (only mode --
                                                     # the whole reconstruction
@@ -79,6 +106,7 @@ CLI:
 
 import argparse
 import datetime
+import time
 from io import StringIO
 
 import pandas as pd
@@ -94,6 +122,27 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 }
+MAX_RETRIES = 3
+
+
+def _get_with_retry(url: str) -> str:
+    """GET url, retrying on 429/transient errors (same pattern as
+    wikipedia_pipeline.py's _get_with_retry) -- the wiring checklist in
+    CLAUDE.md requires this for every new pipeline; a plain requests.get
+    had no backoff at all before this fix (caught by code review)."""
+    last_exc = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if r.status_code == 429:
+                time.sleep(60 * attempt)
+                continue
+            r.raise_for_status()
+            return r.text
+        except requests.RequestException as exc:
+            last_exc = exc
+            time.sleep(10 * attempt)
+    raise last_exc
 
 
 def _norm_ticker(t) -> "str | None":
@@ -114,18 +163,32 @@ def _norm_ticker(t) -> "str | None":
 
 
 def fetch_current() -> "set[str]":
-    r = requests.get(CURRENT_URL, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    df = pd.read_html(StringIO(r.text))[0]
+    html = _get_with_retry(CURRENT_URL)
+    df = pd.read_html(StringIO(html))[0]
+    if "Symbol" not in df.columns:
+        raise ValueError(
+            f"expected a 'Symbol' column in the current-constituents table, "
+            f"got {list(df.columns)} -- Wikipedia's page layout may have "
+            f"changed; do not silently guess a column mapping")
     return {t for t in (_norm_ticker(x) for x in df["Symbol"]) if t}
 
 
 def fetch_changes() -> pd.DataFrame:
-    r = requests.get(CHANGES_URL, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    df = pd.read_html(StringIO(r.text))[0]
-    df.columns = ["date", "add_ticker", "add_name", "rem_ticker", "rem_name",
-                 "reason", "refs"]
+    html = _get_with_retry(CHANGES_URL)
+    df = pd.read_html(StringIO(html))[0]
+    expected_cols = ["date", "add_ticker", "add_name", "rem_ticker",
+                     "rem_name", "reason", "refs"]
+    if len(df.columns) != len(expected_cols):
+        # Fail loudly rather than blindly rename -- this table has already
+        # moved to a different article once (see module docstring); a
+        # future restructure with a different column count/order must not
+        # silently corrupt reconstruct_membership() with mislabeled columns.
+        raise ValueError(
+            f"expected {len(expected_cols)} columns in the historical-"
+            f"components change log, got {len(df.columns)}: "
+            f"{list(df.columns)} -- Wikipedia's table layout may have "
+            f"changed; update expected_cols after checking it by hand")
+    df.columns = expected_cols
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["add_ticker"] = df["add_ticker"].map(_norm_ticker)
     df["rem_ticker"] = df["rem_ticker"].map(_norm_ticker)
@@ -151,16 +214,9 @@ def reconstruct_membership(current_tickers: "set[str]",
     """
     open_end: "dict[str, pd.Timestamp | None]" = {t: None for t in current_tickers}
     intervals = []
-    # Mirror-image source gap, confirmed live 2026-09-06 (NCC/National City:
-    # added 1994-09-30 when MCK was removed, then acquired by PNC in 2008 --
-    # but NCC's OWN eventual removal from the index is never logged as a
-    # `rem_ticker` anywhere in the table). Without this, `open_end.pop(add_t,
-    # None)` would default a non-current symbol's end to None -- indistin-
-    # guishable from "still a member today," which NCC demonstrably is not.
-    # The log's own most recent date is the honest ceiling: NCC left by
-    # then at the latest, exact date unknown. A genuinely-current add still
-    # defaults to open (None) as before.
-    log_ceiling = changes_desc["date"].max() if len(changes_desc) else pd.NaT
+    # Sentinel distinguishing "no dict entry" (no later removal was ever
+    # logged for this symbol) from a real `None`/date value.
+    _no_later_event = object()
 
     for row in changes_desc.itertuples(index=False):
         d, add_t, rem_t = row.date, row.add_ticker, row.rem_ticker
@@ -170,9 +226,25 @@ def reconstruct_membership(current_tickers: "set[str]",
         # ticker and corrupts open_end with a bogus NaN-keyed interval
         # (caught by test_worked_example_from_docstring's row count).
         if pd.notna(add_t):
-            default_end = None if add_t in current_tickers else log_ceiling
-            end = open_end.pop(add_t, default_end)
-            intervals.append({"symbol": add_t, "start_date": d, "end_date": end})
+            if add_t in current_tickers:
+                end = open_end.pop(add_t, None)
+                intervals.append({"symbol": add_t, "start_date": d, "end_date": end})
+            else:
+                # Fixed 2026-09-06 (code review caught it): a NON-current
+                # symbol with no later logged removal (e.g. NCC/National
+                # City, added 1994-09-30, acquired by PNC in 2008 with its
+                # own removal never logged as a rem_ticker anywhere) used to
+                # default `end` to the log's own most recent date -- which,
+                # since that date sits only weeks before whenever this
+                # pipeline runs, silently claimed the symbol as a current-ish
+                # member for essentially its entire real, multi-decade
+                # absence. Dropping the interval entirely is the safer
+                # error: NCC's real 1994-2008 stint goes unrecorded rather
+                # than wrongly extended to the present. See module docstring.
+                end = open_end.pop(add_t, _no_later_event)
+                if end is not _no_later_event:
+                    intervals.append({"symbol": add_t, "start_date": d,
+                                      "end_date": end})
         if pd.notna(rem_t):
             open_end[rem_t] = d
 
