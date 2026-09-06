@@ -98,7 +98,7 @@ _register(
         tv_script_name="RSI + BB Inside Strategy",
         mechanism_family="mean_reversion",
         param_count=len(DEFAULT_PARAMS),
-        translation_verified="unit_tested",
+        translation_verified="unverified",
         notes=[
             "EMA 9/21 crossover — fast/slow EMA mean-reversion strategy",
             "derived from classified pine_ema_cross_9_21 scripts (85 examples)",
@@ -106,4 +106,5 @@ _register(
             "simulate_positions_both used for mutual-exclusion timeline",
         ],
     ),
+    build_rule,
 )

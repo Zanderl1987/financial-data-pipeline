@@ -1,5 +1,5 @@
 """
-strategies/ports/ut_bot_1.0_10.py -- port of UT BOT 1.0/10 strategies
+strategies/ports/ut_bot_1_0_10.py -- port of UT BOT 1.0/10 strategies
 from storage/tv_scripts (classified by pine_bridge as pine_ut_bot_1.0_10,
 3 examples). UT BOT = Ultimate Trail Stop Bot, a trend-following strategy
 with a trailing stop mechanism.
@@ -23,7 +23,7 @@ from strategies.ports import base
 from strategies.ports.base import atr_wilder, simulate_positions_both
 from strategies.ports import _register, PortInfo
 
-SLUG = "ut_bot_1.0_10"
+SLUG = "ut_bot_1_0_10"
 
 DEFAULT_PARAMS = dict(
     trail_pct=1.0,
@@ -51,9 +51,12 @@ def compute(df: pd.DataFrame, params: dict = None) -> dict:
     entries = uptrend.fillna(False)
     short_entries = (~uptrend).fillna(False)
 
-    # Trail-based exits
-    swing_low = df["low"].rolling(p["swing_lookback"]).min()
-    swing_high = df["high"].rolling(p["swing_lookback"]).max()
+    # Trail-based exits -- anchored to the PRIOR swing extreme (shift(1): the
+    # stop refers to the level already established before this bar, so a bar
+    # that breaks new ground triggers the exit instead of ratcheting itself
+    # unreachable, as an including-the-current-bar min/max would).
+    swing_low = df["low"].rolling(p["swing_lookback"]).min().shift(1)
+    swing_high = df["high"].rolling(p["swing_lookback"]).max().shift(1)
 
     long_sl = swing_low - trail
     short_sl = swing_high + trail
@@ -96,7 +99,7 @@ _register(
         tv_script_name="TRADLEWARE-HODL",
         mechanism_family="trend",
         param_count=len(DEFAULT_PARAMS),
-        translation_verified="unit_tested",
+        translation_verified="unverified",
         notes=[
             "UT BOT 1.0/10 — trailing stop trend-following strategy",
             "classified from pine_ut_bot_1.0_10 scripts (3 examples)",
@@ -105,4 +108,5 @@ _register(
             "exit: trail-based exit on reverse cross",
         ],
     ),
+    build_rule,
 )
