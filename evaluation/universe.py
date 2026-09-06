@@ -14,6 +14,15 @@ so any company that delisted/was acquired/went bankrupt before that snapshot is
 entirely absent from the data for its whole history. That is a data-source
 limitation, not something a filter here can fix -- state it in any report that
 uses this module.
+
+historical_constituents() (2026-09-06 backtest rigor audit, Phase 2) narrows a
+DIFFERENT bias: even for a symbol whose price history IS present, a backtest
+that filters to "S&P 500 names" using today's list is using 2026's membership
+on, say, 1999's data (index-inclusion look-ahead). It reads sp500_membership_
+pipeline.py's point-in-time reconstruction. It does NOT fix delisting
+survivorship either -- that pipeline's own docstring records why a free source
+for delisted-symbol price history was vetted and rejected (yfinance: empty or,
+worse, silently returns a DIFFERENT company that reused the old ticker).
 """
 
 import os
@@ -153,3 +162,35 @@ def point_in_time_eligible(
     if start is not None:
         out = out[out["date"] >= pd.Timestamp(start)].reset_index(drop=True)
     return out
+
+
+_SUPPORTED_INDICES = {"SPX"}
+
+
+def historical_constituents(
+    as_of_date: str,
+    index: str = "SPX",
+    table: str = "sp500_membership",
+) -> "list[str]":
+    """
+    Symbols that were ACTUAL index members on `as_of_date`, per sp500_
+    membership_pipeline.py's reconstruction from the Wikipedia change log
+    (see module docstring). Membership interval convention: a symbol counts
+    if start_date <= as_of_date < end_date, treating a NULL start_date as
+    "since before the log's 1976-07-01 floor" and a NULL end_date as "still
+    a current member" -- i.e. both NULLs are open bounds, not missing data.
+
+    Only "SPX" is built (2026-09-06) -- raises for anything else rather than
+    silently returning an empty/wrong list.
+    """
+    if index not in _SUPPORTED_INDICES:
+        raise ValueError(f"historical_constituents only supports "
+                         f"{sorted(_SUPPORTED_INDICES)}, got {index!r}")
+    sql = f"""
+        SELECT DISTINCT symbol
+        FROM {table}
+        WHERE (start_date IS NULL OR CAST(start_date AS DATE) <= ?)
+          AND (end_date IS NULL OR CAST(end_date AS DATE) > ?)
+    """
+    out = q._con().execute(sql, [as_of_date, as_of_date]).df()
+    return sorted(out["symbol"].dropna().unique().tolist())

@@ -14,7 +14,8 @@ sys.path.insert(0, REPO_ROOT)
 
 import query as q
 from evaluation.universe import (
-    clean_symbols, exchange_listed_symbols, flag_price_jumps, point_in_time_eligible,
+    clean_symbols, exchange_listed_symbols, flag_price_jumps,
+    historical_constituents, point_in_time_eligible,
 )
 
 
@@ -136,3 +137,51 @@ class TestFlagPriceJumps:
         out = flag_price_jumps([], price_table="prices")
         assert out.empty
         assert list(out.columns) == ["symbol", "max_abs_log_ret", "min_close"]
+
+
+class TestHistoricalConstituents:
+    def _register(self, con, name, df):
+        con.register(name, df)
+        return name
+
+    def test_open_start_and_open_end_both_count_as_member(self):
+        con = q._con()
+        df = pd.DataFrame([
+            {"symbol": "ALWAYS", "start_date": None, "end_date": None},
+            {"symbol": "LEFT_EARLY", "start_date": None,
+             "end_date": "2010-01-01"},
+            {"symbol": "JOINED_LATE", "start_date": "2020-01-01",
+             "end_date": None},
+            {"symbol": "MID_ONLY", "start_date": "2005-01-01",
+             "end_date": "2015-01-01"},
+        ])
+        name = "test_sp500_membership_a"
+        self._register(con, name, df)
+        try:
+            out_2007 = historical_constituents("2007-01-01", table=name)
+            out_2022 = historical_constituents("2022-01-01", table=name)
+        finally:
+            con.unregister(name)
+        # LEFT_EARLY hasn't left yet as of 2007 (leaves 2010) -- it belongs
+        # in the 2007 set despite its name, which describes 2022's view.
+        assert out_2007 == ["ALWAYS", "LEFT_EARLY", "MID_ONLY"]
+        assert out_2022 == ["ALWAYS", "JOINED_LATE"]
+
+    def test_end_date_boundary_is_exclusive(self):
+        con = q._con()
+        df = pd.DataFrame([
+            {"symbol": "LEAVING", "start_date": None, "end_date": "2020-06-01"},
+        ])
+        name = "test_sp500_membership_b"
+        self._register(con, name, df)
+        try:
+            still_in = historical_constituents("2020-05-31", table=name)
+            already_out = historical_constituents("2020-06-01", table=name)
+        finally:
+            con.unregister(name)
+        assert still_in == ["LEAVING"]
+        assert already_out == []
+
+    def test_unsupported_index_raises(self):
+        with pytest.raises(ValueError, match="SPX"):
+            historical_constituents("2020-01-01", index="NDX")

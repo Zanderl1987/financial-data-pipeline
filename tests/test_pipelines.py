@@ -80,6 +80,7 @@ PIPELINE_MODULES = [
     "eia_petng_prices_pipeline",
     "eia_hourly_grid_pipeline",
     "index_constituents_pipeline",
+    "sp500_membership_pipeline",
     "securities_reference_pipeline",
     "fund_holdings_pipeline",
     "etf_holdings_pipeline",

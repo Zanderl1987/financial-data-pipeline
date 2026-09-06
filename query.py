@@ -176,6 +176,8 @@ CATALOG: dict[str, str] = {
     "fund_holdings":           _iceberg_glob("constituents/fund_holdings/**/*.parquet"),
     "etf_holdings":            _iceberg_glob("constituents/etf_holdings/**/*.parquet"),
     "identifier_map":          _iceberg_glob("constituents/identifier_map/**/*.parquet"),
+    # ── S&P 500 point-in-time membership (start_date/end_date intervals) ──────
+    "sp500_membership":        _glob("sp500_membership/**/*.parquet"),
     # ── TSA checkpoint travel volumes ──────────────────────────────────────────
     "tsa_checkpoint":          _glob("tsa/**/*.parquet"),
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────

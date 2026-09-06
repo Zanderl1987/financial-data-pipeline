@@ -844,6 +844,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
+        name="sp500_membership",
+        file="sp500_membership_pipeline.py",
+        desc="S&P 500 point-in-time membership reconstruction (keyless, Wikipedia change log)",
+        stage=1,
+        tables=['sp500_membership'],
+        backfill_args=['--backfill'],
+        timeout=120,
+    ),
+    PipelineSpec(
         name="securities_reference",
         file="securities_reference_pipeline.py",
         desc="Securities reference table -- SEC EDGAR + Finnhub + index membership flags (Iceberg table)",

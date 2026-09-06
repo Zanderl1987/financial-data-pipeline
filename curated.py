@@ -184,6 +184,10 @@ KEYS: dict[str, list[str]] = {
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],
+    # Full reconstruction re-derived fresh every run -- (symbol, start_date,
+    # end_date) is the natural key; identical intervals across runs collapse
+    # to one row, a real reconstitution shows up as a genuinely new interval.
+    "sp500_membership":       ["symbol", "start_date", "end_date"],
     # Bond ETF rows have no holding_ticker (BlackRock's fixed-income sheets
     # identify positions by name only) -- holding_ticker alone would collapse
     # every bond in a fund to one row. holding_name/maturity_date/coupon_pct/

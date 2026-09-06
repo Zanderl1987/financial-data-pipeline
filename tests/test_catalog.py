@@ -129,6 +129,7 @@ EXPECTED_TABLES = [
     "eia_crude_production",
     "eia_hourly_grid",
     "index_members",
+    "sp500_membership",
     "securities",
     "fund_holdings",
     "etf_holdings",

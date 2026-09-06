@@ -1295,6 +1295,14 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['symbol'],
         "date_col":    None,
     },
+    "sp500_membership": {
+        # start_date/end_date are BOTH legitimately null (left-censored /
+        # still-current, see sp500_membership_pipeline.py) -- neither is a
+        # usable staleness date_col, unlike every dated table elsewhere here.
+        "required":    ['symbol', 'fetched_at'],
+        "critical_nn": ['symbol'],
+        "date_col":    None,
+    },
     "fund_holdings": {
         # holding_ticker is NOT critical_nn: bond ETF rows (AGG/LQD/HYG/TIP)
         # legitimately have no ticker in BlackRock's fixed-income feed (bonds
