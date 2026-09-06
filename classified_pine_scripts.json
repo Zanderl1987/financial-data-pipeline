@@ -1,0 +1,677 @@
+[
+  {
+    "slug": "0bcdtwov_sector_rotation_z_score_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\0bcdtwov_sector_rotation_z_score_strategy.pine"
+  },
+  {
+    "slug": "0zbqpzty_hull_rsi_trend_rider_pro",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\0zbqpzty_hull_rsi_trend_rider_pro.pine"
+  },
+  {
+    "slug": "1dgkudgw_spy_5_9_ma_scalping_volume_time_filter",
+    "pattern": "pine_ema_cross_5_9",
+    "file": "storage/tv_scripts\\1dgkudgw_spy_5_9_ma_scalping_volume_time_filter.pine"
+  },
+  {
+    "slug": "2loyzg4m_cnps7_3sma_cross",
+    "pattern": "pine_ema_cross_7_50",
+    "file": "storage/tv_scripts\\2loyzg4m_cnps7_3sma_cross.pine"
+  },
+  {
+    "slug": "2tmo7zsp_rsi_fibonacci_reversal_strategy_intraday_hunter",
+    "pattern": "pine_rsi_14_30_70",
+    "file": "storage/tv_scripts\\2tmo7zsp_rsi_fibonacci_reversal_strategy_intraday_hunter.pine"
+  },
+  {
+    "slug": "34r4mh5w_market_microstructure_analytics",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\34r4mh5w_market_microstructure_analytics.pine"
+  },
+  {
+    "slug": "41e5ocgx_klinger_oscillator",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\41e5ocgx_klinger_oscillator.pine"
+  },
+  {
+    "slug": "4hz8mood_vwap_strategy",
+    "pattern": "pine_ema_cross_5_13",
+    "file": "storage/tv_scripts\\4hz8mood_vwap_strategy.pine"
+  },
+  {
+    "slug": "5egvp61u_ema_9_20_with_support_and_resistance_breakout",
+    "pattern": "pine_ema_cross_9_20",
+    "file": "storage/tv_scripts\\5egvp61u_ema_9_20_with_support_and_resistance_breakout.pine"
+  },
+  {
+    "slug": "5kgra3dl_dynamic_volume_clusters_with_retest_signals_zeiierman",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\5kgra3dl_dynamic_volume_clusters_with_retest_signals_zeiierman.pine"
+  },
+  {
+    "slug": "5lyhxbqi_mpatel_rsi_2_entry_stock_etf_future",
+    "pattern": "pine_rsi_14_30_70",
+    "file": "storage/tv_scripts\\5lyhxbqi_mpatel_rsi_2_entry_stock_etf_future.pine"
+  },
+  {
+    "slug": "5urauvx9_gold_hft_hybrid_mt5_final",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\5urauvx9_gold_hft_hybrid_mt5_final.pine"
+  },
+  {
+    "slug": "68z68uzz_vix_cheat_sheet",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\68z68uzz_vix_cheat_sheet.pine"
+  },
+  {
+    "slug": "6cfdi5u9_9_21ema_anji",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\6cfdi5u9_9_21ema_anji.pine"
+  },
+  {
+    "slug": "6sorh9zw_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\6sorh9zw_.pine"
+  },
+  {
+    "slug": "6y8zlnni_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\6y8zlnni_.pine"
+  },
+  {
+    "slug": "7s0lx2bw_redk_volume_accelerated_directional_energy_ratio_redk_vader",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\7s0lx2bw_redk_volume_accelerated_directional_energy_ratio_redk_vader.pine"
+  },
+  {
+    "slug": "7tzvyari_fibonacci_concept_execution_engine",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\7tzvyari_fibonacci_concept_execution_engine.pine"
+  },
+  {
+    "slug": "7yzu94l1_simple_long_only_bot",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\7yzu94l1_simple_long_only_bot.pine"
+  },
+  {
+    "slug": "85napmk3_vumanchu_wt_zero_cross_v1_1b",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\85napmk3_vumanchu_wt_zero_cross_v1_1b.pine"
+  },
+  {
+    "slug": "86rawbno_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\86rawbno_.pine"
+  },
+  {
+    "slug": "9pcmzdu9_",
+    "pattern": "pine_ema_cross_11_28",
+    "file": "storage/tv_scripts\\9pcmzdu9_.pine"
+  },
+  {
+    "slug": "9uraizje_high_cagr_25_50_200_ema_cross_spy_daily_timeframe",
+    "pattern": "pine_ema_cross_50_200",
+    "file": "storage/tv_scripts\\9uraizje_high_cagr_25_50_200_ema_cross_spy_daily_timeframe.pine"
+  },
+  {
+    "slug": "ak5hyg42_ultimate_smc_emas_day_trading_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ak5hyg42_ultimate_smc_emas_day_trading_strategy.pine"
+  },
+  {
+    "slug": "aliyx5gu_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\aliyx5gu_.pine"
+  },
+  {
+    "slug": "b3pcu8qn_ce_42macro_equity_factor_table",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\b3pcu8qn_ce_42macro_equity_factor_table.pine"
+  },
+  {
+    "slug": "bn8jxmy5_momentum_squeeze_breakout_engine",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\bn8jxmy5_momentum_squeeze_breakout_engine.pine"
+  },
+  {
+    "slug": "bwbicwa6_emd_trend_investorunknown",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\bwbicwa6_emd_trend_investorunknown.pine"
+  },
+  {
+    "slug": "bxmbb82a_xauusd_15m_200_ema_1h_ut_bot_adx_strategy",
+    "pattern": "pine_ut_bot_2.0_1",
+    "file": "storage/tv_scripts\\bxmbb82a_xauusd_15m_200_ema_1h_ut_bot_adx_strategy.pine"
+  },
+  {
+    "slug": "bz815rmw_bot_acumulacion_ggal_ma_adx",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\bz815rmw_bot_acumulacion_ggal_ma_adx.pine"
+  },
+  {
+    "slug": "bzo4yadb_per_bak_self_organized_criticality",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\bzo4yadb_per_bak_self_organized_criticality.pine"
+  },
+  {
+    "slug": "c4pakqex_4_ema_trend_pullback_strategy_20260320",
+    "pattern": "pine_ema_cross_7_21",
+    "file": "storage/tv_scripts\\c4pakqex_4_ema_trend_pullback_strategy_20260320.pine"
+  },
+  {
+    "slug": "cddzpyx0_monthly_armed_weekly_trigger_macd_backtest_with_nifty_table",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\cddzpyx0_monthly_armed_weekly_trigger_macd_backtest_with_nifty_table.pine"
+  },
+  {
+    "slug": "cxhy1orz_rrinv_10_50_v_1",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\cxhy1orz_rrinv_10_50_v_1.pine"
+  },
+  {
+    "slug": "drx2sbyv_vix_curve_pro_real_time_term_structure_with_statistics",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\drx2sbyv_vix_curve_pro_real_time_term_structure_with_statistics.pine"
+  },
+  {
+    "slug": "dsnkjkxi_configurable_ema_stack_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\dsnkjkxi_configurable_ema_stack_strategy.pine"
+  },
+  {
+    "slug": "dxd8kkzo_test_ema_cross_script",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\dxd8kkzo_test_ema_cross_script.pine"
+  },
+  {
+    "slug": "edel00bp_risk_adjusted_momentum_oscillator",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\edel00bp_risk_adjusted_momentum_oscillator.pine"
+  },
+  {
+    "slug": "eitzg4st_ut_bot_alert_shah",
+    "pattern": "pine_ut_bot_1.0_10",
+    "file": "storage/tv_scripts\\eitzg4st_ut_bot_alert_shah.pine"
+  },
+  {
+    "slug": "ejthcuam_ndx_monthly_ma_env_signal_weekly_execution",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ejthcuam_ndx_monthly_ma_env_signal_weekly_execution.pine"
+  },
+  {
+    "slug": "ema_fib_confluence_3targets",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ema_fib_confluence_3targets.pine"
+  },
+  {
+    "slug": "emvvsgot_",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\emvvsgot_.pine"
+  },
+  {
+    "slug": "eqk0bwy4_analytics_tables",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\eqk0bwy4_analytics_tables.pine"
+  },
+  {
+    "slug": "evvwj4us_stochastic_bot_with_sl_tp",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\evvwj4us_stochastic_bot_with_sl_tp.pine"
+  },
+  {
+    "slug": "flwikvhq_nem_talalod_meg",
+    "pattern": "pine_ut_bot_2.2_10",
+    "file": "storage/tv_scripts\\flwikvhq_nem_talalod_meg.pine"
+  },
+  {
+    "slug": "fm3yqz8i_atr_trend_strategy_with_moving_average_fixed_tp_sl_version",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\fm3yqz8i_atr_trend_strategy_with_moving_average_fixed_tp_sl_version.pine"
+  },
+  {
+    "slug": "fp0zbifh_cnps_9_sma7_50_cross",
+    "pattern": "pine_ema_cross_7_50",
+    "file": "storage/tv_scripts\\fp0zbifh_cnps_9_sma7_50_cross.pine"
+  },
+  {
+    "slug": "gamszeig_logarithmic_moving_average_lma_quantalgo",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\gamszeig_logarithmic_moving_average_lma_quantalgo.pine"
+  },
+  {
+    "slug": "gd1gdoyi_intersection_value_functions",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\gd1gdoyi_intersection_value_functions.pine"
+  },
+  {
+    "slug": "gfzmy44j_amit_eth_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\gfzmy44j_amit_eth_strategy.pine"
+  },
+  {
+    "slug": "gjgm8vsh_trend_pullback_ema_combo_algorithmic_trend_following",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\gjgm8vsh_trend_pullback_ema_combo_algorithmic_trend_following.pine"
+  },
+  {
+    "slug": "gjzhjwka_combined_institutional_pro_manager",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\gjzhjwka_combined_institutional_pro_manager.pine"
+  },
+  {
+    "slug": "h0yse9xz_rsi_direction_bias_jd",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\h0yse9xz_rsi_direction_bias_jd.pine"
+  },
+  {
+    "slug": "i5qjdpxt_redk_everex_effort_versus_results_explorer",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\i5qjdpxt_redk_everex_effort_versus_results_explorer.pine"
+  },
+  {
+    "slug": "i6n7p04p_5m_sol_scalper_ha_lorentzian",
+    "pattern": "pine_ema_cross_14_21",
+    "file": "storage/tv_scripts\\i6n7p04p_5m_sol_scalper_ha_lorentzian.pine"
+  },
+  {
+    "slug": "idt5846t_tradingview_bot_goat",
+    "pattern": "pine_ema_cross_21_55",
+    "file": "storage/tv_scripts\\idt5846t_tradingview_bot_goat.pine"
+  },
+  {
+    "slug": "iodel1o6_cnps4_bb_sma",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\iodel1o6_cnps4_bb_sma.pine"
+  },
+  {
+    "slug": "iq5tvpks_",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\iq5tvpks_.pine"
+  },
+  {
+    "slug": "ivx6six8_tradingview_bot_trailing_15_min",
+    "pattern": "pine_ema_cross_21_55",
+    "file": "storage/tv_scripts\\ivx6six8_tradingview_bot_trailing_15_min.pine"
+  },
+  {
+    "slug": "j6ku7oka_institutional_flow_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\j6ku7oka_institutional_flow_strategy.pine"
+  },
+  {
+    "slug": "jcysz6ni_mtf_sma_crossover_strategy",
+    "pattern": "pine_ema_cross_50_200",
+    "file": "storage/tv_scripts\\jcysz6ni_mtf_sma_crossover_strategy.pine"
+  },
+  {
+    "slug": "jdtmt9ga_smb_fashionably_late_scalp_9ema_x_vwap",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\jdtmt9ga_smb_fashionably_late_scalp_9ema_x_vwap.pine"
+  },
+  {
+    "slug": "jeywqy6n_tema_zero_lag_momentum",
+    "pattern": "pine_ema_cross_29_27",
+    "file": "storage/tv_scripts\\jeywqy6n_tema_zero_lag_momentum.pine"
+  },
+  {
+    "slug": "jfizkwzr_rsi_mean_reversion",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\jfizkwzr_rsi_mean_reversion.pine"
+  },
+  {
+    "slug": "jqoxsbq8_auto_backtest_optimize_engine",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\jqoxsbq8_auto_backtest_optimize_engine.pine"
+  },
+  {
+    "slug": "jthvkevo_trailing_bot_solana_30_min",
+    "pattern": "pine_ema_cross_21_55",
+    "file": "storage/tv_scripts\\jthvkevo_trailing_bot_solana_30_min.pine"
+  },
+  {
+    "slug": "k13xeyxz_zero_line_momentum_strategy_precision_trend_following",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\k13xeyxz_zero_line_momentum_strategy_precision_trend_following.pine"
+  },
+  {
+    "slug": "kcttv29i_option_point",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\kcttv29i_option_point.pine"
+  },
+  {
+    "slug": "kpomqj46_my_strategy_9",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\kpomqj46_my_strategy_9.pine"
+  },
+  {
+    "slug": "kq3f7sfa_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\kq3f7sfa_.pine"
+  },
+  {
+    "slug": "kqpraxem_backtest_template_backtest_terminal",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\kqpraxem_backtest_template_backtest_terminal.pine"
+  },
+  {
+    "slug": "kw2v4sni_sma_4_sma_30",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\kw2v4sni_sma_4_sma_30.pine"
+  },
+  {
+    "slug": "l6nreqzb_adaptive_trend_classification_moving_averages_investorunknown",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\l6nreqzb_adaptive_trend_classification_moving_averages_investorunknown.pine"
+  },
+  {
+    "slug": "lv5jftzn_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\lv5jftzn_.pine"
+  },
+  {
+    "slug": "lz90up19_htf_ema_pullback_strategy_long_short_fx_agnostic_cm",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\lz90up19_htf_ema_pullback_strategy_long_short_fx_agnostic_cm.pine"
+  },
+  {
+    "slug": "m1jdhfr9_velocity_breakout_strategy_vbs",
+    "pattern": "pine_ut_bot_1.0_10",
+    "file": "storage/tv_scripts\\m1jdhfr9_velocity_breakout_strategy_vbs.pine"
+  },
+  {
+    "slug": "ma35whu5_r_r_trading_system_framework",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ma35whu5_r_r_trading_system_framework.pine"
+  },
+  {
+    "slug": "mb0famot_advanced_fed_decision_forecast_model_afdfm",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\mb0famot_advanced_fed_decision_forecast_model_afdfm.pine"
+  },
+  {
+    "slug": "mb0sarnr_big_breakout_strategy",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\mb0sarnr_big_breakout_strategy.pine"
+  },
+  {
+    "slug": "mcogjc67_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\mcogjc67_strategy.pine"
+  },
+  {
+    "slug": "mcwal9oa_fast_scalper_with_stops",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\mcwal9oa_fast_scalper_with_stops.pine"
+  },
+  {
+    "slug": "mfw4fjst_",
+    "pattern": "pine_ema_cross_12_26",
+    "file": "storage/tv_scripts\\mfw4fjst_.pine"
+  },
+  {
+    "slug": "n18vdyzl_ema_5_13_strategy",
+    "pattern": "pine_ema_cross_5_13",
+    "file": "storage/tv_scripts\\n18vdyzl_ema_5_13_strategy.pine"
+  },
+  {
+    "slug": "noqlajrw_fast_scalper_with_stops",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\noqlajrw_fast_scalper_with_stops.pine"
+  },
+  {
+    "slug": "nwiweukt_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\nwiweukt_.pine"
+  },
+  {
+    "slug": "nxo4eltq_vwap_strategy",
+    "pattern": "pine_ema_cross_5_13",
+    "file": "storage/tv_scripts\\nxo4eltq_vwap_strategy.pine"
+  },
+  {
+    "slug": "o52gurxf_redk_momentum_bars_redk_mo_bars",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\o52gurxf_redk_momentum_bars_redk_mo_bars.pine"
+  },
+  {
+    "slug": "omfjrhlz_btc_momentum_trading_rsi_cross",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\omfjrhlz_btc_momentum_trading_rsi_cross.pine"
+  },
+  {
+    "slug": "otfxupmk_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\otfxupmk_.pine"
+  },
+  {
+    "slug": "pbphzfy8_option_selling",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\pbphzfy8_option_selling.pine"
+  },
+  {
+    "slug": "prrh9owy_ema_golden_dead_cross_strategy",
+    "pattern": "pine_ema_cross_50_200",
+    "file": "storage/tv_scripts\\prrh9owy_ema_golden_dead_cross_strategy.pine"
+  },
+  {
+    "slug": "px2zfaxs_simple_breakout_strategy_santana",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\px2zfaxs_simple_breakout_strategy_santana.pine"
+  },
+  {
+    "slug": "q1hxs0v6_liquidity_void_detector_zeiierman",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\q1hxs0v6_liquidity_void_detector_zeiierman.pine"
+  },
+  {
+    "slug": "q9fxt5n6_ema_pullback_adx_cvd_divergence",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\q9fxt5n6_ema_pullback_adx_cvd_divergence.pine"
+  },
+  {
+    "slug": "qd7rh2ka_ssl_macd_nhuthang83_5_sessions",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\qd7rh2ka_ssl_macd_nhuthang83_5_sessions.pine"
+  },
+  {
+    "slug": "qfy9ozpr_spy_daily_timeframe_20_cagr_high_risk_high_reward",
+    "pattern": "pine_ema_cross_20_70",
+    "file": "storage/tv_scripts\\qfy9ozpr_spy_daily_timeframe_20_cagr_high_risk_high_reward.pine"
+  },
+  {
+    "slug": "qpox499e_vumanchu_wt_zero_cross_strategy_v1_2_2",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\qpox499e_vumanchu_wt_zero_cross_strategy_v1_2_2.pine"
+  },
+  {
+    "slug": "qtkfi42t_macd_x_overlay_more_than_macd_by_dgt",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\qtkfi42t_macd_x_overlay_more_than_macd_by_dgt.pine"
+  },
+  {
+    "slug": "qurvpamt_wld_4h_auto_entry_confirmed",
+    "pattern": "pine_ut_bot_2.0_1",
+    "file": "storage/tv_scripts\\qurvpamt_wld_4h_auto_entry_confirmed.pine"
+  },
+  {
+    "slug": "rabiah6x_ut_bot_scalper",
+    "pattern": "pine_ut_bot_2.0_10",
+    "file": "storage/tv_scripts\\rabiah6x_ut_bot_scalper.pine"
+  },
+  {
+    "slug": "rbeervr5_rolling_z_score_trend_quantalgo",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\rbeervr5_rolling_z_score_trend_quantalgo.pine"
+  },
+  {
+    "slug": "rgamipig_rsi_30_65_recovery_strategy",
+    "pattern": "pine_rsi_14_30.0_65.0",
+    "file": "storage/tv_scripts\\rgamipig_rsi_30_65_recovery_strategy.pine"
+  },
+  {
+    "slug": "rj7akfim_ut_bot_shah_200_50_ema",
+    "pattern": "pine_ut_bot_1.0_10",
+    "file": "storage/tv_scripts\\rj7akfim_ut_bot_shah_200_50_ema.pine"
+  },
+  {
+    "slug": "rkhoyhji_btc_scalper_t3_volume_filter",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\rkhoyhji_btc_scalper_t3_volume_filter.pine"
+  },
+  {
+    "slug": "rn9yffsm_ema_golden_dead_cross_strategy",
+    "pattern": "pine_ema_cross_50_200",
+    "file": "storage/tv_scripts\\rn9yffsm_ema_golden_dead_cross_strategy.pine"
+  },
+  {
+    "slug": "s2clgbm5_volume_based_support_resistance_zones",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\s2clgbm5_volume_based_support_resistance_zones.pine"
+  },
+  {
+    "slug": "s8nyoqf9_nas100_ema_scalper",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\s8nyoqf9_nas100_ema_scalper.pine"
+  },
+  {
+    "slug": "sl3hurjg_fast_scalper_with_stops",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\sl3hurjg_fast_scalper_with_stops.pine"
+  },
+  {
+    "slug": "spslkody_ttm_momentum_histo_9_ema_21_ema_debit_spread_script",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\spslkody_ttm_momentum_histo_9_ema_21_ema_debit_spread_script.pine"
+  },
+  {
+    "slug": "sxo2gpsm_new_tott_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\sxo2gpsm_new_tott_strategy.pine"
+  },
+  {
+    "slug": "tbh1kpxq_",
+    "pattern": "pine_ema_cross_25_68",
+    "file": "storage/tv_scripts\\tbh1kpxq_.pine"
+  },
+  {
+    "slug": "tocozxot_the_flasher",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\tocozxot_the_flasher.pine"
+  },
+  {
+    "slug": "tpmkahup_ema_cross",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\tpmkahup_ema_cross.pine"
+  },
+  {
+    "slug": "u6hvxsgf_rsi_strategy_with_take_profit_and_stop_loss",
+    "pattern": "pine_rsi_14_30.0_70.0",
+    "file": "storage/tv_scripts\\u6hvxsgf_rsi_strategy_with_take_profit_and_stop_loss.pine"
+  },
+  {
+    "slug": "ufgpi6rd_ut_bot_options_seller_5_min_spike_protected",
+    "pattern": "pine_ut_bot_2.0_10",
+    "file": "storage/tv_scripts\\ufgpi6rd_ut_bot_options_seller_5_min_spike_protected.pine"
+  },
+  {
+    "slug": "ujgvguvt_volatility_risk_premium",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ujgvguvt_volatility_risk_premium.pine"
+  },
+  {
+    "slug": "ukgkppqm_dynamic_volume_profile_oscillator_alphaalgos",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\ukgkppqm_dynamic_volume_profile_oscillator_alphaalgos.pine"
+  },
+  {
+    "slug": "undertow_backtest",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\undertow_backtest.pine"
+  },
+  {
+    "slug": "v5lj2zyc_vwap_strategy",
+    "pattern": "pine_ema_cross_5_13",
+    "file": "storage/tv_scripts\\v5lj2zyc_vwap_strategy.pine"
+  },
+  {
+    "slug": "vlbyb1vo_aroon_strategy_pro",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\vlbyb1vo_aroon_strategy_pro.pine"
+  },
+  {
+    "slug": "w6w1r6ub_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\w6w1r6ub_.pine"
+  },
+  {
+    "slug": "whqvxcix_vwap_strategy",
+    "pattern": "pine_ema_cross_5_13",
+    "file": "storage/tv_scripts\\whqvxcix_vwap_strategy.pine"
+  },
+  {
+    "slug": "wlsrg7cx_best_sma_finder",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\wlsrg7cx_best_sma_finder.pine"
+  },
+  {
+    "slug": "wrexdud4_index_option_selling",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\wrexdud4_index_option_selling.pine"
+  },
+  {
+    "slug": "wrheq9cf_e2_drawing_library_horizontal_ray",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\wrheq9cf_e2_drawing_library_horizontal_ray.pine"
+  },
+  {
+    "slug": "x5m5zevx_code_a_terminal_core",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\x5m5zevx_code_a_terminal_core.pine"
+  },
+  {
+    "slug": "x9ppfwmi_ac20_55emagdcrosstest",
+    "pattern": "pine_ema_cross_20_55",
+    "file": "storage/tv_scripts\\x9ppfwmi_ac20_55emagdcrosstest.pine"
+  },
+  {
+    "slug": "xaeg4zjg_how_to_set_backtest_time_ranges",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\xaeg4zjg_how_to_set_backtest_time_ranges.pine"
+  },
+  {
+    "slug": "xbtqxdmb_3commas_pullback_sniper_strategy",
+    "pattern": "pine_rsi_14_31.0_69.0",
+    "file": "storage/tv_scripts\\xbtqxdmb_3commas_pullback_sniper_strategy.pine"
+  },
+  {
+    "slug": "xjyfuoda_ema_s_r_breakout",
+    "pattern": "pine_ema_cross_9_20",
+    "file": "storage/tv_scripts\\xjyfuoda_ema_s_r_breakout.pine"
+  },
+  {
+    "slug": "y5ycp2ed_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\y5ycp2ed_.pine"
+  },
+  {
+    "slug": "ygaz2p0e_tradingview_bot_goat_2_0",
+    "pattern": "pine_ema_cross_21_55",
+    "file": "storage/tv_scripts\\ygaz2p0e_tradingview_bot_goat_2_0.pine"
+  },
+  {
+    "slug": "zjzb6mii_amit_eth_strategy",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\zjzb6mii_amit_eth_strategy.pine"
+  },
+  {
+    "slug": "zqnukiaw_20_200_sma_strategy",
+    "pattern": "pine_ema_cross_20_200",
+    "file": "storage/tv_scripts\\zqnukiaw_20_200_sma_strategy.pine"
+  },
+  {
+    "slug": "zrdrgzl3_",
+    "pattern": "pine_ema_cross_9_21",
+    "file": "storage/tv_scripts\\zrdrgzl3_.pine"
+  }
+]
