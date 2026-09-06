@@ -40,7 +40,9 @@ HEADERS = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://www.globalxetfs.com/"
+    "Referer": "https://www.globalxetfs.com/",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
 }
 
 STORAGE_ROOT = Path(__file__).parent / "storage"
@@ -59,37 +61,52 @@ NON_SECURITY_NAME_RE = re.compile(
     re.IGNORECASE
 )
 
-# Global X publishes monthly holdings at month-end with a lag.
-# The filename date is the *as-of* date (month-end), not the publication date.
-# Try the last 3 month-ends since publication lags vary.
+# Global X publishes daily holdings with the current business date in the filename.
+# The filename date is the *as-of* date (latest business day), not month-end.
+# Try today's date first, then fall back to previous business days.
 def get_candidate_dates() -> list[str]:
-    """Get the last 3 month-end dates in YYYYMMDD format."""
+    """Get today's date and previous business days in YYYYMMDD format."""
     dates = []
     today = date.today()
-    for i in range(1, 4):
-        first_of_month = today.replace(day=1)
-        month_end = first_of_month - timedelta(days=1)
-        dates.append(month_end.strftime("%Y%m%d"))
-        today = month_end - timedelta(days=1)
+    # Add today and up to 5 previous business days (covers weekends + holidays)
+    for i in range(6):
+        check_date = today - timedelta(days=i)
+        # Skip weekends (Saturday=5, Sunday=6)
+        if check_date.weekday() < 5:
+            dates.append(check_date.strftime("%Y%m%d"))
     return dates
 
 
 def fetch_globalx_holdings(ticker: str, date_str: str) -> pd.DataFrame | None:
-    """Fetch holdings CSV for a single Global X ETF."""
-    url = f"https://assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{date_str}.csv"
+    """Fetch holdings CSV for a single Global X ETF.
+    
+    The CDN requires visiting the fund page first to establish a session
+    before the holdings CSV can be downloaded.
+    """
+    fund_page = f"https://www.globalxetfs.com/funds/{ticker.lower()}/"
+    csv_url = f"https://assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{date_str}.csv"
     log.info(f"[{ticker}] Fetching from Global X ({date_str})...")
     
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    
     try:
-        r = requests.get(url, headers=HEADERS, timeout=30)
-        if r.status_code == 200:
+        # First visit the fund page to establish session
+        r1 = session.get(fund_page, timeout=15)
+        if r1.status_code != 200:
+            log.warning(f"[{ticker}] Fund page returned {r1.status_code}")
+        
+        # Then fetch the CSV
+        r2 = session.get(csv_url, timeout=30)
+        if r2.status_code == 200:
             # Skip first 2 rows (fund name + "Fund Holdings Data as of...")
-            df = pd.read_csv(StringIO(r.text), skiprows=2)
+            df = pd.read_csv(StringIO(r2.text), skiprows=2)
             log.info(f"[{ticker}] Raw: {len(df)} rows, cols: {list(df.columns)}")
             return df
-        elif r.status_code == 404:
+        elif r2.status_code == 404:
             log.warning(f"[{ticker}] Not found (404) for date {date_str}")
         else:
-            log.warning(f"[{ticker}] HTTP {r.status_code}")
+            log.warning(f"[{ticker}] HTTP {r2.status_code}")
     except Exception as e:
         log.warning(f"[{ticker}] Fetch error: {e}")
     

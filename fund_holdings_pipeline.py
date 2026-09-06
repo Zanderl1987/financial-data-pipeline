@@ -158,6 +158,7 @@ ETF_PID_MAP = {
 # Name only), and bond-specific fields (Duration, YTM, Maturity, Coupon, ...)
 # instead of a Ticker/Sector-only equity layout. Needs fetch_blackrock_bond_
 # holdings() rather than fetch_blackrock_etf_holdings().
+# Some funds (e.g., SGOV) require different API parameters (appSubType, targetSite).
 BOND_ETF_PID_MAP = {
     "AGG": {"pid": "239458", "name": "iShares Core U.S. Aggregate Bond ETF"},
     "LQD": {"pid": "239566", "name": "iShares iBoxx $ Investment Grade Corporate Bond ETF"},
@@ -167,7 +168,12 @@ BOND_ETF_PID_MAP = {
     "IEI": {"pid": "239455", "name": "iShares 3-7 Year Treasury Bond ETF"},
     "GSG": {"pid": "239757", "name": "iShares S&P GSCI Commodity-Indexed Trust"},
     # Short-term Treasury (gap closed 2026-09-05; pid verified live)
-    # "SGOV": {"pid": "239747", "name": "iShares 0-3 Month Treasury Bond ETF"},  -- 400 from API, need correct PID
+    "SGOV": {
+        "pid": "314116",
+        "name": "iShares 0-3 Month Treasury Bond ETF",
+        "api_params": {"appSubType": "ISHARES", "targetSite": "us-ishares"},
+        "skip_cash_filter": True
+    },
 }
 
 # Mutual funds to fetch via EdgarTools N-PORT
@@ -245,6 +251,8 @@ MUTUAL_FUND_UNIVERSE = {
     "BND":  "Vanguard Total Bond Market ETF (N-PORT, name-guarded)",
     "BNDX": "Vanguard Total International Bond ETF (N-PORT, name-guarded)",
     "VTEB": "Vanguard Tax-Exempt Bond ETF (N-PORT, name-guarded)",
+    # Amplify ETFs (Firestore API 403, but N-PORT works)
+    "DIVO": "Amplify ETF Trust - Amplify BlackSwan Growth & Treasury Core ETF (N-PORT, name-guarded)",
 }
 
 # Substring that must appear in the resolved report.name (case-insensitive)
@@ -253,18 +261,26 @@ NPORT_ETF_NAME_GUARD = {
     "BND":  "total bond market ii",
     "BNDX": "total international bond ii",
     "VTEB": "intermediate-term tax-exempt",
+    "DIVO": "blackswan growth & treasury core",
 }
 
 
-def _fetch_blackrock_holdings_rows(ticker: str, pid: str) -> list:
+def _fetch_blackrock_holdings_rows(ticker: str, pid: str, api_params: dict | None = None) -> list:
     """Fetch a fund's Holdings worksheet from the BlackRock varnish API and
     return it as a list of non-empty rows (each a list of cell strings)."""
     log.info("[%s] Fetching from BlackRock (pid=%s)...", ticker, pid)
 
+    # Default API parameters (standard BlackRock varnish API)
+    app_sub_type = "ONE"
+    target_site = "one"
+    if api_params:
+        app_sub_type = api_params.get("appSubType", "ONE")
+        target_site = api_params.get("targetSite", "one")
+
     api_url = (
         f"https://www.blackrock.com/varnish-api/blk-one01-product-data/"
         f"product-data/api/v1/get-fund-document"
-        f"?appType=PRODUCT_PAGE&appSubType=ONE&targetSite=one&locale=en_US"
+        f"?appType=PRODUCT_PAGE&appSubType={app_sub_type}&targetSite={target_site}&locale=en_US"
         f"&portfolioId={pid}&component=fundDownload&userType=individual"
     )
     r = requests.get(api_url, headers=HEADERS, timeout=60)
@@ -391,7 +407,9 @@ def fetch_blackrock_bond_holdings(ticker: str) -> pd.DataFrame:
     """
     info = BOND_ETF_PID_MAP[ticker]
     fund_name = info["name"]
-    rows_data = _fetch_blackrock_holdings_rows(ticker, info["pid"])
+    api_params = info.get("api_params")
+    skip_cash_filter = info.get("skip_cash_filter", False)
+    rows_data = _fetch_blackrock_holdings_rows(ticker, info["pid"], api_params)
 
     # Find header row (bond sheets have no "ticker" column, so key off Name +
     # Weight + a bond-specific field instead)
@@ -422,18 +440,22 @@ def fetch_blackrock_bond_holdings(ticker: str) -> pd.DataFrame:
 
     # Cash/derivative sweep line has Asset Class == "Money Market" (real
     # positions are "Fixed Income"); Sector == "Cash and/or Derivatives" too.
-    before = len(df)
-    if asset_class_col:
-        df = df[~df[asset_class_col].astype(str).str.contains(
-            "money market", case=False, na=False
-        )]
-    if sector_col:
-        df = df[~df[sector_col].astype(str).str.contains(
-            "cash and/or derivatives", case=False, na=False
-        )]
-    dropped = before - len(df)
-    if dropped > 0:
-        log.info("[BOND:%s] Filtered %d non-security rows (cash, etc.)", ticker, dropped)
+    # Skip this filter for funds like SGOV where Treasury bills are classified as Cash.
+    if not skip_cash_filter:
+        before = len(df)
+        if asset_class_col:
+            df = df[~df[asset_class_col].astype(str).str.contains(
+                "money market", case=False, na=False
+            )]
+        if sector_col:
+            df = df[~df[sector_col].astype(str).str.contains(
+                "cash and/or derivatives", case=False, na=False
+            )]
+        dropped = before - len(df)
+        if dropped > 0:
+            log.info("[BOND:%s] Filtered %d non-security rows (cash, etc.)", ticker, dropped)
+    else:
+        log.info("[BOND:%s] Skipping cash filter (Treasury ETF)", ticker)
 
     maturity = pd.to_datetime(df[maturity_col], errors="coerce").dt.date if maturity_col else None
 
