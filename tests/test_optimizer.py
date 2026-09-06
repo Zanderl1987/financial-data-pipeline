@@ -7,6 +7,7 @@ assembly, and walk-forward optimization's fold discipline.
 """
 
 import json
+import math
 import os
 import sys
 
@@ -369,6 +370,19 @@ class TestRunSearch:
                            {"cache": _toy_cache()}, method="pso",
                            registry_path=reg_path)
 
+    def test_cpcv_in_artifact_and_verdict(self, reg_path, tmp_path,
+                                          monkeypatch):
+        artifact, _ = self._run(reg_path, tmp_path, monkeypatch)
+        assert "cpcv" in artifact
+        cpcv = artifact["cpcv"]
+        # _toy_cache's 60-day fixture with >=2 scored trials should clear
+        # cpcv_report's n_obs >= n_groups=6 floor -- a real distribution,
+        # not a reason string, is the expected path here.
+        assert cpcv["cpcv_oos_sharpe_median"] is not None
+        assert cpcv["purge"] == "embargo-only"     # no t1 -- see docstring
+        assert cpcv["n_splits"] == math.comb(6, 2)
+        assert any("CPCV" in line for line in artifact["verdict"])
+
 
 class TestPboMatrix:
     def test_needs_two_return_series(self):
@@ -404,6 +418,40 @@ class TestPboMatrix:
         matrix, reason = opt.pbo_matrix(ev)
         assert matrix.empty
         assert "overlapping" in reason
+
+
+class TestCpcvStability:
+    def test_empty_matrix_gives_reason(self):
+        out = opt.cpcv_stability(pd.DataFrame(), None)
+        assert out["cpcv_oos_sharpe_median"] is None
+        assert "no matrix" in out["cpcv_reason"]
+
+    def test_no_best_col_gives_reason(self):
+        matrix = pd.DataFrame(np.random.default_rng(0).normal(size=(60, 2)))
+        out = opt.cpcv_stability(matrix, None)
+        assert out["cpcv_oos_sharpe_median"] is None
+        assert "no matrix" in out["cpcv_reason"]
+
+    def test_too_few_observations_for_n_groups(self):
+        matrix = pd.DataFrame(np.random.default_rng(0).normal(size=(4, 2)))
+        out = opt.cpcv_stability(matrix, 0, n_groups=6, k_test=2)
+        assert out["cpcv_oos_sharpe_median"] is None
+        assert out["cpcv_reason"] is not None
+
+    def test_real_matrix_produces_full_split_distribution(self):
+        rng = np.random.default_rng(3)
+        # column 0: real positive drift, low vol -- the "best" finalist.
+        best = rng.normal(0.001, 0.01, 90)
+        other = rng.normal(0.0, 0.01, 90)
+        matrix = pd.DataFrame({0: best, 1: other})
+        out = opt.cpcv_stability(matrix, 0, n_groups=6, k_test=2)
+        assert "cpcv_reason" not in out
+        assert out["cpcv_oos_sharpe_median"] is not None
+        assert out["n_splits"] == math.comb(6, 2)
+        assert out["purge"] == "embargo-only"
+        assert 0.0 <= out["cpcv_pct_positive"] <= 100.0
+        # a real, low-vol positive drift should clear positive on most folds
+        assert out["cpcv_pct_positive"] > 50.0
 
 
 # --------------------------------------------------- walk-forward optimize

@@ -29,6 +29,13 @@ Safety machinery (all of it mandatory, none optional):
 6. Nothing here writes to the strategy registry or promotes anything into a
    campaign. Output = JSON artifact + registry rows + a printed verdict.
    Promotion remains a human one-shot decision per the pre-registration.
+7. Combinatorial purged CV (robustness.cpcv_splits, embargo-only -- these are
+   already-realized daily P&L series, not labels with a forward horizon to
+   purge against) reports how STABLE the single best finalist's OOS Sharpe
+   is across many overlapping train/test partitions of the same calendar
+   PBO already used. PBO asks whether picking by in-sample rank generalizes
+   at all; CPCV asks whether the winner it points to is itself dependable
+   from fold to fold. See cpcv_stability().
 
 Solvers: exhaustive grid + scipy differential_evolution (deterministic seed,
 polish=False). CMA-ES would need the `cma` package -- deliberately not added;
@@ -417,6 +424,54 @@ def pbo_matrix(evaluator: Evaluator) -> "tuple[pd.DataFrame, str]":
     return df, ""
 
 
+def cpcv_stability(matrix: pd.DataFrame, best_col: "int | None", *,
+                   n_groups: int = 6, k_test: int = 2,
+                   embargo_pct: float = 0.01) -> dict:
+    """
+    OOS Sharpe distribution for the single BEST in-sample finalist across
+    combinatorial purged CV test folds of the pbo_matrix() calendar.
+
+    Embargo-only purge (no `t1`): these are already-realized daily P&L
+    series aggregated across a whole trade system, not per-observation
+    labels with a forward horizon to purge against -- robustness.
+    cpcv_report()'s own distinction between "exact" and "embargo-only"
+    purging is reported here via the `purge` key rather than assumed.
+
+    Complements pbo(): PBO asks whether the in-sample RANKING survives
+    out-of-sample across these same folds at all; this asks how STABLE the
+    single winner's own OOS Sharpe is fold to fold. A winner that clears PBO
+    but whose OOS Sharpe swings from strongly positive to strongly negative
+    across folds is not a result to trust either -- PBO alone would not
+    surface that, since it only ever looks at relative RANK, never at a
+    single configuration's own OOS spread.
+    """
+    from evaluation.robustness import _sharpe as _rb_sharpe
+    from evaluation.robustness import cpcv_report as _cpcv_report
+    from evaluation.robustness import cpcv_splits as _cpcv_splits
+
+    if matrix.empty or best_col is None:
+        return {"cpcv_oos_sharpe_median": None,
+               "cpcv_reason": "no matrix / no best finalist with a return series"}
+    n_obs = len(matrix)
+    meta = _cpcv_report(n_obs, n_groups=n_groups, k_test=k_test,
+                        embargo_pct=embargo_pct)
+    if meta.get("n_splits") is None:
+        return {"cpcv_oos_sharpe_median": None,
+               "cpcv_reason": meta.get("cpcv_reason")}
+
+    col = matrix.iloc[:, best_col].to_numpy(dtype=float)
+    oos = [_rb_sharpe(col[test_idx])
+          for _, test_idx in _cpcv_splits(n_obs, n_groups=n_groups,
+                                          k_test=k_test, embargo_pct=embargo_pct)]
+    arr = np.asarray(oos, dtype=float)
+    return {"cpcv_oos_sharpe_median": round(float(np.median(arr)), 4),
+           "cpcv_oos_sharpe_p5": round(float(np.percentile(arr, 5)), 4),
+           "cpcv_oos_sharpe_p95": round(float(np.percentile(arr, 95)), 4),
+           "cpcv_pct_positive": round(100.0 * float((arr > 0).mean()), 1),
+           "n_splits": meta["n_splits"], "purge": meta["purge"],
+           "n_groups": meta["n_groups"], "k_test": meta["k_test"]}
+
+
 # ------------------------------------------------------------------ solvers
 
 
@@ -578,9 +633,24 @@ def run_search(space: ParamSpace, data: dict, *, method: str = "grid",
 
     matrix, pbo_reason = pbo_matrix(ev)
     pbo_res = {"pbo": None, "pbo_reason": pbo_reason}
+    cpcv_res = {"cpcv_oos_sharpe_median": None, "cpcv_reason": pbo_reason}
     if not matrix.empty:
         from evaluation.robustness import pbo as _pbo
         pbo_res = _pbo(matrix)
+
+        # Same non-null-return trials pbo_matrix() concatenated, same order
+        # -> matrix's integer column labels line up positionally. Identity
+        # (`is`), not equality, finds `best`'s position: dataclass equality
+        # would mis-locate it on a tie between two distinct trials.
+        returns_idx = [i for i, r in enumerate(ev.results)
+                      if r.returns is not None and len(r.returns) > 0]
+        best_col = None
+        if best is not None:
+            for pos, i in enumerate(returns_idx):
+                if ev.results[i] is best:
+                    best_col = pos
+                    break
+        cpcv_res = cpcv_stability(matrix, best_col)
 
     artifact = {
         "run_id": run_id, "mode": "single_split",
@@ -601,14 +671,15 @@ def run_search(space: ParamSpace, data: dict, *, method: str = "grid",
         "pbo": {"pbo": pbo_res.get("pbo"),
                 "reason": pbo_res.get("pbo_reason",
                                       pbo_res.get("metric_reason"))},
-        "verdict": _verdict(best, dsr, pbo_res),
+        "cpcv": cpcv_res,
+        "verdict": _verdict(best, dsr, pbo_res, cpcv_res),
     }
     log.finalize()
     _write_artifact(artifact, artifact_dir)
     return artifact
 
 
-def _verdict(best, dsr: dict, pbo_res: dict) -> "list[str]":
+def _verdict(best, dsr: dict, pbo_res: dict, cpcv_res: "dict | None" = None) -> "list[str]":
     """ASCII verdict lines. Skepticism defaults: null results are normal."""
     out = []
     if best is None or best.sharpe is None:
@@ -631,6 +702,20 @@ def _verdict(best, dsr: dict, pbo_res: dict) -> "list[str]":
                    f"treat the winner as noise")
     else:
         out.append(f"PBO {pb} -- selection procedure generalizes acceptably")
+    cpcv_res = cpcv_res or {}
+    med = cpcv_res.get("cpcv_oos_sharpe_median")
+    if med is None:
+        out.append(f"CPCV unavailable ({cpcv_res.get('cpcv_reason', '?')})")
+    elif med <= 0 or cpcv_res.get("cpcv_pct_positive", 100.0) < 60.0:
+        out.append(f"CPCV OOS sharpe median {med} across "
+                   f"{cpcv_res.get('n_splits')} folds ("
+                   f"{cpcv_res.get('cpcv_pct_positive')}% positive) -- "
+                   f"the winner is not stable fold-to-fold, treat as fragile")
+    else:
+        out.append(f"CPCV OOS sharpe median {med} across "
+                   f"{cpcv_res.get('n_splits')} folds ("
+                   f"{cpcv_res.get('cpcv_pct_positive')}% positive) -- "
+                   f"reasonably stable")
     return out
 
 

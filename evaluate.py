@@ -95,6 +95,33 @@ def _print_trades_summary(res):
                   f"(tax ${_fmt(taxd.get('tax_due_total'))}, "
                   f"drag {_fmt(taxd.get('tax_drag_pct'))}%, "
                   f"wash events {taxd.get('n_wash_events', 0)})")
+    noise = res["results"].get("robustness_noise")
+    if noise:
+        if noise.get("robustness_reason") or noise.get("noise_reason"):
+            print(f"robustness noise: "
+                  f"{noise.get('robustness_reason') or noise.get('noise_reason')}")
+        else:
+            print(f"robustness noise: {_fmt(noise.get('noise_pct_profitable'))}% "
+                  f"of trials profitable, CVaR ${_fmt(noise.get('noise_cvar_pnl_dollars'))} "
+                  f"(n={noise.get('n_trials')})")
+    mcpt = res["results"].get("robustness_mcpt")
+    if mcpt:
+        if mcpt.get("robustness_reason") or mcpt.get("price_mcpt_reason"):
+            print(f"robustness price-MCPT: "
+                  f"{mcpt.get('robustness_reason') or mcpt.get('price_mcpt_reason')}")
+        else:
+            print(f"robustness price-MCPT: p={_fmt(mcpt.get('price_mcpt_p'))} "
+                  f"(n_perm={mcpt.get('n_perm')})")
+    order = res["results"].get("robustness_order")
+    if order:
+        if order.get("robustness_reason") or order.get("order_reason"):
+            print(f"robustness trade-order: "
+                  f"{order.get('robustness_reason') or order.get('order_reason')}")
+        else:
+            print(f"robustness trade-order: observed drawdown "
+                  f"{_fmt(order.get('observed_mdd_pct'))}% sits at percentile "
+                  f"{_fmt(order.get('observed_mdd_percentile'))} of the "
+                  f"shuffled-order distribution")
 
 
 def main(argv=None) -> int:
@@ -155,6 +182,18 @@ def main(argv=None) -> int:
                          "accounting (evaluation/taxes.py) over the realized "
                          "trades and register after-tax + wash stats as its "
                          "own trades_tax evaluation")
+    ap.add_argument("--robustness", action="store_true",
+                    help="trade-rule runs only: run the W2 robustness "
+                         "battery (evaluation/robustness.py -- noise test, "
+                         "price-series Monte Carlo permutation, trade-order "
+                         "shuffle) and register robustness_noise/"
+                         "robustness_mcpt/robustness_order as their own "
+                         "evaluations. Previously reachable only from "
+                         "backtest_app.py's manual button")
+    ap.add_argument("--robustness-n-trials", type=int, default=100,
+                    help="noise-test trial count")
+    ap.add_argument("--robustness-sigma-bps", type=float, default=5.0,
+                    help="noise-test per-bar lognormal jitter, in bps")
     ap.add_argument("--out-root", default=None)
     ap.add_argument("--registry-path", default=None)
     ap.add_argument("--no-registry", action="store_true",
@@ -240,7 +279,9 @@ def main(argv=None) -> int:
                   meta_label=args.meta_label, meta_threshold=args.meta_threshold,
                   regime_report=args.regime_report,
                   regime_benchmark=args.regime_benchmark, regime_k=args.regime_k,
-                  tax=args.tax)
+                  tax=args.tax, robustness=args.robustness,
+                  robustness_n_trials=args.robustness_n_trials,
+                  robustness_sigma_bps=args.robustness_sigma_bps)
     if cache is not None:
         kwargs["cache"] = cache
     if args.out_root:

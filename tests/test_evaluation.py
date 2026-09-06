@@ -1324,6 +1324,89 @@ class TestRunner:
                             n_perm=10, seed=0, regime_report=True)
         assert "no benchmark history" in res["results"]["regime_reason"]
 
+    def test_robustness_off_by_default(self, tmp_path):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="no_robustness_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=10, seed=0)
+        assert "robustness_noise" not in res["results"]
+        assert "robustness_mcpt" not in res["results"]
+        assert "robustness_order" not in res["results"]
+        reg = ev_registry.load(reg_path)
+        assert not (reg["evaluation"] == "robustness_noise").any()
+
+    def test_robustness_opt_in_registers_rows(self, tmp_path):
+        # Same fixture shape as test_meta_label_opt_in_registers_rows: enough
+        # trades (~23) for trade_order_mc's n>=5 floor and enough bars for
+        # noise_test/price_mcpt's own usable-trial floors at n_trials=n_perm=20.
+        idx = pd.bdate_range("2024-01-02", periods=250)
+        n = len(idx)
+        ent = np.zeros(n, dtype=bool)
+        exi = np.zeros(n, dtype=bool)
+        for start in range(10, 240, 10):
+            ent[start] = True
+            exi[start + 5] = True
+        rng = np.random.default_rng(0)
+        close = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, n)), index=idx)
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="robustness_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+        reg_path = str(tmp_path / "reg.parquet")
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_perm=20, seed=0,
+                            robustness=True, robustness_n_trials=20)
+        noise = res["results"]["robustness_noise"]
+        mcpt = res["results"]["robustness_mcpt"]
+        order = res["results"]["robustness_order"]
+        assert "robustness_reason" not in noise
+        assert "robustness_reason" not in mcpt
+        assert "robustness_reason" not in order
+        assert noise["noise_pct_profitable"] is not None
+        assert mcpt["price_mcpt_p"] is not None
+        assert order["observed_mdd_percentile"] is not None
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "robustness_noise").any()
+        assert (reg["evaluation"] == "robustness_mcpt").any()
+        assert (reg["evaluation"] == "robustness_order").any()
+
+    def test_robustness_exception_is_caught_not_fatal(self, tmp_path, monkeypatch):
+        idx = pd.bdate_range("2024-01-02", periods=40)
+        close = pd.Series(np.linspace(100, 120, 40), index=idx)
+        ent = np.zeros(40, dtype=bool)
+        ent[[5, 20]] = True
+        exi = np.zeros(40, dtype=bool)
+        exi[[10, 25]] = True
+        df = pd.DataFrame({"close": close, "ent": ent, "exi": exi}, index=idx)
+        rule = TradeRule(name="boom_robustness_rule",
+                         entries=lambda d: d["ent"], exits=lambda d: d["exi"])
+
+        import evaluation.robustness as ev_robustness_mod
+
+        def boom(*a, **k):
+            raise RuntimeError("synthetic robustness failure")
+
+        monkeypatch.setattr(ev_robustness_mod, "noise_test", boom)
+        res = ev_runner.run(rule, cache={"AAA": df},
+                            out_root=str(tmp_path / "reports"),
+                            registry_path=str(tmp_path / "reg.parquet"),
+                            n_perm=10, seed=0, robustness=True)
+        assert ("synthetic robustness failure"
+               in res["results"]["robustness_noise"]["robustness_reason"])
+        assert ("synthetic robustness failure"
+               in res["results"]["robustness_mcpt"]["robustness_reason"])
+        assert ("synthetic robustness failure"
+               in res["results"]["robustness_order"]["robustness_reason"])
+
 
 from evaluation import adapters as ev_adapters
 

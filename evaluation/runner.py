@@ -281,7 +281,9 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         meta_label=False, meta_threshold=0.5, meta_min_train=50,
         meta_refit_every=20, meta_l2=1.0,
         regime_report=False, regime_benchmark="SPY", regime_k=2,
-        tax=False) -> dict:
+        tax=False,
+        robustness=False, robustness_n_trials=100, robustness_sigma_bps=5.0,
+        robustness_alpha=0.95) -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -338,6 +340,39 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                                    n_key="n_trades")
             except Exception as exc:   # best-effort, never fatal to the run
                 results["tax"] = {"tax_reason": f"{type(exc).__name__}: {exc}"}
+        if robustness:
+            # W2's noise/price-MCPT/trade-order battery (evaluation/
+            # robustness.py) was previously reachable only from
+            # backtest_app.py's manual "run robustness" button -- this is
+            # the same battery, opt-in here too, not a new statistical
+            # method. Each of the three functions already reports its own
+            # *_reason on bad input rather than raising; this try/except
+            # only guards against a genuinely unexpected failure, matching
+            # the meta-label/tax best-effort convention above.
+            try:
+                from evaluation import robustness as ev_robust
+                noise_res = ev_robust.noise_test(
+                    obj, cache, n_trials=robustness_n_trials,
+                    sigma_bps=robustness_sigma_bps, seed=seed,
+                    alpha=robustness_alpha)
+                mcpt_res = ev_robust.price_mcpt(
+                    obj, cache, n_perm=n_perm, seed=seed,
+                    alpha=robustness_alpha)
+                order_res = ev_robust.trade_order_mc(trades_df, seed=seed)
+            except Exception as exc:   # best-effort, never fatal to the run
+                reason = f"{type(exc).__name__}: {exc}"
+                noise_res = {"robustness_reason": reason}
+                mcpt_res = {"robustness_reason": reason}
+                order_res = {"robustness_reason": reason}
+            results["robustness_noise"] = noise_res
+            results["robustness_mcpt"] = mcpt_res
+            results["robustness_order"] = order_res
+            rows += (_stat_rows("robustness_noise", -1, noise_res,
+                                n_key="n_trials")
+                    + _stat_rows("robustness_mcpt", -1, mcpt_res,
+                                n_key="n_perm")
+                    + _stat_rows("robustness_order", -1, order_res,
+                                n_key="n_trials"))
     else:
         raise TypeError(f"cannot evaluate object of type {type(obj).__name__}"
                         " -- expected Signal, EventSet, or TradeRule")
@@ -396,7 +431,10 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                        "regime_report": regime_report,
                        "regime_benchmark": regime_benchmark if regime_report else None,
                        "regime_k": regime_k if regime_report else None,
-                       "tax": tax}}
+                       "tax": tax,
+                       "robustness": robustness,
+                       "robustness_n_trials": robustness_n_trials if robustness else None,
+                       "robustness_sigma_bps": robustness_sigma_bps if robustness else None}}
     with open(os.path.join(out_dir, "run_meta.json"), "w",
               encoding="utf-8") as fh:
         json.dump(_json_safe(meta), fh, indent=2, default=str)
