@@ -28,7 +28,11 @@ Port notes (approximations, recorded per pre-registration section 6)
 2. Raw entry/exit flags only (color-streak counters are pure bar state); the
    engine's next_free re-entry gate (exit day + 2) can drop an immediate flip
    entry on the bar after the exit -- same accepted convention as the sibling.
-3. _ema warmup (min_periods=n) delays signals vs Pine's bar-0 seed.
+3. First-stage smoothing uses a bar-0-seeded EWM (_pine_ema) rather than
+   _ema's min_periods warmup: the HA-open recursion ha_o[0] = (o_s[0]+c_s[0])/2
+   would otherwise be NaN-seeded and poison every later bar, emitting zero
+   signals (observed as n_trades = 0 in the registry Stage 3 row). o2/c2
+   (second stage) keep the plain _ema warmup, which only delays signals.
 4. The SHA start/end-date backtest window and every plot/alert block are
    scaffolding/cosmetic and are not ported.
 """
@@ -44,6 +48,18 @@ from strategies.ports import _register, PortInfo
 
 SLUG = "bqc4p98t_combined_sha_strategy_multi_ma_vwap"
 
+
+def _pine_ema(s: pd.Series, n: int) -> pd.Series:
+    """Pine-faithful ta.ema (seeds at bar 0 from the first observation).
+
+    Unlike analytics.technical._ema (min_periods=n, NaN warmup), this returns
+    a finite value from bar 0. Needed here because the Heikin-Ashi open is a
+    recursion ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2: a NaN seed would cascade
+    through every later bar and the port would emit zero signals (observed
+    as n_trades = 0 in the registry Stage 3 row).
+    """
+    return s.ewm(span=n, adjust=False).mean()
+
 DEFAULT_PARAMS = dict(
     len1=10, len2=10, confirm_bars=2,
     exit_first=True, allow_long=True, allow_short=True,
@@ -56,10 +72,10 @@ def compute(df: pd.DataFrame, params: dict = None) -> dict:
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
     n = len(df)
 
-    o_s = _ema(o, p["len1"]).to_numpy(dtype=float)
-    h_s = _ema(h, p["len1"]).to_numpy(dtype=float)
-    l_s = _ema(l, p["len1"]).to_numpy(dtype=float)
-    c_s = _ema(c, p["len1"]).to_numpy(dtype=float)
+    o_s = _pine_ema(o, p["len1"]).to_numpy(dtype=float)
+    h_s = _pine_ema(h, p["len1"]).to_numpy(dtype=float)
+    l_s = _pine_ema(l, p["len1"]).to_numpy(dtype=float)
+    c_s = _pine_ema(c, p["len1"]).to_numpy(dtype=float)
 
     ha_c = (o_s + h_s + l_s + c_s) / 4.0
     ha_o = np.full(n, np.nan)
@@ -116,8 +132,9 @@ _register(
             "raw signal flags (color streaks are pure bar state); engine "
             "re-entry gate can drop an immediate flip entry, same convention "
             "as sibling port",
-            "_ema warmup delays signals vs Pine bar-0 seed; backtest-window "
-            "and plot/alert blocks not ported",
+            "_pine_ema first-stage seed (fix for NaN-poisoned HA-open "
+            "recursion, was zero signals); o2/c2 keep _ema warmup; "
+            "backtest-window and plot/alert blocks not ported",
         ],
     ),
     build_rule,
