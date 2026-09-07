@@ -372,15 +372,13 @@ def run_all(n_perm: int = N_PERM, seed: int = SEED, write_registry: bool = True,
                 only = [ln.strip() for ln in fh if ln.strip()]
         else:
             only = list(only_slugs)
-        want = {s.split("_")[0] if "_" in s else s for s in only}
-        available = {k.split("_")[0]: k for k in slugs}
-        missing = want - set(available)
+        want = set(only)
+        missing = want - set(slugs)
         if missing:
             raise ValueError(
                 f"--only-slugs: {len(missing)} slugs are not admitted: "
                 f"{sorted(missing)[:5]}...")
-        slugs = {k: note for k, note in slugs.items()
-                 if k.split("_")[0] in want}
+        slugs = {k: note for k, note in slugs.items() if k in want}
 
     ordered = sorted(slugs.items())
     total = len(ordered) if limit is None else min(limit, len(ordered))

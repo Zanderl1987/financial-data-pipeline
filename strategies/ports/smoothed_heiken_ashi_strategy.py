@@ -23,9 +23,13 @@ Port notes (approximations, recorded per pre-registration section 6)
    engine won't take the opposite entry until the bar after the exit, whereas
    Pine positions immediately on the confirm bar. Same convention every other
    side='both' port already accepts.
-2. The campaign's analytics.technical._ema uses min_periods=n warmup (NaN until
-   n bars), where Pine's ta.ema seeds from bar 0 -- signals are delayed by the
-   warmup, not altered once live.
+2. The FIRST-stage smoothing (o_s/h_s/l_s/c_s) uses a bar-0-seeded EMA
+   (`_pine_ema`) matching Pine's ta.ema, NOT analytics.technical._ema: the
+   Heikin-Ashi open is a recursion (ha_o[i] = (ha_o[i-1]+ha_c[i-1])/2), so
+   _ema's min_periods=n NaN warmup would poison ha_o forever and the port would
+   emit zero signals. The SECOND-stage smoothing (o2/c2) keeps the campaign's
+   standard min_periods=n _ema -- its warmup merely delays the color-streak
+   counters by n bars (documented convention), it does not propagate.
 3. startDate/endDate backtest-window inputs, plotcandle/plotshape/alertcondition
    are scaffolding/cosmetic and not ported.
 """
@@ -41,6 +45,18 @@ from strategies.ports import _register, PortInfo
 
 SLUG = "smoothed_heiken_ashi_strategy"
 
+
+def _pine_ema(s: pd.Series, n: int) -> pd.Series:
+    """Pine-faithful ta.ema (seeds at bar 0 from the first observation).
+
+    Unlike analytics.technical._ema (min_periods=n, NaN warmup), this returns
+    a finite value from bar 0. Needed here because the Heikin-Ashi open is a
+    recursion ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2: a NaN seed would cascade
+    through every later bar and the port would emit zero signals (observed
+    6719 bars of AAPL with no green candle before the fix).
+    """
+    return s.ewm(span=n, adjust=False).mean()
+
 DEFAULT_PARAMS = dict(
     len1=10, len2=10, confirm_bars=2,
     exit_first=True, allow_long=True, allow_short=True,
@@ -53,10 +69,10 @@ def compute(df: pd.DataFrame, params: dict = None) -> dict:
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
     n = len(df)
 
-    o_s = _ema(o, p["len1"]).to_numpy(dtype=float)
-    h_s = _ema(h, p["len1"]).to_numpy(dtype=float)
-    l_s = _ema(l, p["len1"]).to_numpy(dtype=float)
-    c_s = _ema(c, p["len1"]).to_numpy(dtype=float)
+    o_s = _pine_ema(o, p["len1"]).to_numpy(dtype=float)
+    h_s = _pine_ema(h, p["len1"]).to_numpy(dtype=float)
+    l_s = _pine_ema(l, p["len1"]).to_numpy(dtype=float)
+    c_s = _pine_ema(c, p["len1"]).to_numpy(dtype=float)
 
     ha_c = (o_s + h_s + l_s + c_s) / 4.0
     ha_o = np.full(n, np.nan)
