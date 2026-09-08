@@ -14,12 +14,15 @@ Two problems this script solves:
    By default this script runs an HTTPS server on the callback address and
    catches the redirect itself, so no paste happens at all.
 
-2. SILENT FAILURE. Constructing a Client by hand prints a wall of schwabdev
+2. SILENT/OBSCURED FAILURE. Constructing a Client by hand prints a wall of schwabdev
    log lines and returns normally whether or not a token was stored. On
    2026-08-11 a re-auth was believed to have succeeded while tokens.db still
    held the token issued on 2026-08-01. This script re-reads the store
    afterward and proves refresh_token_issued actually advanced, then spends
-   one live API call confirming the credentials work.
+   one live API call confirming the credentials work. When Schwab REJECTS the
+   exchange, schwabdev masks the real OAuth error behind a bug
+   ('bool' object has no attribute 'get'); _build_client translates that into
+   the likely causes instead of letting the masked traceback stand.
 
 THE CERTIFICATE IS PERSISTED, deliberately. Schwab's callback is https, so the
 listener needs TLS, and a self-signed cert makes the browser interrupt with
@@ -54,6 +57,7 @@ import http.server
 import os
 import shutil
 import socket
+import sqlite3
 import ssl
 import sys
 import tempfile
@@ -437,6 +441,15 @@ def _authorize_by_paste(callback_url: str) -> "schwabdev.Client":
         ) from exc
 
 
+# When Schwab rejects an exchange (code expired or already used, app not
+# "Ready For Use", bad key/secret), schwabdev 3.0.x returns False from
+# _get_new_tokens() and feeds that bool into _set_tokens(), where
+# token_dictionary.get() raises this AttributeError at tokens.py:202 instead
+# of surfacing the actual OAuth error, which schwabdev only logs. _build_client
+# translates it into the real likely causes.
+_SCHWABDEV_TOKEN_BOOL_BUG = "'bool' object has no attribute 'get'"
+
+
 def _build_client(callback_url: str, call_on_auth) -> "schwabdev.Client":
     try:
         return schwabdev.Client(
@@ -449,6 +462,29 @@ def _build_client(callback_url: str, call_on_auth) -> "schwabdev.Client":
         )
     except KeyError as exc:
         raise _AuthAborted(f"{exc} is not set in .env", code=2) from exc
+    except AttributeError as exc:
+        if _SCHWABDEV_TOKEN_BOOL_BUG not in str(exc):
+            raise
+        # Same failure in the listener, --paste, and --callback-url flows.
+        raise _AuthAborted(
+            "Schwab rejected the authorization exchange. The schwabdev\n"
+            "   log lines printed just above this are the real answer; usual\n"
+            "   causes: the code was already used or is older than ~30s (run\n"
+            "   again for a fresh one), the app is not status 'Ready For Use'\n"
+            "   at developer.schwab.com, or SCHWAB_API_KEY/SCHWAB_APP_SECRET\n"
+            "   in .env do not match that app.",
+            code=2,
+        ) from exc
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower():
+            raise
+        # A leftover reauth process waits in its long capture window holding
+        # tokens.db open in an exclusive transaction.
+        raise _AuthAborted(
+            "tokens.db is locked -- another reauth process is probably still\n"
+            "   waiting in its capture window. Kill it, then re-run.",
+            code=2,
+        ) from exc
 
 
 if __name__ == "__main__":

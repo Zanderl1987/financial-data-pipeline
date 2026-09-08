@@ -284,3 +284,65 @@ def test_occupied_port_falls_back_to_paste(reauth, monkeypatch, capsys):
 
     assert result == "client"
     assert "falling back to manual paste" in capsys.readouterr().out
+
+
+@pytest.fixture
+def _qa_env(monkeypatch):
+    """
+    _build_client reads the credentials and token path from the environment.
+    None of these tests touch a real token or a network socket; the tokens_db
+    is pointed at a temp file so even a stray write could not hit the store.
+    """
+    monkeypatch.setenv("SCHWAB_API_KEY", "k" * 16)
+    monkeypatch.setenv("SCHWAB_APP_SECRET", "s" * 32)
+    monkeypatch.setenv("SCHWAB_TOKEN_PATH", os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "test_tokens_db_never.db"))
+
+
+def test_rejected_exchange_is_translated_not_a_bool_error(reauth, monkeypatch,
+                                                          _qa_env):
+    """
+    schwabdev feeds the non-2xx return of _get_new_tokens() (a bool) into
+    _set_tokens(), which raises "'bool' object has no attribute 'get'" at
+    tokens.py:202 instead of the real invalid_grant. The reauth script must
+    translate that into actionable guidance, not let the masked traceback
+    stand.
+    """
+    monkeypatch.setattr(
+        reauth.schwabdev, "Client",
+        lambda **kw: (_ for _ in ()).throw(AttributeError(
+            "'bool' object has no attribute 'get'")))
+
+    with pytest.raises(reauth._AuthAborted) as exc:
+        reauth._build_client("https://127.0.0.1:8182", lambda url: "url")
+    assert exc.value.code == 2
+    assert "Ready For Use" in str(exc.value)
+    assert "schwabdev" in str(exc.value)
+
+
+def test_unrelated_attribute_error_is_not_masked(reauth, monkeypatch, _qa_env):
+    """A real bug in our own wiring must still traceback, not be relabeled."""
+    monkeypatch.setattr(
+        reauth.schwabdev, "Client",
+        lambda **kw: (_ for _ in ()).throw(AttributeError(
+            "'Tokens' object has no attribute 'typo'")))
+    with pytest.raises(AttributeError, match="typo"):
+        reauth._build_client("https://127.0.0.1:8182", lambda url: "url")
+
+
+def test_locked_tokens_db_is_translated(reauth, monkeypatch, _qa_env):
+    """
+    A leftover reauth process holds tokens.db in an exclusive transaction;
+    a fresh run then hits 'database is locked'. Give the kill-the-elsewhere
+    instruction instead of the raw sqlite error.
+    """
+    monkeypatch.setattr(
+        reauth.schwabdev, "Client",
+        lambda **kw: (_ for _ in ()).throw(
+            __import__("sqlite3").OperationalError("database is locked")))
+
+    with pytest.raises(reauth._AuthAborted) as exc:
+        reauth._build_client("https://127.0.0.1:8182", lambda url: "url")
+    assert exc.value.code == 2
+    assert "locked" in str(exc.value)
+    assert "kill it" in str(exc.value).lower()
