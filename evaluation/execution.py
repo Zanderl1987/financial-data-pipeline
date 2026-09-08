@@ -29,6 +29,13 @@ Two things this module deliberately does NOT unify
    they are kept apart here as impact_model="sqrt" and impact_model="flat".
    Whether the flat model deserves to exist is a research question (W2), not a
    refactor.
+
+3. The "sqrt_law" model is a calibrated square-root-law ADV impact for the
+   discrete-trade engine (trades.py), using the literature-anchored prefactor
+   ADV_SQRT_LAW_K=0.6 (event_backtest.ADV_SQRT_LAW_K). It computes per-trade
+   impact as K * realized_daily_vol_bps * sqrt(participation) where
+   participation = notional / trailing_ADV. This is opt-in via
+   CostModel(impact_model="sqrt_law", impact_coeff=0.6).
 """
 
 from __future__ import annotations
@@ -40,7 +47,7 @@ import pandas as pd
 
 TRADING_DAYS = 252
 
-IMPACT_MODELS = (None, "sqrt", "flat")
+IMPACT_MODELS = (None, "sqrt", "flat", "sqrt_law")
 SIZING_MODES = ("fixed_notional", "fixed_fraction", "inverse_vol", "hrp")
 
 
@@ -55,10 +62,11 @@ class CostModel:
                      trade simulator (trades.simulate_symbol) -- same rate,
                      two different accrual shapes since one engine has a daily
                      weight series and the other has variable-length trades.
-    impact_model   : None | "sqrt" | "flat" -- see module docstring.
+    impact_model   : None | "sqrt" | "flat" | "sqrt_law" -- see module docstring.
     impact_coeff   : for "sqrt", backtest.py's adv_impact_coeff (its own default
                      is 0.1, NOT 0.0 -- callers must pass that through);
-                     for "flat", bps added per side (event_backtest.py uses 10.0).
+                     for "flat", bps added per side (event_backtest.py uses 10.0);
+                     for "sqrt_law", the calibrated prefactor K (event_backtest.ADV_SQRT_LAW_K=0.6).
     """
     commission_bps: float = 0.0
     spread_bps: float = 0.0

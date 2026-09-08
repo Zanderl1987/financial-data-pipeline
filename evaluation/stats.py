@@ -207,7 +207,7 @@ def _perm_null_totals(flags_chunk: list, perm_seed: int, notional: float,
     pnl = 0.0
     n_trades = 0
     n_wins = 0
-    for sym_idx, sym, index, close, le, lx, se, sx in flags_chunk:
+    for sym_idx, sym, index, close, volume, le, lx, se, sx in flags_chunk:
         n = len(index)
         rng = np.random.default_rng((int(perm_seed), int(sym_idx)))
         ple = np.zeros(n, dtype=bool)
@@ -219,7 +219,7 @@ def _perm_null_totals(flags_chunk: list, perm_seed: int, notional: float,
         if k:
             pse[rng.choice(n, size=k, replace=False)] = True
         for row in tr.simulate_symbol(index, close, ple, lx, pse, sx, sym,
-                                      notional, config=config):
+                                      notional, config=config, volume=volume):
             pnl += row["pnl_dollars"]
             n_trades += 1
             if row["pnl_dollars"] > 0:
@@ -273,17 +273,20 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
     obs_pnl = float(obs["pnl_dollars"].sum())
     obs_wr = float((obs["pnl_dollars"] > 0).mean())
     rng = np.random.default_rng(seed)
-    params = {}                        # legacy dict shape (index, close, (le,lx,se,sx))
+    params = {}                        # legacy dict shape (index, close, volume, (le,lx,se,sx))
     flags_list = []                    # flat shape for worker sharding
     for sym_idx, (sym, df) in enumerate(cache.items()):
         if df.empty or "close" not in df.columns:
             continue
         close = df["close"].to_numpy(dtype=float)
+        volume = df.get("volume")
+        if volume is not None:
+            volume = volume.to_numpy(dtype=float)
         le, lx, se, sx = tr.rule_flags(rule, df)
-        params[sym] = (df.index, close, (le, lx, se, sx))
-        # sym_idx is the symbol's GLOBAL position in cache order -- the 
+        params[sym] = (df.index, close, volume, (le, lx, se, sx))
+        # sym_idx is the symbol's GLOBAL position in cache order -- the
         # per-symbol seed is derived from it so a shard reproduces the full run.
-        flags_list.append((sym_idx, sym, df.index, close, le, lx, se, sx))
+        flags_list.append((sym_idx, sym, df.index, close, volume, le, lx, se, sx))
 
     if _perm_needs_portfolio:
         # Configs that budget capital or cap concurrency couple symbols (the
@@ -292,7 +295,7 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
         pnl_ge = wr_ge = n_done = 0
         for _ in range(n_perm):
             symbol_flags = {}
-            for sym, (index, close, (le, lx, se, sx)) in params.items():
+            for sym, (index, close, volume, (le, lx, se, sx)) in params.items():
                 n = len(index)
                 ple = np.zeros(n, dtype=bool)
                 k = int(le.sum())
@@ -302,7 +305,7 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
                 k = int(se.sum())
                 if k:
                     pse[rng.choice(n, size=k, replace=False)] = True
-                symbol_flags[sym] = (index, close, ple, lx, pse, sx)
+                symbol_flags[sym] = (index, close, volume, ple, lx, pse, sx)
             # The null must face the SAME capital budget, concurrency cap, AND
             # admission-order behavior as the observed run (tr.simulate() when
             # needs_portfolio) -- both go through _simulate_single_pass, or the

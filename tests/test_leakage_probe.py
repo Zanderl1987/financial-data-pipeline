@@ -268,3 +268,103 @@ class TestPitLagFundamentalsLeakage:
                                               horizon=horizon, benchmark=None)
         assert out["safe_metric"] is None and out["leaky_metric"] is None
         assert out["inflation"] is None
+
+
+class TestLlmLookaheadLeakage:
+    """
+    LLM look-ahead precheck (Phase 7): does the label correlate with the
+    realized outcome only because the scorer was handed the outcome, rather
+    than because the text says anything? The one-switch here is the scorer's
+    INFORMATION SET: text alone (safe, = production) vs text + realized
+    outcome appended (leaky, = a model whose training data "remembers" the
+    outcome). The deterministic fake scorers below pin the mechanics so the
+    real Claude-backed run (requires ANTHROPIC_API_KEY) is just parameter
+    substitution, not re-verification.
+    """
+
+    @staticmethod
+    def _docs(n=40, start="2020-01-01"):
+        dates = pd.bdate_range(start, periods=n)
+        return pd.DataFrame({
+            "date": dates,
+            "title": [f"Doc {i}" for i in range(n)],
+            "text": ["uninformative filler words."] * n,
+        })
+
+    @staticmethod
+    def _outcome_fn(signs):
+        def fn(dates):
+            return dates.map(dict(zip(pd.bdate_range("2020-01-01", periods=len(signs)), signs)))
+        return fn
+
+    @staticmethod
+    def _memory_scorer(outcome_fn, rng):
+        """A scorer that ONLY knows the outcome when the leaky sentence was
+        appended: text-only scores are noise, leaked scores read the outcome
+        straight off. Exactly the contamination the probe exists to catch."""
+        def scorer(docs):
+            if "ACTUAL_OUTCOME" in docs["text"].iloc[0]:
+                vals = outcome_fn(docs["date"]).map(lambda v: 1.0 if v > 0 else -1.0)
+            else:
+                vals = pd.Series(rng.normal(0, 1, len(docs)), index=docs.index)
+            return vals
+        return scorer
+
+    def test_memory_scorer_shows_strong_leakage(self):
+        signs = [1.0 if i % 2 else -1.0 for i in range(40)]
+        outcomes = self._outcome_fn(signs)
+        scorer = self._memory_scorer(outcomes, np.random.default_rng(7))
+        docs = self._docs(n=40)
+
+        out = lp.llm_lookahead_leakage(docs, scorer=scorer, outcome_fn=outcomes)
+        assert out["switch"] == "leaky"
+        assert out["safe_value"] is False and out["leaky_value"] is True
+        # safe text-only noise vs outcome -> near-zero correlation is
+        # EXPECTED to be noisy, so only require it's clearly below leaky;
+        # leaky labels are a deterministic read of the outcome -> corr ~ 1
+        assert out["leaky_metric"] is not None and out["leaky_metric"] > 0.8
+        assert out["safe_metric"] is None or out["safe_metric"] < out["leaky_metric"]
+        assert out["inflation"] is not None and out["inflation"] > 0.5
+
+    def test_no_memory_scorer_shows_no_inflation(self):
+        # A scorer that always returns noise, outcome or not, must show no
+        # inflation -- otherwise the probe would false-positive on a model
+        # that simply doesn't encode the outcome.
+        def noise_scorer(docs):
+            rng = np.random.default_rng(123)
+            return pd.Series(rng.normal(0, 1, len(docs)), index=docs.index)
+
+        signs = [1.0 if i % 2 else -1.0 for i in range(40)]
+        outcomes = self._outcome_fn(signs)
+        docs = self._docs(n=40)
+
+        out = lp.llm_lookahead_leakage(docs, scorer=noise_scorer, outcome_fn=outcomes)
+        assert out["safe_metric"] is not None and out["leaky_metric"] is not None
+        assert abs(out["inflation"]) < 0.5
+
+    def test_too_few_docs_gives_none_metrics(self):
+        signs = [1.0] * 3
+        outcomes = self._outcome_fn(signs)
+        scorer = self._memory_scorer(outcomes, np.random.default_rng(1))
+        out = lp.llm_lookahead_leakage(self._docs(n=3), scorer=scorer,
+                                       outcome_fn=outcomes)
+        assert out["safe_metric"] is None and out["leaky_metric"] is None
+        assert out["inflation"] is None
+
+
+class TestFfrMonthlyOutcome:
+    def test_change_across_months(self, monkeypatch):
+        import query as q
+        rows = [
+            {"date": "2020-01-31", "value": 1.55, "series_id": "FEDFUNDS"},
+            {"date": "2020-02-29", "value": 1.58, "series_id": "FEDFUNDS"},
+            {"date": "2020-03-31", "value": 0.65, "series_id": "FEDFUNDS"},
+            # a non-FEDFUNDS row must be ignored entirely
+            {"date": "2020-01-31", "value": 99.0, "series_id": "DGS1"},
+        ]
+        monkeypatch.setattr(q, "load", lambda table: pd.DataFrame(rows))
+        dates = pd.Series(pd.to_datetime(["2020-01-15", "2020-02-15", "2020-03-15"]))
+        out = lp.ffr_monthly_outcome(dates)
+        assert list(out.round(3).iloc[:2]) == [0.03, -0.93]
+        assert pd.isna(out.iloc[2])   # no April value yet -> NaN, not an error
+        assert list(out.index) == list(dates.index)

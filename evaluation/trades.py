@@ -32,6 +32,40 @@ MIN_HRP_OVERLAP_DAYS = 20
 #: `window_px.diff().abs().mean()` so the two engines measure the same thing.
 VOL_WINDOW = 14
 
+#: Window for trailing ADV and realized vol (PIT, trade day excluded).
+ADV_WINDOW = 20
+
+
+def _compute_adv_impact_arrays(close: pd.Series, volume: pd.Series,
+                               notional: float, k: float, n: int):
+    """
+    Pre-compute per-bar ADV sqrt_law impact for entry and exit.
+
+    Square-root law: impact_bps = k * realized_daily_vol_bps * sqrt(participation)
+    where participation = notional / trailing_adv_dollar_volume
+
+    Both ADV and vol are computed with PIT discipline: trailing ADV_WINDOW days,
+    shifted by 1 so today's not-yet-realized return/volume is excluded.
+    Returns NaN where history is insufficient.
+    """
+    import event_backtest as eb
+    dollar_vol = close * volume
+    # Trailing ADV (mean dollar volume), shifted 1 for PIT
+    adv = dollar_vol.rolling(ADV_WINDOW, min_periods=ADV_WINDOW).mean().shift(1)
+    # Realized daily vol (sample std of close-to-close returns), shifted 1 for PIT
+    rets = close.pct_change()
+    realized_vol = rets.rolling(ADV_WINDOW, min_periods=ADV_WINDOW).std(ddof=1).shift(1) * 10000  # bps
+
+    participation = notional / adv
+    # sqrt_law impact in bps of notional
+    impact_bps = eb.ADV_SQRT_LAW_K * realized_vol * np.sqrt(participation)
+    # Convert to rate (decimal)
+    impact_rate = impact_bps / 10000.0
+    # Replace inf/nan with 0
+    impact_rate = impact_rate.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # Entry and exit use the same arrays (impact charged on both sides)
+    return impact_rate.to_numpy(), impact_rate.to_numpy()
+
 
 def _bool_array(flags, n: int, who: str) -> np.ndarray:
     a = pd.Series(flags).fillna(False).to_numpy(dtype=bool)
@@ -131,7 +165,7 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
 
 def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     long_exit, short_exit, symbol: str, notional: float,
-                    cfg, n: int) -> "dict | None":
+                    cfg, n: int, volume: "pd.Series | None" = None) -> "dict | None":
     """
     First eligible candidate trade for one symbol, searching entry signals
     starting at `cursor` (an index into the signal array, not a date). The
@@ -159,6 +193,14 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
     has_risk = any(getattr(risk, f) is not None
                    for f in ("stop_loss_pct", "take_profit_pct",
                              "vol_stop_mult", "max_holding_days"))
+
+    # Pre-compute ADV impact arrays if using sqrt_law model and volume available
+    adv_impact_entry = None
+    adv_impact_exit = None
+    if (volume is not None and cfg.costs.impact_model == "sqrt_law"
+            and cfg.costs.impact_coeff > 0):
+        adv_impact_entry, adv_impact_exit = _compute_adv_impact_arrays(
+            close, volume, notional, cfg.costs.impact_coeff, n)
 
     for sig_i, side in entry_positions:
         if sig_i < cursor:
@@ -192,20 +234,20 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
         pnl_dollars = round(notional * pct, 2)
         pnl_pct = round(100 * pct, 3)
         total_rate = rate
+
+        # Add ADV sqrt_law impact (entry + exit) if available
+        if adv_impact_entry is not None and adv_impact_exit is not None:
+            entry_impact = adv_impact_entry[entry_i] if entry_i < len(adv_impact_entry) else 0.0
+            exit_impact = adv_impact_exit[exit_i] if exit_i < len(adv_impact_exit) else 0.0
+            if np.isfinite(entry_impact):
+                total_rate += entry_impact
+            if np.isfinite(exit_impact):
+                total_rate += exit_impact
+
         if side == "short" and cfg.costs.borrow_fee_bps > 0:
-            # Annualized borrow fee accrued over the trade's actual holding
-            # period, same rate the weight-matrix engine charges daily via
-            # execution.daily_cost() -- but round_trip_rate() is a flat
-            # per-trade constant with no notion of holding period, so this
-            # engine (variable holding time per trade) needs its own accrual
-            # rather than reusing that helper.
             total_rate += (cfg.costs.borrow_fee_bps / 1e4
                            * (exit_i - entry_i) / ev_execution.TRADING_DAYS)
         if total_rate:
-            # Round, THEN deduct, THEN round -- the order strategies/stage3.py's
-            # monkeypatch used. Deducting before the first rounding shifts
-            # pnl_dollars by a cent per trade, which moves total_pnl_net and so
-            # the campaign's pnl_p. See the W1 spec.
             pnl_dollars = round(pnl_dollars - notional * total_rate, 2)
             pnl_pct = round(pnl_pct - 100 * total_rate, 3)
         row = {
@@ -230,7 +272,7 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
 
 def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit,
                     symbol: str, notional: float, *,
-                    config=None) -> "list[dict]":
+                    config=None, volume=None) -> "list[dict]":
     """
     Low-level engine on flag arrays (Tier-2 permutation re-enters here).
 
@@ -254,6 +296,8 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
     """
     cfg = ev_execution.resolve(config)
     close = pd.Series(np.asarray(close, dtype=float), index=index)
+    if volume is not None:
+        volume = pd.Series(np.asarray(volume, dtype=float), index=index)
     n = len(close)
     entry_positions = sorted(
         [(i, "long") for i in np.flatnonzero(long_entry)] +
@@ -263,7 +307,7 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
     cursor = 0
     while True:
         cand = _next_candidate(entry_positions, cursor, close, long_exit,
-                               short_exit, symbol, notional, cfg, n)
+                               short_exit, symbol, notional, cfg, n, volume)
         if cand is None:
             break
         rows.append(cand["row"])
@@ -440,7 +484,7 @@ def _push_next(heap: list, sym: str, state: dict, cursor: int,
     themselves. Pushes nothing when the symbol has no further candidate."""
     cand = _next_candidate(state["entry_positions"], cursor, state["close"],
                            state["long_exit"], state["short_exit"], sym,
-                           notional, cfg, state["n"])
+                           notional, cfg, state["n"], state.get("volume"))
     if cand is not None:
         heapq.heappush(heap, (cand["row"]["entry_date"], sym, cand))
 
@@ -470,8 +514,8 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
     open position's capital consumption is a separate question this spec
     does not take on.
 
-    `symbol_flags[sym] = (index, close, long_entry, long_exit, short_entry,
-    short_exit)` -- pre-built per symbol so this is reusable by both
+    `symbol_flags[sym] = (index, close, volume, long_entry, long_exit,
+    short_entry, short_exit)` -- pre-built per symbol so this is reusable by both
     simulate() (flags from the rule) and stats.permutation_trades()
     (flags from a permutation), the null must face the same admission-order
     fix the observed run does or the p-value comparison is invalid.
@@ -489,16 +533,18 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
 
     symbols = {}
     heap = []
-    for sym, (index, close_raw, long_entry, long_exit, short_entry, short_exit) \
-            in symbol_flags.items():
+    for sym, (index, close_raw, volume_raw, long_entry, long_exit,
+              short_entry, short_exit) in symbol_flags.items():
         close = pd.Series(np.asarray(close_raw, dtype=float), index=index)
+        volume = (pd.Series(np.asarray(volume_raw, dtype=float), index=index)
+                  if volume_raw is not None else None)
         n = len(close)
         entry_positions = sorted(
             [(i, "long") for i in np.flatnonzero(long_entry)] +
             [(i, "short") for i in np.flatnonzero(short_entry)]
         )
-        symbols[sym] = {"close": close, "long_exit": long_exit,
-                        "short_exit": short_exit,
+        symbols[sym] = {"close": close, "volume": volume,
+                        "long_exit": long_exit, "short_exit": short_exit,
                         "entry_positions": entry_positions, "n": n}
         _push_next(heap, sym, symbols[sym], 0, notional, cfg)
 
@@ -572,7 +618,7 @@ def simulate(rule, cache: dict, notional: "float | None" = None,
             if df.empty or "close" not in df.columns:
                 continue
             le, lx, se, sx = rule_flags(rule, df)
-            symbol_flags[sym] = (df.index, df["close"], le, lx, se, sx)
+            symbol_flags[sym] = (df.index, df["close"], df.get("volume"), le, lx, se, sx)
         rows = _simulate_single_pass(symbol_flags, notional, cfg) if symbol_flags else []
     else:
         rows = []
@@ -580,8 +626,9 @@ def simulate(rule, cache: dict, notional: "float | None" = None,
             if df.empty or "close" not in df.columns:
                 continue
             le, lx, se, sx = rule_flags(rule, df)
+            volume = df.get("volume")
             rows.extend(simulate_symbol(df.index, df["close"], le, lx, se, sx,
-                                        sym, notional, config=config))
+                                        sym, notional, config=config, volume=volume))
 
     return pd.DataFrame(rows, columns=TRADE_COLS)
 

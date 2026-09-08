@@ -380,8 +380,14 @@ class TestStage3Migration:
 
     def test_cost_config_matches_prereg_rate(self):
         from strategies import stage3
+        # Phase 5 (2026-09-07): primary cost model changed from flat 10bps
+        # to calibrated sqrt_law with 1bps commission base.
+        # round_trip_rate only includes commission+spread; sqrt_law impact
+        # is computed per-trade in the engine.
         cfg = stage3.cost_config(stage3.PRIMARY_COST_BPS)
-        assert ex.round_trip_rate(cfg.costs) == 2.0 * stage3.PRIMARY_COST_BPS / 1e4
+        assert cfg.costs.impact_model == "sqrt_law"
+        assert cfg.costs.impact_coeff == 0.6  # ADV_SQRT_LAW_K
+        assert ex.round_trip_rate(cfg.costs) == 2.0 * 1.0 / 1e4  # 1bps commission per side
 
     def test_campaign_config_reduces_pnl_versus_legacy(self):
         from strategies import stage3

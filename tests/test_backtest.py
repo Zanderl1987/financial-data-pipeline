@@ -333,3 +333,169 @@ class TestAdvParticipationCost:
         with pytest.raises(ValueError):
             bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
                         adv_participation_coeff="linear_magic")
+
+
+class TestWeightingModes:
+    """Tests for the new weighting_mode parameter: signal_proportional and hrp."""
+
+    def _setup(self, monkeypatch, n=60):
+        dates = pd.bdate_range("2024-01-01", periods=n)
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B", "C", "D"])
+        # A=1.0, B=0.7, C=0.3, D=0.1 -- varying signal strength
+        sig = pd.DataFrame({
+            "symbol": ["A", "B", "C", "D"] * n,
+            "date": np.repeat(dates, 4),
+            "composite": [1.0, 0.7, 0.3, 0.1] * n,
+        })
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        return dates, sig, R
+
+    def _setup_hrp_returns(self, monkeypatch, n=60):
+        """Setup with correlated returns for meaningful HRP."""
+        dates = pd.bdate_range("2024-01-01", periods=n)
+        np.random.seed(42)
+        R = pd.DataFrame({
+            "A": np.random.normal(0.001, 0.02, len(dates)),
+            "B": np.random.normal(0.001, 0.015, len(dates)),
+            "C": np.random.normal(0.0005, 0.01, len(dates)),
+            "D": np.random.normal(0.0005, 0.01, len(dates)),
+        }, index=dates)
+        # Add correlation: A and B correlated, C and D correlated
+        R["B"] = R["A"] * 0.7 + np.random.normal(0, 0.01, len(dates))
+        R["D"] = R["C"] * 0.7 + np.random.normal(0, 0.01, len(dates))
+        # Constant signals
+        sig = pd.DataFrame({
+            "symbol": ["A", "B", "C", "D"] * n,
+            "date": np.repeat(dates, 4),
+            "composite": [1.0, 0.7, 0.3, 0.1] * n,
+        })
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        return dates, sig, R
+
+    def _first_weight_date(self, weights: pd.DataFrame) -> pd.Timestamp:
+        """Find first date where any weight is non-zero."""
+        nonzero = (weights.abs().sum(axis=1) > 0)
+        if not nonzero.any():
+            return weights.index[-1]
+        return weights.index[nonzero.argmax()]
+
+    def test_signal_proportional_long_only_weights_sum_to_one_after_first_rebal(self, monkeypatch):
+        dates, sig, R = self._setup(monkeypatch)
+        res = bt.backtest(sig, rebalance="W", quantiles=2, long_short=False,
+                          weighting_mode="signal_proportional")
+        # Weights should sum to 1.0 on each day AFTER first rebalance
+        first_rebal = self._first_weight_date(res.weights)
+        w = res.weights.loc[first_rebal:]
+        assert (w.sum(axis=1) - 1.0).abs().max() < 1e-9
+        # A should have highest weight, D lowest
+        last_w = w.iloc[-1]
+        assert last_w["A"] > last_w["B"] > last_w["C"] > last_w["D"] > 0
+
+    def test_signal_proportional_long_short_weights_sum_to_signal_balance(self, monkeypatch):
+        """Signal-proportional long/short sums to (sum pos - sum neg) / sum |signal|, not zero."""
+        dates, sig, R = self._setup(monkeypatch)
+        # Add negative scores for C, D
+        sig2 = sig.copy()
+        sig2.loc[sig2["symbol"].isin(["C", "D"]), "composite"] *= -1
+        res = bt.backtest(sig2, rebalance="W", quantiles=2, long_short=True,
+                          weighting_mode="signal_proportional")
+        # Sum of weights = (sum of positive scores - sum of abs(negative scores)) / sum |scores|
+        # = (1.0 + 0.7 - 0.3 - 0.1) / (1.0 + 0.7 + 0.3 + 0.1) = 1.3 / 2.1
+        expected_sum = 1.3 / 2.1
+        first_rebal = self._first_weight_date(res.weights)
+        w = res.weights.loc[first_rebal:]
+        assert (w.sum(axis=1) - expected_sum).abs().max() < 1e-9
+        # Long weights positive, short weights negative
+        last_w = w.iloc[-1]
+        assert last_w["A"] > 0 and last_w["B"] > 0
+        assert last_w["C"] < 0 and last_w["D"] < 0
+
+    def test_hrp_weights_sum_to_one_long_only_after_first_rebal(self, monkeypatch):
+        dates, sig, R = self._setup_hrp_returns(monkeypatch)
+        res = bt.backtest(sig, rebalance="W", quantiles=2, long_short=False,
+                          weighting_mode="hrp", hrp_lookback=20)
+        # Weights should sum to 1.0 on each day AFTER first rebalance
+        first_rebal = self._first_weight_date(res.weights)
+        w = res.weights.loc[first_rebal:]
+        assert (w.sum(axis=1) - 1.0).abs().max() < 1e-9
+        # All weights non-negative for long_only
+        assert (w >= -1e-9).all().all()
+
+    def test_hrp_long_short_dollar_neutral_after_first_rebal(self, monkeypatch):
+        dates, sig, R = self._setup_hrp_returns(monkeypatch)
+        # Make C, D negative scores
+        sig2 = sig.copy()
+        sig2.loc[sig2["symbol"].isin(["C", "D"]), "composite"] *= -1
+
+        res = bt.backtest(sig2, rebalance="W", quantiles=2, long_short=True,
+                          weighting_mode="hrp", hrp_lookback=20)
+        # Dollar-neutral: sum of weights = 0 after HRP has enough history
+        # (first ~3 weeks fall back to equal-weight before HRP window fills)
+        first_rebal = self._first_weight_date(res.weights)
+        w = res.weights.loc[first_rebal:]
+        # Check last 10 days (where HRP is active) are dollar-neutral
+        assert w.tail(10).sum(axis=1).abs().max() < 1e-9
+        last_w = w.iloc[-1]
+        assert last_w["A"] > 0 and last_w["B"] > 0
+        assert last_w["C"] < 0 and last_w["D"] < 0
+
+    def test_hrp_requires_returns_matrix(self, monkeypatch):
+        dates = pd.bdate_range("2024-01-01", periods=60)
+        sig = pd.DataFrame({
+            "symbol": ["A", "B", "C", "D"] * 60,
+            "date": np.repeat(dates, 4),
+            "composite": [1.0, 0.7, 0.3, 0.1] * 60,
+        })
+        # Provide returns with only 1 symbol - HRP needs at least 2,
+        # so it should fall back to equal weight gracefully
+        R = pd.DataFrame(0.001, index=dates, columns=["A"])
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "prices")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+        res = bt.backtest(sig, rebalance="W", quantiles=2, long_short=False,
+                          weighting_mode="hrp", hrp_lookback=20)
+        # Should fall back to equal weight for available symbols (only A in returns)
+        first_rebal = self._first_weight_date(res.weights)
+        w = res.weights.loc[first_rebal:].iloc[:-1]  # exclude last day (shift artifact)
+        # Only symbol A has weights (others dropped due to no returns data)
+        assert list(w.columns) == ["A"]
+        assert (w["A"] == 1.0).all()  # 100% weight to the only available symbol
+
+    def test_hrp_fallback_to_equal_weight_when_insufficient_history(self, monkeypatch):
+        dates = pd.bdate_range("2024-01-01", periods=5)  # too little history
+        R = pd.DataFrame(0.001, index=dates, columns=["A", "B"])
+        sig = pd.DataFrame({
+            "symbol": ["A", "B"] * 5,
+            "date": np.repeat(dates, 2),
+            "composite": [1.0, 0.5] * 5,
+        })
+        monkeypatch.setattr(bt, "_pick_price_table", lambda *a, **k: "synthetic")
+        monkeypatch.setattr(bt, "_returns_matrix", lambda *a, **k: R)
+
+        # Should not raise, should fall back to equal weight
+        res = bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                          weighting_mode="hrp", hrp_lookback=20)
+        w = res.weights.iloc[-1]
+        assert w["A"] == pytest.approx(0.5, abs=1e-6)
+        assert w["B"] == pytest.approx(0.5, abs=1e-6)
+
+    def test_weighting_mode_params_recorded(self, monkeypatch):
+        dates, sig, R = self._setup_hrp_returns(monkeypatch)
+        res = bt.backtest(sig, rebalance="W", quantiles=2, long_short=False,
+                          weighting_mode="hrp", hrp_lookback=30, hrp_linkage_method="ward")
+        assert res.params["weighting_mode"] == "hrp"
+        assert res.params["hrp_lookback"] == 30
+        assert res.params["hrp_linkage_method"] == "ward"
+
+        res2 = bt.backtest(sig, rebalance="W", quantiles=2, long_short=False,
+                           weighting_mode="signal_proportional")
+        assert res2.params["weighting_mode"] == "signal_proportional"
+        assert res2.params["hrp_lookback"] is None
+        assert res2.params["hrp_linkage_method"] is None
+
+    def test_invalid_weighting_mode_raises(self, monkeypatch):
+        dates, sig, R = self._setup(monkeypatch)
+        with pytest.raises(ValueError, match="weighting_mode must be"):
+            bt.backtest(sig, rebalance="D", quantiles=2, long_short=False,
+                        weighting_mode="invalid_mode")

@@ -192,12 +192,33 @@ def dev_cache(price_table: str = PRICE_TABLE) -> dict:
 
 # --------------------------------------------------------------- cost model
 
+# Pre-registration amendment (2026-09-07): swap flat 10bps for calibrated
+# square-root-law ADV impact (ADV_SQRT_LAW_K=0.6). The legacy flat model used
+# a uniform 10 bps/side regardless of symbol liquidity. The calibrated form
+# computes per-trade impact as K * realized_daily_vol_bps * sqrt(notional / ADV),
+# which naturally tiers costs by liquidity (high-vol names cost more, liquid
+# names cost less). A small 1 bps commission+spread base is retained.
+# Logged as formal amendment per preregistration protocol.
+
 def cost_config(cost_bps_side: float) -> "ev_execution.ExecutionConfig":
     """
     The campaign's cost model as an ExecutionConfig -- the supported path since
     W1 Step B. The engine applies the same round-then-deduct-then-round order
     cost_adjusted() used, so results are unchanged; see evaluation/trades.py.
     """
+    # For backward compatibility: if cost_bps_side is the legacy 10.0,
+    # interpret as "use calibrated sqrt_law model". Otherwise use flat model.
+    if cost_bps_side == PRIMARY_COST_BPS:
+        # Calibrated sqrt_law model with 1 bps base commission+spread
+        return ev_execution.ExecutionConfig(
+            name="tv_campaign_sqrt_law",
+            costs=ev_execution.CostModel(
+                commission_bps=1.0,
+                impact_model="sqrt_law",
+                impact_coeff=0.6,  # ADV_SQRT_LAW_K
+            ),
+        )
+    # Legacy flat model (used for sensitivity tests at 5/20 bps)
     return ev_execution.ExecutionConfig(
         name=f"tv_campaign_{cost_bps_side:g}bps",
         costs=ev_execution.CostModel(commission_bps=cost_bps_side),

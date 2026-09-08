@@ -28,14 +28,14 @@ The four steps (hrp_weights() runs all of them):
      each fork inverse-proportional to the two child clusters' variance
      (_cluster_var, _recursive_bisection).
 
-SCOPE, deliberately narrow today: this module computes weights for an
-already-known, already-aligned returns panel. It does NOT (yet) plug into
-Sizing.mode -- sizing a SET of concurrently-held positions from one HRP
-call is a different shape than inverse_vol's per-trade-at-entry sizing,
-and needs the trades.py _portfolio_pass admission-order rework that
-TASKS.md already flags as its own design-doc-worthy project (touches the
-exact engine the live campaign depends on). Two separate pieces of work
-that happen to share a dependency decision, not one task.
+SCOPE: this module computes weights for an already-known, already-aligned
+returns panel, plus everything the engine needs to size a SET of
+concurrently-held positions from one HRP call (Sizing.mode="hrp" in
+evaluation/trades.py's single-pass engine, wired 2026-09-03, commit
+`b1de4fb`). TASKS.md used to flag the sizing-wiring as its own design-doc-
+worthy project because it touches the exact engine the live campaign depends
+on -- that piece shipped; what remains narrow is simply that this module
+stays hand-rolled and dependency-free (see reason above).
 """
 
 from __future__ import annotations

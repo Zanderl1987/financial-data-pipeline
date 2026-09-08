@@ -19,6 +19,15 @@ Catalog rows are rebuilt from evaluation/eval_registry/results.parquet's
 strategies/stage3.py) joined with cheap, non-recomputed metadata (.meta.json,
 strategies.screen.screen_source(), the ports registry) -- so building/refreshing
 the catalog never re-runs the expensive permutation test.
+
+Stage 5 holdout results (the durable one-shot record written by
+strategies.stage5.run_holdout_for / stage5.run_all) are also read back from the
+registry here so a fresh rebuild keeps the holdout columns instead of dropping
+them -- the one-shot guard (stage5.already_run) guarantees there is at most one
+valid holdout value per strategy. Stage 4 (bh_q/fdr_pass) is left as None: the
+campaign is not truly closed (stage4.run_close refuses: 781 admitted vs only 18
+with a Stage 3 pnl_p), and the referee's m=18 provisional recompute is a
+documented, deliberately-persist-free artifact.
 """
 
 from __future__ import annotations
@@ -42,6 +51,9 @@ CATALOG_DIR = os.path.join("storage", "tv_strategy_catalog")
 CATALOG_FILENAME = "tv_strategy_catalog.parquet"
 EVALUATION_NAME = "tv_strategy_catalog_stage3"
 
+HOLDOUT_SUCCESS_P = 0.05   # pre-declared Stage 5 success bar (section 5); also
+                           # the "promising" bar at Stage 6 (catalog labeling).
+
 SCHEMA_COLUMNS = [
     "strategy_id", "tv_url", "tv_author", "tv_script_name",
     "tv_boosts", "tv_views", "collected_at", "license",
@@ -52,8 +64,29 @@ SCHEMA_COLUMNS = [
     "total_pnl_net", "pnl_p", "pnl_p_5bps", "pnl_p_20bps", "cost_fragile",
     "bh_q", "fdr_pass",
     "holdout_pnl_p", "holdout_run_ts",
+    "verdict",
     "provisional", "stage", "run_id", "git_commit", "fetched_at",
 ]
+
+
+def label_verdict(stage: str, holdout_pnl_p) -> str:
+    """Stage 6 catalog verdict, per preregistration section 5 -- "only Stage 5
+    survivors may be described as promising; everything else is a recorded
+    null result". Wording here is deliberately "undetermined", not "null
+    result", for everything that didn't clear Stage 5: a null result implies
+    the full pipeline ran and the strategy failed, which is not true for the
+    ~760 admitted strategies still waiting on a Stage 3 test, nor for the
+    provisional Stage 3 non-significant ones -- by section 5's own
+    incremental-batch clause every result stays provisional until the
+    campaign formally closes at 30-50 strategies. "Undetermined" is the
+    honest label for anything not yet proven either way.
+
+    This is a DERIVED label, not new evidence: build_catalog_rows() recomputes
+    it from the stage + holdout fields on every rebuild, so a re-pivot never
+    silently drops a survivor's verdict."""
+    if stage != "stage5" or holdout_pnl_p is None or pd.isna(holdout_pnl_p):
+        return "undetermined"
+    return "promising" if float(holdout_pnl_p) < HOLDOUT_SUCCESS_P else "undetermined"
 
 
 def _git_commit() -> str:
@@ -84,11 +117,32 @@ def _stage3_wide() -> pd.DataFrame:
     return wide.reset_index()
 
 
+def _stage5_wide() -> pd.DataFrame:
+    """Pivot eval_registry's long rows for the one-shot Stage 5 holdout
+    evaluation back to one row per strategy_id. Falls back to the empty frame
+    when nothing has been holdout-tested yet."""
+    reg = ev_registry.load()
+    sub = reg[reg["evaluation"] == "tv_strategy_catalog_stage5"].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=["strategy_id"])
+    sub["strategy_id"] = sub["input_name"].str.replace("^pine_", "", regex=True)
+    # the one-shot guard makes at most one valid run; keep latest if re-run rows exist
+    sub = sub.sort_values("created_at").drop_duplicates(
+        subset=["strategy_id", "statistic"], keep="last")
+    wide = sub.pivot(index="strategy_id", columns="statistic", values="value")
+    runs = sub.groupby("strategy_id")["created_at"].max()
+    wide["holdout_run_ts"] = runs
+    return wide.reset_index()
+
+
 def build_catalog_rows() -> pd.DataFrame:
     """One row per admitted strategy: Stage 3 numeric results (if run yet)
     joined with provenance/screen metadata. Strategies not yet Stage-3-tested
     still appear, with stage="stage2" and the numeric columns null."""
     stage3 = _stage3_wide()
+    stage5 = _stage5_wide()
+    stage5_by_slug = (
+        stage5.set_index("strategy_id").to_dict("index") if not stage5.empty else {})
     git_commit = _git_commit()
     fetched_at = pd.Timestamp.now("UTC").isoformat()
 
@@ -116,6 +170,12 @@ def build_catalog_rows() -> pd.DataFrame:
         pnl_p_5, pnl_p_20 = get("pnl_p_5bps"), get("pnl_p_20bps")
         cost_fragile = (None if None in (pnl_p_5, pnl_p_20)
                         else bool((pnl_p_5 < 0.05) != (pnl_p_20 < 0.05)))
+
+        s5 = stage5_by_slug.get(slug, {})
+        has_holdout = "holdout_pnl_p" in s5
+        holdout_pnl_p = s5.get("holdout_pnl_p")
+        holdout_run_ts = s5.get("holdout_run_ts")
+        stage = "stage5" if has_holdout else ("stage3" if has_stage3 else "stage2")
 
         rows.append({
             "strategy_id": slug,
@@ -145,10 +205,11 @@ def build_catalog_rows() -> pd.DataFrame:
             "cost_fragile": cost_fragile,
             "bh_q": None,          # Stage 4: computed campaign-wide at close
             "fdr_pass": None,
-            "holdout_pnl_p": None,  # Stage 5: one-shot, not touched here
-            "holdout_run_ts": None,
+            "holdout_pnl_p": holdout_pnl_p,  # Stage 5: one-shot, read from registry
+            "holdout_run_ts": holdout_run_ts,
+            "verdict": label_verdict(stage, holdout_pnl_p),  # Stage 6 (section 5)
             "provisional": True,
-            "stage": "stage3" if has_stage3 else "stage2",
+            "stage": stage,
             "run_id": get("run_id"),
             "git_commit": git_commit,
             "fetched_at": fetched_at,

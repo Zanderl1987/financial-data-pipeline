@@ -94,30 +94,126 @@ def _rebalance_dates(index: pd.DatetimeIndex, rebalance: str) -> pd.DatetimeInde
     return pd.DatetimeIndex(s.resample(freq).last().dropna().values)
 
 
-def _target_weights(scores_wide: pd.DataFrame, rebal_dates, quantiles, long_short) -> pd.DataFrame:
+def _target_weights(
+    scores_wide: pd.DataFrame,
+    rebal_dates,
+    quantiles: int,
+    long_short: bool,
+    weighting_mode: str = "quantile",
+    returns: "pd.DataFrame | None" = None,
+    hrp_lookback: int = 126,
+    hrp_linkage_method: str = "single",
+) -> pd.DataFrame:
     """
-    Quantile weights at each rebalance date.
+    Target weights at each rebalance date, supporting multiple weighting modes.
 
-    Top 1/quantiles of symbols by score go long (equal weight summing to +1);
-    if long_short, the bottom 1/quantiles go short (summing to -1).
+    Modes:
+    - "quantile" (default): Top 1/quantiles go long equal-weight (+1 sum);
+      if long_short, bottom 1/quantiles go short equal-weight (-1 sum).
+    - "signal_proportional": Weights proportional to signal score. Long-only:
+      weights = score / sum(score) for positive scores. Long/short: weights
+      = score / sum(|score|), preserving sign.
+    - "hrp": Hierarchical Risk Parity weights from evaluation.hrp.hrp_weights()
+      computed on trailing returns at each rebalance date (PIT-safe). Requires
+      `returns` matrix and at least 2 symbols with shared history.
     """
+    if weighting_mode not in ("quantile", "signal_proportional", "hrp"):
+        raise ValueError(f"weighting_mode must be 'quantile', 'signal_proportional', or 'hrp'; got {weighting_mode!r}")
+
     out = pd.DataFrame(0.0, index=rebal_dates, columns=scores_wide.columns)
+
+    if weighting_mode == "quantile":
+        for rd in rebal_dates:
+            prior = scores_wide.loc[:rd]
+            if prior.empty:
+                continue
+            s = prior.iloc[-1].dropna()
+            n = len(s)
+            if n < 2:
+                continue
+            k = max(1, int(round(n / quantiles)))
+            ranked = s.sort_values(ascending=False)
+            longs = ranked.index[:k]
+            out.loc[rd, longs] = 1.0 / k
+            if long_short:
+                shorts = ranked.index[-k:]
+                out.loc[rd, shorts] = out.loc[rd, shorts] - 1.0 / k
+        return out
+
+    if weighting_mode == "signal_proportional":
+        for rd in rebal_dates:
+            prior = scores_wide.loc[:rd]
+            if prior.empty:
+                continue
+            s = prior.iloc[-1].dropna()
+            if s.empty:
+                continue
+            if long_short:
+                denom = s.abs().sum()
+                if denom > 0:
+                    out.loc[rd, s.index] = s / denom
+            else:
+                pos = s[s > 0]
+                denom = pos.sum()
+                if denom > 0:
+                    out.loc[rd, pos.index] = pos / denom
+        return out
+
+    # weighting_mode == "hrp"
+    if returns is None:
+        raise ValueError("HRP weighting mode requires the returns matrix (returns=...)")
+    from evaluation import hrp as ev_hrp
+
     for rd in rebal_dates:
-        # most recent scores known on or before the rebalance date
         prior = scores_wide.loc[:rd]
         if prior.empty:
             continue
         s = prior.iloc[-1].dropna()
-        n = len(s)
-        if n < 2:
+        active_symbols = s.index.tolist()
+        if len(active_symbols) < 2:
             continue
-        k = max(1, int(round(n / quantiles)))
-        ranked = s.sort_values(ascending=False)
-        longs = ranked.index[:k]
-        out.loc[rd, longs] = 1.0 / k
-        if long_short:
-            shorts = ranked.index[-k:]
-            out.loc[rd, shorts] = out.loc[rd, shorts] - 1.0 / k
+
+        # Trailing returns window ending STRICTLY BEFORE rebalance date (PIT-safe)
+        ret_window = returns.loc[:rd].iloc[:-1]  # exclude rebalance date itself
+        if len(ret_window) < hrp_lookback + 1:
+            ret_window = returns.loc[:rd].iloc[:-1]
+        ret_window = ret_window.tail(hrp_lookback + 1)
+
+        # Align to active symbols
+        panel = ret_window[active_symbols].dropna(axis=1, how="all").dropna(axis=0, how="any")
+        if panel.shape[1] < 2 or panel.shape[0] < 20:
+            # Fall back to equal-weight if insufficient history for HRP
+            k = len(active_symbols)
+            out.loc[rd, active_symbols] = 1.0 / k
+            continue
+
+        try:
+            hrp_w = ev_hrp.hrp_weights(panel, linkage_method=hrp_linkage_method)
+            # hrp_w is long-only summing to 1; apply long/short if requested
+            if long_short:
+                # Split HRP weights by signal sign: positive -> long, negative -> short
+                # Scale so gross = 1 (long sum = 0.5, short sum = -0.5)
+                pos_symbols = s[s > 0].index.intersection(hrp_w.index)
+                neg_symbols = s[s < 0].index.intersection(hrp_w.index)
+                if len(pos_symbols) == 0 and len(neg_symbols) == 0:
+                    continue
+                w = pd.Series(0.0, index=active_symbols)
+                if len(pos_symbols) > 0:
+                    pos_w = hrp_w[pos_symbols]
+                    pos_w = pos_w / pos_w.sum() * 0.5
+                    w[pos_symbols] = pos_w
+                if len(neg_symbols) > 0:
+                    neg_w = hrp_w[neg_symbols]
+                    neg_w = neg_w / neg_w.sum() * 0.5
+                    w[neg_symbols] = -neg_w
+                out.loc[rd, w.index] = w
+            else:
+                # Long-only: use HRP weights directly (already sum to 1)
+                out.loc[rd, hrp_w.index] = hrp_w
+        except Exception:
+            # Fall back to equal-weight on any HRP failure
+            k = len(active_symbols)
+            out.loc[rd, active_symbols] = 1.0 / k
     return out
 
 
@@ -211,6 +307,9 @@ def backtest(
     vol_target: "float | None" = None,
     max_weight: "float | None" = None,
     max_drawdown_stop: "float | None" = None,
+    weighting_mode: str = "quantile",
+    hrp_lookback: int = 126,
+    hrp_linkage_method: str = "single",
 ) -> BacktestResult:
     """
     Backtest a cross-sectional signal with advanced execution costs, risk controls,
@@ -231,6 +330,14 @@ def backtest(
     `borrow_fee_bps` for short-cost calculation using per-symbol short exposure.
     If None and `borrow_fee_bps == 0`, attempts to auto-load from the
     `ibkr_borrow_fee` table for the signal's symbols/dates.
+
+    weighting_mode (default "quantile"): Portfolio weighting scheme.
+    - "quantile": Top/bottom 1/quantiles equal-weight (legacy behavior).
+    - "signal_proportional": Weights proportional to signal score magnitude.
+    - "hrp": Hierarchical Risk Parity (Lopez de Prado 2016) using trailing
+      returns covariance at each rebalance. Requires `hrp_lookback` days of
+      shared history (default 126). `hrp_linkage_method` passed to
+      scipy.cluster.hierarchy.linkage (default "single").
     """
     if not {"symbol", "date", score}.issubset(signal.columns):
         raise ValueError(f"signal must have columns symbol, date, '{score}'")
@@ -262,7 +369,10 @@ def backtest(
                       .sort_index())
 
     rebal_dates = _rebalance_dates(R.index, rebalance)
-    target = _target_weights(scores_wide, rebal_dates, quantiles, long_short)
+    target = _target_weights(
+        scores_wide, rebal_dates, quantiles, long_short,
+        weighting_mode=weighting_mode, returns=R,
+        hrp_lookback=hrp_lookback, hrp_linkage_method=hrp_linkage_method)
 
     # Position sizing cap constraint (max_weight)
     if max_weight is not None and max_weight > 0:
@@ -351,6 +461,9 @@ def backtest(
         "adv_window": adv_window if adv_participation_coeff else None,
         "vol_target": vol_target, "max_weight": max_weight,
         "max_drawdown_stop": max_drawdown_stop,
+        "weighting_mode": weighting_mode,
+        "hrp_lookback": hrp_lookback if weighting_mode == "hrp" else None,
+        "hrp_linkage_method": hrp_linkage_method if weighting_mode == "hrp" else None,
         "n_symbols": len(symbols), "n_days": len(net),
         "start": str(R.index.min().date()), "end": str(R.index.max().date()),
     }

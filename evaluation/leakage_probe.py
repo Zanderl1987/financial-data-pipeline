@@ -19,13 +19,20 @@ programmatically: it refuses to run if the "leaky" kwargs differ from the
 "safe" kwargs in more than one key, because a two-switch ablation can't
 attribute the inflation to either one.
 
-Three concrete probes ship here, one per switch the research names:
+Four concrete probes ship here, one per switch the research names:
   * entry_lag_leakage()          -- same-bar vs next-bar execution
                                      (event_backtest.scenario()).
   * feature_centering_leakage()  -- centered vs trailing feature windows
                                      (meta_label.build_features()).
   * pit_lag_fundamentals_leakage() -- period_end vs filed as the date a
                                      fundamentals fact became knowable.
+  * llm_lookahead_leakage()      -- text-only vs text+outcome scoring of
+                                     LLM-labeled documents (fed_sentiment).
+                                     Checked BEFORE the factor goes near
+                                     signal_panel(), since the score's
+                                     information set is the model's, not
+                                     the repo's (Phase 7 of the backtest
+                                     rigor audit).
 
 entry_lag_leakage() is the one ready-to-use concrete probe this module
 ships: event_backtest.scenario() already exposes entry_lag as a real
@@ -252,3 +259,131 @@ def pit_lag_fundamentals_leakage(symbols, metric: str = "net_income",
                        date_col="filed")
     return one_switch_ablation(_run_fundamentals_pipeline, base_kwargs,
                                {"date_col": "period_end"}, lambda r: r)
+
+
+def _label_outcome_corr(labels: "pd.Series", outcomes: "pd.Series") -> "float | None":
+    """
+    Spearman correlation between LLM-assigned labels and the realized rate-
+    decision outcome, across documents. Guarded the same way the other
+    probes' metrics are: fewer than 8 aligned docs or a degenerate (zero-
+    variance) side returns None rather than a spurious number. Spearman,
+    not Pearson, because labels are bounded [-1, 1] and outcomes are a
+    signed rate change -- the monotone association is what matters, not the
+    linear fit.
+    """
+    al = labels.astype(float).reset_index(drop=True)
+    ao = outcomes.astype(float).reset_index(drop=True)
+    ok = al.notna() & ao.notna()
+    if int(ok.sum()) < 8:
+        return None
+    l, o = al[ok], ao[ok]
+    if l.nunique() < 2 or o.nunique() < 2:
+        return None
+    return float(l.corr(o, method="spearman"))
+
+
+def _run_llm_scoring(docs: "pd.DataFrame", scorer: Callable,
+                     outcome_fn: Callable, leaky: bool) -> "float | None":
+    """
+    Run scorer() over `docs` -- text alone when leaky=False (exactly the
+    production fed_sentiment_pipeline path), text PLUS the realized outcome
+    appended when leaky=True (what a model whose training data includes the
+    outcome effectively sees). Then measure how well the labels correlate
+    with the outcome. The outcome series is computed from the same outcome_fn
+    in BOTH runs, so the only thing that differs between them is the
+    information the scorer was handed -- the one-switch discipline.
+    """
+    work = docs.copy()
+    if leaky:
+        outcomes = outcome_fn(work["date"])
+        work["text"] = work["text"].astype(str) + (
+            " ACTUAL_OUTCOME: " + outcomes.fillna("").astype(str))
+    labels = scorer(work)
+    outcomes = outcome_fn(work["date"])
+    return _label_outcome_corr(labels, outcomes)
+
+
+def ffr_monthly_outcome(dates: "pd.Series") -> "pd.Series":
+    """
+    Default outcome function for llm_lookahead_leakage(): the signed change
+    in the effective fed funds rate (FRED FEDFUNDS, monthly average) from
+    the document's month to the FOLLOWING month, in percentage points.
+    Positive = the Fed moved toward tighter policy right after this doc --
+    the direction a hawkish label should predict IF the label carries real
+    signal. Deliberately coarse (monthly averages, not decision-by-decision)
+    because the probe only needs a defensible directional outcome, and it is
+    held FIXED across the safe/leaky runs so any measurement coarseness
+    cancels out of the inflation.
+    """
+    import query as q
+
+    df = q.load("fred_rates_gdp_interest_rates")
+    df = df[df["series_id"] == "FEDFUNDS"].copy()
+    if df.empty:
+        return pd.Series(index=dates.index, dtype="float64")
+    s = pd.to_numeric(df["value"], errors="coerce")
+    ym = pd.to_datetime(df["date"]).dt.to_period("M")
+    monthly = pd.Series(s.to_numpy(), index=ym.to_numpy()).sort_index()
+    out_dates = pd.to_datetime(dates).dt.to_period("M")
+    cur = out_dates.map(monthly)
+    nxt = (out_dates + 1).map(monthly)
+    return (nxt - cur).astype("float64")
+
+
+def _claude_fed_scorer(docs: "pd.DataFrame") -> "pd.Series":
+    """
+    Score documents the way fed_sentiment_pipeline.py does -- batching the
+    text through the same SYSTEM_PROMPT / _score_batch path -- and return a
+    hawkish_score Series aligned to docs.index. Requires ANTHROPIC_API_KEY.
+    This is the production-path scorer; llm_lookahead_leakage() runs it
+    untouched in the safe case, and appends the outcome before calling it in
+    the leaky case.
+    """
+    import fed_sentiment_pipeline as fsp
+
+    to_score = [
+        {"id": i, "title": str(r["title"]), "text": str(r["text"])}
+        for i, r in docs.iterrows()
+    ]
+    results = fsp._score_batch(to_score)
+    by_id = {r["id"]: float(r.get("hawkish_score"))
+             for r in (results or [])}
+    return pd.Series([by_id.get(i, float("nan")) for i in docs.index],
+                     index=docs.index)
+
+
+def llm_lookahead_leakage(docs: "pd.DataFrame",
+                          scorer: "Callable | None" = None,
+                          outcome_fn: Callable = ffr_monthly_outcome) -> dict:
+    """
+    One-switch probe on the INFORMATION SET an LLM scorer is handed.
+    Safe = score the document text exactly as fed_sentiment_pipeline.py does
+    (no outcome anywhere in the prompt). Leaky = append the realized rate
+    outcome to the text before scoring, simulating a model whose training
+    data included post-hoc rate history it could "remember" while reading a
+    speech. Reports the inflation in Spearman(docs' labels, realized outcome)
+    from flipping that one switch.
+
+    The worry this encodes (Phase 7 of the backtest rigor audit): an LLM
+    trained through a cutoff has seen news coverage of what the Fed actually
+    did. If its hawkish/dovish score shades toward the realized outcome even
+    when the text itself says nothing about it, the score's predictive power
+    overstates the text's -- and any factor built from these scores inherits
+    that overstatement. Run this once before fed_sentiment ever joins
+    signal_panel(); it is currently dormant because the pipeline itself is
+    unwired (no ANTHROPIC_API_KEY set).
+
+    docs: DataFrame with at least 'date' (pd.Timestamp-able) and 'text'.
+    scorer: callable(docs) -> Series of hawkish_score aligned to docs.index.
+      Defaults to the pipeline's own Claude scorer (needs ANTHROPIC_API_KEY).
+      Tests inject a deterministic stand-in.
+    outcome_fn: callable(dates: Series) -> Series of signed outcomes aligned
+      to the same index. Defaults to ffr_monthly_outcome().
+
+    Returns the one_switch_ablation() dict: switch, safe_value/leaky_value,
+    safe_metric/leaky_metric (both Spearman correlations), inflation.
+    """
+    base_kwargs = dict(docs=docs, scorer=scorer or _claude_fed_scorer,
+                       outcome_fn=outcome_fn, leaky=False)
+    return one_switch_ablation(_run_llm_scoring, base_kwargs,
+                               {"leaky": True}, lambda r: r)

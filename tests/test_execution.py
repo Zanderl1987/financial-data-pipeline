@@ -194,7 +194,7 @@ class TestStage3CostEquivalence:
         from evaluation import trades as ev_trades
         from strategies import stage3
 
-        notional, bps = 10_000.0, 10.0
+        notional, bps = 10_000.0, 15.0  # use non-primary bps to get flat model
         # entry at bar 1 (100.0), rule exit signal at bar 2, fill at bar 3.
         closes = [100.0, 100.0, 112.30, 112.30]
         idx = pd.bdate_range("2024-01-01", periods=4)
