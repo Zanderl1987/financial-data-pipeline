@@ -14,14 +14,17 @@ HS codes tracked:
   283691 — Lithium carbonates         (battery-grade cathode material)
   282520 — Lithium oxide/hydroxide    (battery material)
   810520 — Cobalt, unwrought          (NMC/NCA cathode precursor)
+  750210 — Nickel, unwrought, not alloyed (NMC/NCA cathode precursor)
   260200 — Manganese ores             (LFP/NMC batteries, steel alloys)
   250410 — Natural graphite           (battery anode material)
+  280461 — Silicon >=99.99% pure      (battery anode material, semiconductors)
   284690 — Rare earth compounds       (EV motor magnets — Nd, Pr, Dy)
   850760 — Lithium-ion batteries      (EV and grid storage)
   854231 — Processor/controller ICs   (semiconductors)
   854232 — Memory ICs                 (semiconductors)
    720829 — Steel flat-rolled HRC      (automotive body/frame)
    760110 — Aluminum unwrought         (EV body, battery enclosures)
+   740311 — Copper cathodes, refined   (battery current collectors, EV wiring)
    280429 — Helium                     (MRI, semiconductors, lifting/aerospace)
 
 CLI:
@@ -61,14 +64,17 @@ HS_CODES: dict[str, tuple[str, str]] = {
     "283691": ("Lithium Carbonates",            "battery_materials"),
     "282520": ("Lithium Oxide & Hydroxide",     "battery_materials"),
     "810520": ("Cobalt Unwrought",              "battery_materials"),
+    "750210": ("Nickel Unwrought Non-Alloy",    "battery_materials"),
     "260200": ("Manganese Ores",                "ores"),
     "250410": ("Natural Graphite",              "battery_materials"),
+    "280461": ("Silicon >=99.99% Pure",         "battery_materials"),
     "284690": ("Rare Earth Compounds",          "battery_materials"),
     "850760": ("Lithium-Ion Batteries",         "batteries"),
     "854231": ("Processor & Controller ICs",    "semiconductors"),
     "854232": ("Memory ICs",                    "semiconductors"),
     "720829": ("Steel Flat-Rolled HRC",         "metals"),
     "760110": ("Aluminum Unwrought Non-Alloy",  "metals"),
+    "740311": ("Copper Refined Cathodes",       "metals"),
     "280429": ("Helium",                        "industrial_gases"),
 }
 
