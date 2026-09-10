@@ -11,6 +11,25 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
 - **Failure signal:** `QUALITY_FAIL.txt` appears at repo root when validate.py reports
   any FAIL. Any future Claude session should check for that file. Auto-clears on the
   next clean run.
+- **Also runs `coverage_audit.py --fail-on-gap`** (added 2026-09-10), archived to
+  `storage\quality_reports\coverage_audit_YYYY-MM-DD.txt`, one summary line per week
+  appended to `storage\quality_reports\coverage_audit_summary_log.txt`. Checks the
+  commodity/FX pipelines against closed upstream catalogs FRED and Frankfurter
+  publish in full (FRED's IMF PCPS "Global price of X" series, Frankfurter/ECB's
+  currency list) — a gap here means a series/currency the source publishes that no
+  pipeline tracks. Added after a session found (and fixed) Uranium, Dubai/APSP
+  crude, a never-wired-up Silicon USGS entry, and 6 missing IMF agriculture series
+  (Hides/Olive Oil/Swine/Salmon/Wool) all in one sitting — this makes that check
+  recurring instead of ad-hoc. It also does a second-pass keyword search against a
+  curated-table allowlist before calling something a GAP, because a different
+  pipeline can cover the same commodity under a totally different series ID (this
+  is how 21 of that session's first 27 "gaps" turned out to already be covered by
+  `worldbank_pink_sheet.py` under different names — a source-code-only grep can't
+  see that). Ambiguous matches are reported as "POSSIBLE DUPLICATE" for a human/
+  Claude to judge, not silently dropped or silently flagged.
+  **Failure signal:** `COVERAGE_GAP.txt` appears at repo root when a confirmed gap
+  is found. Separate from `QUALITY_FAIL.txt` — a coverage gap is "we should add a
+  series," not "something is broken." Auto-clears on the next clean run.
 
 ## ClaudeAuto-DailyAccumulators (Windows Scheduled Task)
 

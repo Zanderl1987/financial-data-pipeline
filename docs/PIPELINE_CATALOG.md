@@ -16,7 +16,7 @@ endpoint — the table only grows if the pipeline runs regularly (see
 |---|---|---|---|
 | `price_history_pipeline.py` | `prices` | Core daily OHLCV price history (equities) | — |
 | `yfinance_pipeline.py` | `market_history` | Deep daily history for indices, front-month futures, FX pairs, rate/credit ETFs (`^GSPC` to 1927, `^DJI` to 1992, `CL=F`/`GC=F` to 2000, `TLT`/`HYG` to inception) | — |
-| `futures_pipeline.py` | `futures`, `cot` | Continuous front-month OHLCV for 30 futures contracts + CFTC Commitments of Traders weekly positioning | — |
+| `futures_pipeline.py` | `futures`, `cot` | Continuous front-month OHLCV for 38 futures contracts + CFTC Commitments of Traders weekly positioning | — |
 | `sector_etf_pipeline.py` | `sector_etfs` | Daily OHLCV for 11 SPDR sector ETFs + 4 broad index ETFs (Schwab) | Schwab OAuth |
 | `tiingo_pipeline.py` | `tiingo_prices`, `tiingo_news` | Corporate-action-adjusted EOD prices + ticker-tagged news; works without OAuth | `TIINGO` key |
 

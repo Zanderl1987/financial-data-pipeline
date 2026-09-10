@@ -67,7 +67,21 @@ SERIES: dict[str, tuple] = {
     "PRICENPQUSDM":   ("Rice Thailand",                "monthly", "USD/MT",          "agriculture"),
     "PPOILUSDM":      ("Palm Oil",                     "monthly", "USD/MT",          "agriculture"),
     "PTEAUSDM":       ("Tea",                          "monthly", "USD/kg",          "agriculture"),
-    # Cocoa and rubber series codes differ across FRED — covered by WB Pink Sheet
+    "PHIDEUSDM":      ("Hides",                        "monthly", "cents/lb",        "agriculture"),
+    "POLVOILUSDM":    ("Olive Oil",                    "monthly", "USD/MT",          "agriculture"),
+    "PPORKUSDM":      ("Swine",                        "monthly", "cents/lb",        "agriculture"),
+    "PSALMUSDM":      ("Fish (Salmon)",                "monthly", "USD/kg",          "agriculture"),
+    "PWOOLCUSDM":     ("Wool, Coarse",                 "monthly", "cents/kg",        "agriculture"),
+    "PWOOLFUSDM":     ("Wool, Fine",                   "monthly", "cents/kg",        "agriculture"),
+    # Cocoa, rubber, bananas, barley, beef, coffee robusta, fish meal, groundnuts,
+    # lamb, logs, orange, poultry, rapeseed/soybean/sunflower oil, sawnwood,
+    # shrimp, soybean meal, sugar (EU/US) are ALL already covered by
+    # worldbank_pink_sheet.py's dynamic Pink Sheet parse (different source,
+    # same commodity) — do not re-add them here as FRED duplicates. Verified
+    # 2026-09-10 against storage/curated/wb_commodities's actual commodity
+    # values, not just source-code grep (grep alone missed this whole set,
+    # since WB Pink Sheet parses its Excel dynamically rather than fetching
+    # a hardcoded FRED series-ID list).
     # Fertilizers (urea, DAP, potash) not available in FRED's IMF PCPS mirror —
     # covered by World Bank Pink Sheet pipeline (worldbank_pink_sheet.py)
 

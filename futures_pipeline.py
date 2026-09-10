@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Futures pipeline:
-  - Continuous front-month OHLCV for 30 contracts via yfinance (free, no key required)
+  - Continuous front-month OHLCV for 38 contracts via yfinance (free, no key required)
   - CFTC Commitments of Traders weekly positioning data (free, no key required)
 
 Outputs:
