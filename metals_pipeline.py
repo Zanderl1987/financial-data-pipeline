@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-Metals Spot Price Pipeline.
+Metals Price Pipeline.
 
 Two data sources:
-  1. api.metals.live — real-time precious metals spot prices (no key required)
-  2. FRED API — monthly base metals historical prices (IMF PCPS series)
+  1. yfinance front-month continuous futures (GC=F, SI=F, PL=F, PA=F) as a
+     daily "spot" proxy for gold, silver, platinum, palladium (keyless, free).
+     The front-month close is the standard spot proxy and this is the same
+     proven fetch path futures_pipeline.py uses. It replaces api.metals.live,
+     which went dead (SSL failure on this host).
+  2. FRED API - monthly base metals historical prices (IMF PCPS series).
 
-Precious metals from api.metals.live are stored as of today's date.
-Base metals history from FRED goes back to the 1990s–2000s depending on series.
+FRED no longer carries gold/platinum/palladium spot series (IBA data deleted
+from FRED Jan 2022) and api.metals.live is dead, so precious metals live here
+as yfinance front-month closes rather than a dedicated spot feed. The same
+contracts are fetched full-OHLCV daily by futures_pipeline.py; this table keeps
+the close only so metals_spot stays the one-value-per-metal spot view.
 
 CLI:
   python metals_pipeline.py             # incremental (last 90 days)
-  python metals_pipeline.py --backfill  # full FRED history + today's spot
+  python metals_pipeline.py --backfill  # full FRED history + latest spot
 
 Output:
   storage/raw/metals/metals_spot_{mode}_{YYYYMMDD}.parquet
@@ -24,6 +31,7 @@ import time
 
 import pandas as pd
 import requests
+import yfinance as yf
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
 
@@ -31,14 +39,15 @@ load_dotenv()
 
 FRED_API_KEY  = os.environ.get("FRED_API_KEY", "")
 FRED_BASE     = "https://api.stlouisfed.org/fred/series/observations"
-METALS_LIVE   = "https://api.metals.live/v1/spot"
 BASE_DIR      = os.path.join("storage", "raw", "metals")
 REQUEST_INTERVAL = 0.5
 MAX_RETRIES      = 3
 BACKOFF_SECONDS  = 60
 
 # Base metals via FRED (IMF PCPS, monthly)
-# Precious metals (gold, silver, platinum, palladium) already in commodity_macro_pipeline
+# Precious metals are NOT here: FRED dropped its gold/platinum/palladium spot
+# series (IBA data deleted Jan 2022) and api.metals.live went dead. They come
+# from YF_SPOT below (yfinance front-month futures as the spot proxy).
 FRED_METALS: dict[str, tuple] = {
     "PCOPPUSDM":        ("Copper",               "monthly", "USD/MT"),
     "PALUMUSDM":        ("Aluminum",             "monthly", "USD/MT"),
@@ -47,15 +56,16 @@ FRED_METALS: dict[str, tuple] = {
     "PLEADUSDM":        ("Lead",                 "monthly", "USD/MT"),
     "PIORECRUSDM":      ("Iron Ore",             "monthly", "USD/DMT"),
     "PTINUSDM":         ("Tin",                  "monthly", "USD/MT"),
+    "PURANUSDM":        ("Uranium",              "monthly", "USD/lb"),
 }
 
-# Metals returned by api.metals.live and their display names
-METALS_LIVE_MAP = {
-    "gold":      "Gold",
-    "silver":    "Silver",
-    "platinum":  "Platinum",
-    "palladium": "Palladium",
-    "lbma_gold": "Gold LBMA",
+# Precious metals "spot" via yfinance front-month continuous futures.
+# series_id is the yf_<contract> slug; value is the last valid daily close.
+YF_SPOT: dict[str, tuple] = {
+    "GC=F":  ("Gold",      "yf_gc"),
+    "SI=F":  ("Silver",    "yf_si"),
+    "PL=F":  ("Platinum",  "yf_pl"),
+    "PA=F":  ("Palladium", "yf_pa"),
 }
 
 
@@ -104,50 +114,43 @@ def fetch_fred_series(series_id, observation_start=None):
     return df if not df.empty else None
 
 
-def fetch_metals_live(today_str):
-    """Fetch real-time spot from api.metals.live. Returns a DataFrame or None."""
-    try:
-        r = requests.get(METALS_LIVE, timeout=15)
-        if r.status_code != 200:
-            print(f"  api.metals.live HTTP {r.status_code}")
-            return None
-        data = r.json()
-        # Response may be a list of dicts or a single dict
-        if isinstance(data, list):
-            data = data[0] if data else {}
-        rows = []
-        for key, display_name in METALS_LIVE_MAP.items():
-            if key in data:
-                rows.append({
-                    "series_id": f"metals_live_{key}",
-                    "name":      display_name,
-                    "frequency": "realtime",
-                    "unit":      "USD/troy oz",
-                    "source":    "api.metals.live",
-                    "date":      pd.Timestamp(today_str),
-                    "value":     float(data[key]),
-                })
-        # Also handle flat numeric keys like "XAU", "XAG"
-        xau_map = {"XAU": "Gold", "XAG": "Silver", "XPT": "Platinum", "XPD": "Palladium"}
-        for xcode, display_name in xau_map.items():
-            if xcode in data and xcode not in [r["series_id"] for r in rows]:
-                rows.append({
-                    "series_id": f"metals_live_{xcode.lower()}",
-                    "name":      display_name,
-                    "frequency": "realtime",
-                    "unit":      "USD/troy oz",
-                    "source":    "api.metals.live",
-                    "date":      pd.Timestamp(today_str),
-                    "value":     float(data[xcode]),
-                })
-        return pd.DataFrame(rows) if rows else None
-    except Exception as e:
-        print(f"  api.metals.live error: {e}")
-        return None
+def fetch_yf_spot():
+    """Fetch the latest daily close for each precious-metal front-month contract.
+
+    Returns (df, failed): df with one row per metal (tz-naive trading date from
+    the bar itself, NOT the wall-clock run date), or empty df if nothing landed;
+    failed = list of contracts that errored or returned no valid close.
+    """
+    rows = []
+    failed = []
+    for symbol, (display_name, series_id) in YF_SPOT.items():
+        try:
+            hist = yf.Ticker(symbol).history(period="2d", auto_adjust=True)
+            closes = hist["Close"].dropna()
+            if closes.empty:
+                print(f"  {symbol} ({display_name}): no valid close")
+                failed.append(symbol)
+                time.sleep(REQUEST_INTERVAL)
+                continue
+            rows.append({
+                "series_id": series_id,
+                "name":      display_name,
+                "frequency": "daily",
+                "unit":      "USD/troy oz",
+                "source":    "yfinance",
+                "date":      pd.Timestamp(closes.index[-1]).tz_localize(None),
+                "value":     float(closes.iloc[-1]),
+            })
+            print(f"  {symbol} ({display_name}): {closes.iloc[-1]:.2f} on {closes.index[-1].date()}")
+        except Exception as e:
+            print(f"  {symbol} ({display_name}): error: {e}")
+            failed.append(symbol)
+        time.sleep(REQUEST_INTERVAL)
+    return pd.DataFrame(rows), failed
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Metals spot price pipeline")
+    parser = argparse.ArgumentParser(description="Metals price pipeline")
     parser.add_argument("--backfill", action="store_true",
                         help="Fetch full FRED history")
     args = parser.parse_args()
@@ -167,21 +170,23 @@ def main():
     os.makedirs(BASE_DIR, exist_ok=True)
     frames = []
 
-    # Part 1: real-time spot from api.metals.live
-    print("[metals_live] Fetching real-time spot prices...")
-    spot_df = fetch_metals_live(today_str)
+    # Part 1: precious-metals spot proxy via yfinance front-month futures
+    print("[yfinance] Fetching gold/silver/platinum/palladium closes...")
+    spot_df, spot_failed = fetch_yf_spot()
     if spot_df is not None and not spot_df.empty:
         spot_df["fetched_at"] = now.isoformat()
         frames.append(spot_df)
-        print(f"  {len(spot_df)} metals fetched from api.metals.live")
-    else:
-        print("  No data from api.metals.live (may be down or format changed)")
+        print(f"  {len(spot_df)} metals fetched from yfinance")
+    if spot_failed:
+        print(f"  WARNING: no spot close for: {', '.join(spot_failed)}")
+    if not spot_failed and (spot_df is None or spot_df.empty):
+        print("  WARNING: precious-metals spot fetch returned nothing")
 
     # Part 2: FRED historical base metals
     print(f"\n[fred_metals] Fetching {len(FRED_METALS)} series from FRED...")
     failed = []
     for i, (series_id, (name, frequency, unit)) in enumerate(FRED_METALS.items(), 1):
-        print(f"  [{i}/{len(FRED_METALS)}] {series_id} — {name}...", end=" ")
+        print(f"  [{i}/{len(FRED_METALS)}] {series_id} - {name}...", end=" ")
         df = fetch_fred_series(series_id, observation_start)
         if df is None or df.empty:
             print("no data")
@@ -218,6 +223,8 @@ def main():
     print(f"   {len(combined):,} rows | {combined['series_id'].nunique()} series")
     if failed:
         print(f"   No data: {', '.join(failed)}")
+    if spot_failed:
+        print(f"   Spot fetch failed for: {', '.join(spot_failed)}")
 
     print("\n--- METALS PIPELINE COMPLETE ---")
 

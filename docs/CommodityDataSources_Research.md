@@ -92,6 +92,7 @@
 - **URLs**: https://metals.dev (fully free), https://api.metals.live (free), https://www.metals-api.com (free tier)
 - **What**: Real-time and historical spot prices — steel (HRC, scrap, rebar), aluminum, copper, nickel, zinc, tin, lead.
 - **Notes**: Metals.Dev requires no credit card; api.metals.live is public. Cover base metals beyond what FRED provides. Evaluate which has best historical depth.
+- **Status 2026-09-08**: api.metals.live is DEAD for this pipeline (SSL failure; no spot rows landed in months of runs). Precious-metals spot in `metals_pipeline.py` now uses yfinance front-month futures closes (GC=F/SI=F/PL=F/PA=F) as the daily spot proxy instead.
 
 ### World Bank Pink Sheet
 - **URL**: https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/world-bank-commodities-price-data-the-pink-sheet

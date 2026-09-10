@@ -4,10 +4,10 @@ USGS National Minerals Information Center (NMIC) Pipeline.
 
 Fetches two types of files from USGS commodity pages:
   MIS (Monthly Industrial Survey) — monthly US import/export volumes and values
-      Available for: cobalt, manganese
+      Available for: cobalt, manganese, silicon
       Source: https://www.usgs.gov/centers/national-minerals-information-center/{name}-statistics-and-information
   MYB (Minerals Yearbook) — annual production and trade statistics
-      Available for: lithium, graphite, nickel, rare earths, silicon
+      Available for: lithium, graphite, nickel, rare earths
       Same page structure, but links to annual workbooks
 
 Data is extracted from numbered table sheets (T1–T5 in MIS files):
@@ -86,6 +86,12 @@ COMMODITIES: dict[str, dict] = {
         "mis_abbrev": None,
         "category":   "battery_materials",
         "notes":      "EV motor magnets (Nd, Pr, Dy); China dominant supplier",
+    },
+    "silicon": {
+        "page_url": "https://www.usgs.gov/centers/national-minerals-information-center/silicon-statistics-and-information",
+        "mis_abbrev": "simet",
+        "category":   "metals",
+        "notes":      "Ferrosilicon/silicon metal; semiconductor, solar, aluminum alloying",
     },
     "iron_steel": {
         "page_url": "https://www.usgs.gov/centers/national-minerals-information-center/iron-and-steel-statistics-and-information",

@@ -43,8 +43,9 @@ SERIES = {
     "PCOFFOTMUSDM":   ("Coffee (Arabica)",             "monthly",  "USD/kg",       "agriculture"),
 
     # --- Metals ---
-    # Gold/Palladium/Platinum removed — IBA data deleted from FRED Jan 2022.
-    # Get precious metals from worldbank_pink_sheet.py (monthly) or yfinance.
+    # Gold/Palladium/Platinum removed -- IBA data deleted from FRED Jan 2022.
+    # Precious metals now come from metals_pipeline.py (yfinance front-month
+    # futures proxy: GC=F/SI=F/PL=F/PA=F, daily) and futures_pipeline.py.
     "PCOPPUSDM":      ("Copper",                       "monthly",  "USD/MT",       "metals"),
 
     # --- Lumber (PPI) ---

@@ -310,10 +310,11 @@ Four new free-data-source pipelines, no new API keys required. CATALOG expanded 
 - Supplements `commodity_macro_pipeline.py` — no overlap with existing series
 - CATALOG: `imf_commodities`
 
-**`metals_pipeline.py`** (FRED API + api.metals.live):
+**`metals_pipeline.py`** (FRED API + yfinance futures proxy):
 - 7 base metals via FRED IMF PCPS monthly series: Cu, Al, Ni, Zn, Pb, Fe (iron ore), Sn
-- api.metals.live real-time spot (SSL error on current host — graceful fallback)
-- Precious metals (Au, Ag, Pt, Pd) already in `commodity_macro_pipeline.py`
+- Precious metals (Au, Ag, Pt, Pd) via yfinance front-month futures closes
+  (GC=F, SI=F, PL=F, PA=F) as the daily spot proxy — replaces api.metals.live
+  (dead: SSL error on current host) and the FRED IBA spot series (deleted Jan 2022)
 - CATALOG: `metals_spot`
 
 **`fao_pipeline.py`** (FAOSTAT bulk ZIP fallback):

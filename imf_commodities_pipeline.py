@@ -40,7 +40,9 @@ BACKOFF_SECONDS  = 60
 # ---------------------------------------------------------------------------
 # IMF PCPS series available via FRED — supplements commodity_macro_pipeline
 # (gold, copper, WTI, Brent, natural gas, corn, wheat, soybeans, cotton,
-#  sugar, coffee, platinum, palladium already live in commodity_macro)
+#  sugar, coffee already live in commodity_macro; platinum and palladium are
+#  in metals_pipeline.py as yfinance front-month futures-proxy spot, since
+#  FRED deleted its IBA-based precious-metal series Jan 2022)
 # ---------------------------------------------------------------------------
 
 SERIES: dict[str, tuple] = {

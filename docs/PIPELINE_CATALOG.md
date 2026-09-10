@@ -130,7 +130,7 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `eia_expansion_pipeline.py` | `eia_electricity_generation`, `eia_electricity_sales`, `eia_nuclear_outages`, `eia_coal_production`, `eia_coal_trade`, `eia_international`, `eia_seds` | Electricity generation/sales, nuclear outages, coal production/trade, international energy, state-level SEDS | `EIA_API_KEY` |
 | `eia_hourly_grid_pipeline.py` | `eia_hourly_grid` | Hourly demand, demand forecast, net generation, interchange — 65+ balancing authorities (EIA-930) | `EIA_API_KEY` |
 | `eia_petng_prices_pipeline.py` | `eia_petroleum_spot_prices`, `eia_petroleum_futures`, `eia_refiner_margins`, `eia_petroleum_supply_demand`, `eia_natural_gas_consumption` | Spot/futures petroleum prices, refiner margins, supply/demand balance, natgas consumption, LNG | `EIA_API_KEY` |
-| `metals_pipeline.py` | `metals_spot` | Real-time precious metals spot (api.metals.live) + FRED base metals history | `FRED_API_KEY` (base metals only) |
+| `metals_pipeline.py` | `metals_spot` | Gold/silver/platinum/palladium daily spot proxy (yfinance front-month futures GC=F/SI=F/PL=F/PA=F) + FRED base metals history | `FRED_API_KEY` (base metals only) |
 | `omkar_commodity_pipeline.py` | `omkar_commodity` | CME/NYMEX commodity futures — 30 commodities incl. lumber (100 queries/month free) | `OMKAR_API_KEY` |
 | `fao_pipeline.py` | `fao_production`, `fao_prices` | Global crop production quantities/area + producer prices (major crops: wheat, maize, rice, soy, cotton, sugar) | — |
 | `usda_pipeline.py` | `usda_crops`, `usda_fertilizers` | US crop production statistics + fertilizer prices (QuickStats API) | `USDA_NASS_API_KEY` (**currently 401ing, needs fresh key**) |
