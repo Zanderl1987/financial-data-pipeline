@@ -6,8 +6,10 @@ Fetches historical foreign exchange rates from Frankfurter (api.frankfurter.app)
 sourced from the European Central Bank (201 currencies, 84 central banks).
 Completely keyless — no API key required.
 
-Tracks 19 currencies vs USD (base):
+Tracks 29 currencies vs USD (base) — the full set Frankfurter/ECB publishes reference
+rates for, minus USD itself:
   EUR GBP JPY CAD AUD CHF CNY INR MXN BRL KRW SGD HKD NOK SEK DKK NZD ZAR TRY
+  CZK HUF ISK PLN RON ILS MYR IDR PHP THB
 
 CLI:
   python forex_pipeline.py             # last 90 days
@@ -36,6 +38,7 @@ TARGET_CURRENCIES = [
     "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "INR",
     "MXN", "BRL", "KRW", "SGD", "HKD", "NOK", "SEK", "DKK",
     "NZD", "ZAR", "TRY",
+    "CZK", "HUF", "ISK", "PLN", "RON", "ILS", "MYR", "IDR", "PHP", "THB",
 ]
 
 
