@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Futures pipeline:
-  - Continuous front-month OHLCV for 38 contracts via yfinance (free, no key required)
+  - Continuous front-month OHLCV for 44 contracts via yfinance (free, no key required)
   - CFTC Commitments of Traders weekly positioning data (free, no key required)
 
 Outputs:
@@ -49,6 +49,7 @@ FUTURES = {
     "ZC=F":  ("Corn",                   "agriculture"),
     "ZS=F":  ("Soybeans",               "agriculture"),
     "ZW=F":  ("Wheat",                  "agriculture"),
+    "ZR=F":  ("Rough Rice",             "agriculture"),
     "KC=F":  ("Coffee",                 "agriculture"),
     "SB=F":  ("Sugar",                  "agriculture"),
     "CT=F":  ("Cotton",                 "agriculture"),
@@ -56,6 +57,11 @@ FUTURES = {
     "GF=F":  ("Feeder Cattle",          "agriculture"),
     "HE=F":  ("Lean Hogs",              "agriculture"),
     "DC=F":  ("Class III Milk",         "agriculture"),
+    "GDK=F": ("Class IV Milk",          "agriculture"),
+    "CB=F":  ("Cash-Settled Butter",    "agriculture"),
+    "GNF=F": ("Nonfat Dry Milk",        "agriculture"),
+    "DY=F":  ("Dry Whey",               "agriculture"),
+    "CSC=F": ("Cash-Settled Cheese",    "agriculture"),
     "OJ=F":  ("Orange Juice",           "agriculture"),
     "CC=F":  ("Cocoa",                  "agriculture"),
     "ZO=F":  ("Oats",                   "agriculture"),
