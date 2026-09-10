@@ -35,6 +35,7 @@ REQUEST_INTERVAL = 0.5  # courtesy delay between yfinance calls
 FUTURES = {
     # Energy
     "CL=F":  ("WTI Crude Oil",         "energy"),
+    "BZ=F":  ("Brent Crude Oil",        "energy"),
     "NG=F":  ("Natural Gas",            "energy"),
     "RB=F":  ("RBOB Gasoline",          "energy"),
     "HO=F":  ("Heating Oil",            "energy"),

@@ -33,6 +33,8 @@ SERIES = {
     "GASREGCOVW":     ("US Regular Gasoline (conv.)",  "weekly",   "USD/gallon",   "energy"),
     "GASDESW":        ("US On-Highway Diesel",         "weekly",   "USD/gallon",   "energy"),
     "DHOILNYH":       ("Heating Oil (New York)",       "daily",    "USD/gallon",   "energy"),
+    "POILDUBUSDM":    ("Dubai Crude Oil",              "monthly",  "USD/barrel",   "energy"),
+    "POILAPSPUSDM":   ("APSP Crude Oil (avg WTI/Brent/Dubai)", "monthly", "USD/barrel", "energy"),
 
     # --- Agriculture (IMF Global Prices via FRED) ---
     "PMAIZMTUSDM":    ("Corn",                         "monthly",  "USD/MT",       "agriculture"),
