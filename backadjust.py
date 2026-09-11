@@ -42,6 +42,8 @@ Usage:
   python backadjust.py --detect            # find affected symbols, write report
   python backadjust.py --build             # build the offset table
   python backadjust.py --build-close-corrections   # negative-price close fix
+  python backadjust.py --sweep-no-reference       # per-symbol reference pull over all
+                                                 #  ~25.5k symbols with no in-store reference
   python backadjust.py --verify            # re-check corrected prices vs yfinance
 """
 
@@ -84,21 +86,35 @@ CLOSE_CORRECTION_ALLOWLIST = ["BF/A"]
 YAHOO_SYMBOL_OVERRIDES = {"BF/A": "BF-A"}
 
 
-def _yf_history(symbol: str) -> pd.DataFrame:
-    """Unadjusted daily closes from yfinance, or an empty frame."""
+def _yf_history_detailed(symbol: str):
+    """Unadjusted daily closes from yfinance plus a diagnosis string.
+
+    Returns (frame, error) where error is None on success. A genuinely
+    delisted/missing ticker returns an empty frame with error="empty"; a
+    network/rate-limit failure returns an empty frame with the message. The
+    sweep (--sweep-no-reference) needs the distinction so a transient 429
+    doesn't permanently checkpoint a symbol as "checked".
+    """
     import yfinance as yf
     try:
         h = yf.Ticker(symbol).history(period="max", auto_adjust=False)
     except Exception as exc:
-        print(f"    {symbol}: yfinance error {str(exc)[:60]}")
-        return pd.DataFrame()
+        return pd.DataFrame(), str(exc)[:120]
     if h.empty or "Close" not in h.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), "empty"
     out = pd.DataFrame({
         "date": pd.to_datetime(h.index).tz_localize(None).strftime("%Y-%m-%d"),
         "ref_close": h["Close"].astype(float).values,
     })
-    return out[out["ref_close"] > 0]
+    return out[out["ref_close"] > 0], None
+
+
+def _yf_history(symbol: str) -> pd.DataFrame:
+    """Unadjusted daily closes from yfinance, or an empty frame."""
+    frame, error = _yf_history_detailed(symbol)
+    if error:
+        print(f"    {symbol}: yfinance error {error}")
+    return frame
 
 
 def detect_candidates() -> pd.DataFrame:
@@ -159,6 +175,42 @@ def _compress(offsets: pd.DataFrame) -> pd.DataFrame:
     return out[(out["n_days"] > 1) | (out["offset"].abs() > MIN_OFFSET)]
 
 
+def classify_one(symbol: str, ours: pd.DataFrame, ref: pd.DataFrame) -> dict:
+    """
+    Classify ONE symbol against a reference: is it clean, additively
+    back-adjusted (correct), or a reverse-split/ticker-reuse artifact whose
+    offset is NOT piecewise constant (reject)?
+
+    Shared by build_offsets() and sweep_no_reference() so the thresholds and
+    the verdict logic live in exactly one place. Returns a dict with
+    `status` in {no_history, no_compare, clean, corrected, rejected} plus the
+    stats the caller prints.
+    """
+    if ref.empty:
+        return {"status": "no_history"}
+    if ours.empty:
+        return {"status": "no_compare"}
+    m = ours.merge(ref, on="date", how="inner")
+    if m.empty:
+        return {"status": "no_compare"}
+    m["offset"] = (m["ref_close"] - m["close"]).round(4)
+    frac = float((m["offset"].abs() > MIN_OFFSET).mean())
+    if frac < MIN_AFFECTED_FRAC:
+        return {"status": "clean", "frac": frac}
+    steps = _compress(m[["date", "offset"]])
+    if len(steps) > MAX_STEPS:
+        # Not an additive back-adjustment -- see MAX_STEPS. Correcting these
+        # additively would corrupt them; they are reported, not corrected.
+        return {"status": "rejected", "frac": frac, "symbol": symbol,
+                "n_steps": len(steps), "n_compared": len(m),
+                "median_offset": round(float(m["offset"].median()), 4),
+                "median_ratio": round(float(
+                    (m["ref_close"] / m["close"].replace(0, pd.NA)).median()), 4)}
+    steps = steps.copy().reset_index(drop=True)
+    steps.insert(0, "symbol", symbol)
+    return {"status": "corrected", "frac": frac, "steps": steps}
+
+
 def build_offsets(symbols: list, verbose: bool = True) -> pd.DataFrame:
     """Derive the offset step function for each symbol against yfinance."""
     rows, rejected = [], []
@@ -173,37 +225,28 @@ def build_offsets(symbols: list, verbose: bool = True) -> pd.DataFrame:
             SELECT date, close FROM prices
             WHERE symbol = '{sym}' AND close IS NOT NULL ORDER BY date
         """)
-        if ours.empty:
-            continue
-        m = ours.merge(ref, on="date", how="inner")
-        if m.empty:
+        r = classify_one(sym, ours, ref)
+        if r["status"] == "no_compare":
             if verbose:
                 print(f"  [{i}/{len(symbols)}] {sym}: no overlapping dates")
             continue
-        m["offset"] = (m["ref_close"] - m["close"]).round(4)
-        frac = float((m["offset"].abs() > MIN_OFFSET).mean())
-        if frac < MIN_AFFECTED_FRAC:
+        if r["status"] == "clean":
             if verbose:
-                print(f"  [{i}/{len(symbols)}] {sym}: clean ({frac:.0%} offset rows)")
+                print(f"  [{i}/{len(symbols)}] {sym}: clean "
+                      f"({r['frac']:.0%} offset rows)")
             continue
-        steps = _compress(m[["date", "offset"]])
-        if len(steps) > MAX_STEPS:
-            # Not an additive back-adjustment -- see MAX_STEPS.
-            rejected.append({
-                "symbol": sym, "n_steps": len(steps), "n_compared": len(m),
-                "median_offset": round(float(m["offset"].median()), 4),
-                "median_ratio": round(float(
-                    (m["ref_close"] / m["close"].replace(0, pd.NA)).median()), 4),
-            })
+        if r["status"] == "rejected":
+            rejected.append({k: r[k] for k in
+                             ("symbol", "n_steps", "n_compared",
+                              "median_offset", "median_ratio")})
             if verbose:
                 print(f"  [{i}/{len(symbols)}] {sym}: REJECTED "
-                      f"({len(steps)} steps -- offset is not piecewise constant)")
+                      f"({r['n_steps']} steps -- offset is not piecewise constant)")
             continue
-        steps.insert(0, "symbol", sym)
-        rows.append(steps)
+        rows.append(r["steps"])
         if verbose:
-            print(f"  [{i}/{len(symbols)}] {sym}: {len(steps)} step(s), "
-                  f"offsets {sorted(steps['offset'].unique())[:5]}")
+            print(f"  [{i}/{len(symbols)}] {sym}: {len(r['steps'])} step(s), "
+                  f"offsets {sorted(r['steps']['offset'].unique())[:5]}")
     if rejected:
         rej = pd.DataFrame(rejected)
         os.makedirs(OUT_DIR, exist_ok=True)
@@ -335,6 +378,190 @@ def write_close_corrections(df: pd.DataFrame) -> str:
     return path
 
 
+_SWEEP_PROGRESS = os.path.join(OUT_DIR, "backadjust_sweep_progress.csv")
+# Deliberately does NOT match curated.py's `price_backadjust_*.parquet` glob:
+# it holds RESUME state only, and is merged into a dated file when the sweep
+# completes, so a mid-run `curated.py` never reads partial results.
+_SWEEP_WORK = os.path.join(OUT_DIR, "backadjust_sweep_work.parquet")
+
+# Terminal statuses: a symbol bearing one of these will not be re-pulled on a
+# resumed run. "error" is deliberately NOT terminal -- it means a transient
+# yfinance/network failure, retried on resume.
+_SWEEP_TERMINAL = {"corrected", "clean", "rejected", "no_history", "no_compare"}
+
+
+def no_reference_symbols() -> list:
+    """Symbols in `prices` with no in-store yfinance reference -- the
+    population the 2026-08-30 correction deliberately left untouched (see
+    TASKS.md "COME BACK TO THE UNCORRECTED SYMBOLS")."""
+    df = q.sql("""
+        SELECT DISTINCT p.symbol FROM prices p
+        LEFT JOIN (SELECT DISTINCT symbol FROM yfinance_universe_prices) y
+          ON p.symbol = y.symbol
+        WHERE y.symbol IS NULL ORDER BY p.symbol
+    """)
+    return df["symbol"].tolist()
+
+
+def _load_sweep_progress() -> dict:
+    if not os.path.exists(_SWEEP_PROGRESS) or os.path.getsize(_SWEEP_PROGRESS) == 0:
+        return {}
+    d = pd.read_csv(_SWEEP_PROGRESS)
+    if d.empty or "symbol" not in d.columns:
+        return {}
+    d = d[d["symbol"].astype(str) != "symbol"]       # drop any stray header row
+    if d.empty:
+        return {}
+    return dict(zip(d["symbol"].astype(str), d["status"].astype(str)))
+
+
+def _load_sweep_work() -> pd.DataFrame:
+    if not os.path.exists(_SWEEP_WORK):
+        return pd.DataFrame()
+    return pd.read_parquet(_SWEEP_WORK)
+
+
+def _merge_offsets(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
+    """Merge the work file with newly-derived steps, dedupe on
+    (symbol, start_date) keeping the newest derivation."""
+    if new.empty:
+        return existing
+    if existing.empty:
+        new = new.copy()
+        new["fetched_at"] = datetime.datetime.utcnow().isoformat()
+        return new
+    all_rows = pd.concat([existing, new], ignore_index=True)
+    all_rows["fetched_at"] = all_rows["fetched_at"].fillna(
+        datetime.datetime.utcnow().isoformat())
+    return (all_rows.sort_values("fetched_at")
+            .drop_duplicates(["symbol", "start_date"], keep="last")
+            .sort_values(["symbol", "start_date"])
+            .reset_index(drop=True))
+
+
+def sweep_no_reference(verbose: bool = True, checkpoint_every: int = 200,
+                       limit: "int | None" = None) -> int:
+    """
+    Per-symbol reference pull over every symbol in `prices` that has NO
+    in-store yfinance coverage (~25.5k), closing the deferred 2026-08-30 gap.
+
+    Same classification as build_offsets() (via classify_one) but resumable:
+    progress is checkpointed per symbol to _SWEEP_PROGRESS; derived offsets
+    accumulate in _SWEEP_WORK and are copied to a dated
+    `price_backadjust_<date>.parquet` (what curated.py consumes) only when the
+    whole population is done. A transient yfinance failure records status=error
+    and is retried on resume. Rejected (non-piecewise-constant) symbols are
+    unioned back into REJECTED_not_piecewise_constant.csv without clobbering
+    prior verdicts.
+
+    Cost: ~25.5k rate-limited calls (~0.6s + fetch each) -- run as a background
+    job, not interactively. Returns number of newly-corrected symbols.
+    """
+    symbols = no_reference_symbols()
+    done = _load_sweep_progress()
+    todo = [s for s in symbols if done.get(s) not in _SWEEP_TERMINAL]
+    if verbose:
+        print(f"no-reference population : {len(symbols):,}")
+        print(f"already terminal        : {len(symbols) - len(todo):,}")
+    if limit:
+        todo = todo[:limit]
+    if verbose:
+        print(f"to check this run       : {len(todo):,}")
+    if not todo:
+        print("sweep already complete -- no work to do")
+        return 0
+
+    work = _load_sweep_work()
+    os.makedirs(OUT_DIR, exist_ok=True)
+    n_corrected = 0
+    checkpoint = 0
+    rejected_rows = []
+    fresh = not os.path.exists(_SWEEP_PROGRESS) or os.path.getsize(_SWEEP_PROGRESS) == 0
+    for i, sym in enumerate(todo, 1):
+        time.sleep(REQUEST_PAUSE)
+        ref, error = _yf_history_detailed(sym)
+        ours = pd.DataFrame()
+        if not ref.empty:
+            ours = q.sql(f"""
+                SELECT date, close FROM prices
+                WHERE symbol = '{sym}' AND close IS NOT NULL ORDER BY date
+            """)
+        r = classify_one(sym, ours, ref)
+        status = r["status"]
+        if error and ref.empty:
+            status = "error"   # transient failure -- retry on resume
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: ERROR {error}")
+        elif status == "no_history":
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: no yfinance history")
+        elif status == "no_compare":
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: no overlapping dates")
+        elif status == "clean":
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: clean ({r['frac']:.0%})")
+        elif status == "rejected":
+            rejected_rows.append({k: r[k] for k in
+                                  ("symbol", "n_steps", "n_compared",
+                                   "median_offset", "median_ratio")})
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: REJECTED "
+                      f"({r['n_steps']} steps, offset not piecewise constant)")
+        else:
+            n_corrected += 1
+            if verbose:
+                print(f"  [{i}/{len(todo)}] {sym}: corrected "
+                      f"({len(r['steps'])} step(s))")
+            work = _merge_offsets(work, r["steps"])
+
+        checkpoint += 1
+        with open(_SWEEP_PROGRESS, "a", encoding="utf-8") as f:
+            if fresh:
+                f.write("symbol,status,fetched_at\n")
+                fresh = False
+            f.write(f"{sym},{status},"
+                    f"{datetime.datetime.utcnow().isoformat()}\n")
+
+        if checkpoint % checkpoint_every == 0:
+            if not work.empty:
+                work.to_parquet(_SWEEP_WORK, index=False)
+            if verbose:
+                print(f"  -- checkpoint {i}/{len(todo)}: {n_corrected} corrected, "
+                      f"{len(todo) - i} left")
+
+    # Merge rejected verdicts into the shared list without clobbering priors
+    # or their stats columns.
+    rej_path = os.path.join(OUT_DIR, "REJECTED_not_piecewise_constant.csv")
+    rej_prior = (pd.read_csv(rej_path) if os.path.exists(rej_path)
+                 else pd.DataFrame())
+    if rejected_rows:
+        rej_new = pd.DataFrame(rejected_rows)
+        if rej_prior.empty:
+            all_rej = rej_new
+        else:
+            all_rej = pd.concat(
+                [rej_prior, rej_new[~rej_new["symbol"].isin(rej_prior["symbol"].astype(str))]],
+                ignore_index=True)
+        all_rej.to_csv(rej_path, index=False)
+        if verbose:
+            print(f"{len(all_rej)} symbol(s) rejected / blocklisted -> {rej_path}")
+
+    if not work.empty:
+        work.to_parquet(_SWEEP_WORK, index=False)
+        if limit is None:
+            # Only a FULL run publishes the dated offset file curated.py
+            # consumes; a --limit smoke run persists work/progress so a later
+            # full run resumes seamlessly instead of writing a partial story.
+            path = write_offsets(work)
+            if verbose:
+                print(f"offsets -> {path}  ({len(work):,} step rows, "
+                      f"{work['symbol'].nunique():,} symbols)")
+    print(f"sweep complete: {n_corrected} symbol(s) newly corrected, "
+          f"{len(todo)} checked")
+    return n_corrected
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--detect", action="store_true",
@@ -344,6 +571,9 @@ def main():
     ap.add_argument("--build-close-corrections", action="store_true",
                     help="derive and write per-date close-correction table "
                          "(negative-price symbol fix)")
+    ap.add_argument("--sweep-no-reference", action="store_true",
+                    help="per-symbol reference pull over every symbol with no "
+                         "in-store yfinance reference (resumable background job)")
     ap.add_argument("--verify", action="store_true",
                     help="re-check corrected prices against yfinance")
     ap.add_argument("--limit", type=int, default=None,
@@ -402,6 +632,12 @@ def main():
         print(f"\n-> {path}  ({len(out):,} rows, "
               f"{out['symbol'].nunique():,} symbols)")
         return 0
+
+    if args.sweep_no_reference:
+        print("sweeping no-reference symbols (resumable; see "
+              "backadjust_sweep_progress.csv for checkpoints)...")
+        n = sweep_no_reference(limit=args.limit)
+        return 0 if n >= 0 else 1
 
     ap.print_help()
     return 0
