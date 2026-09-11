@@ -116,6 +116,34 @@ class TestEventStudy:
         with pytest.raises(RuntimeError):
             eb.event_study(ev, benchmark="BENCH", window=(0, 5))
 
+    def test_baseline_robust_to_broken_series(self, monkeypatch):
+        """A sub-penny OTC shell jumping 0.0005 -> 0.25 (+49,900%) in the
+        close matrix must not explode the unconditional baseline -- the
+        documented 3.36e+22 failure mode over a wide universe."""
+        dates = pd.bdate_range("2020-01-01", periods=120)
+        fine = pd.Series(100 * np.exp(np.cumsum(
+            np.random.default_rng(1).normal(0, 0.01, len(dates)))),
+            index=dates, name="FINE")
+        shell = pd.Series([0.0005] * 60 + [0.25] * 60,
+                          index=dates, name="SHELL")
+
+        def fake_matrix(symbols, start=None, end=None, price_table=None):
+            d = {"FINE": fine, "SHELL": shell}
+            return pd.DataFrame({s: d[s] for s in dict.fromkeys(symbols)
+                                 if s in d})
+
+        monkeypatch.setattr(eb, "load_close_matrix", fake_matrix)
+        res = eb.event_study(pd.DataFrame({"date": [dates[70]],
+                                           "symbol": ["FINE"]}),
+                             window=(0, 5))
+        b1 = res.baseline.get(1, np.nan)
+        # unbounded, the shell alone would contribute ~499 to that day's
+        # cross-sectional mean; the clip keeps it sane. This must be a small
+        # fraction (a real 1-day baseline is a few %), not an explosion.
+        assert abs(b1) < 1.0
+        assert res.horizons.loc[1, "baseline_pct"] == pytest.approx(
+            100 * b1, abs=0.1)
+
     def test_scenario_stop_loss_caps_loss(self, patched_prices):
         ev = pd.DataFrame({"date": patched_prices.index[[50, 100, 150, 200]]})
         sc = eb.scenario(ev, symbols="TEST", holding_days=21,
@@ -500,3 +528,20 @@ class TestLoadCloseMatrix:
         monkeypatch.setattr(eb.q, "load", fake_load)
         out = eb.load_close_matrix(["AAA"])
         assert out.empty
+
+    def test_impossible_closes_are_dropped(self, monkeypatch):
+        """Zero/negative/inf/nan closes (OTC shells, reverse-split artifacts,
+        Schwab zero-padding) are filtered at load -- they must never reach a
+        cross-sectional return. Mirrors validate.py's close > 0 rule."""
+        df = self._frame({
+            "symbol": ["AAA"] * 6,
+            "date": list(pd.bdate_range("2024-01-02", periods=6)),
+            "close": [10.0, -3.0, 0.0, np.inf, 12.0, np.nan],
+        })
+
+        def fake_load(table, symbol=None, start=None, end=None, **kw):
+            return df if table == "tiingo_prices" else pd.DataFrame()
+
+        monkeypatch.setattr(eb.q, "load", fake_load)
+        out = eb.load_close_matrix(["AAA"])
+        assert out["AAA"].tolist() == pytest.approx([10.0, 12.0])

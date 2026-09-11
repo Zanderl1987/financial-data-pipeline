@@ -75,6 +75,30 @@ ADV_SQRT_LAW_K: float = 0.6
 _PRICE_TABLES = ("tiingo_prices", "yfinance_universe_prices", "prices",
                  "market_history", "sector_etfs")
 
+# Clip bound for event_study()'s UNCONDITIONAL baseline: the cross-sectional
+# mean daily return winsorized to +/- this many percent. A 10x move is ~40
+# standard deviations above AAPL's realized daily vol -- far beyond any
+# legitimate single-day move in the store (the largest real ones are a few
+# hundred % on reverse-split artifacts) -- so clipping at this magnitude only
+# ever touches impossible/garbage values, never real ones. Without it a single
+# broken OTC/shell series (sub-penny close -> jump) explodes the baseline.
+_DAILY_RET_CLIP = 10.0   # +/-1000%
+
+
+def _clean_close(s: pd.Series) -> pd.Series:
+    """Drop impossible close prices (non-finite or <= 0) from a close series.
+
+    Mirrors validate.py's `positive_cols` close > 0 rule: zero/negative
+    closes are a documented corruption (OTC shells, reverse-split artifacts,
+    Schwab zero-padding for holidays), not legitimate prices. Filtering them
+    at load is what keeps one broken series from poisoning every
+    cross-sectional return computed from the matrix -- e.g. event_study()'s
+    unconditional baseline. Applied in both load_close() and
+    load_close_matrix(), the two price-loading paths in this module.
+    """
+    s = s[np.isfinite(s)]
+    return s[s > 0]
+
 
 # ------------------------------------------------------------------ prices
 
@@ -114,7 +138,7 @@ def load_close(symbol: str, start: "str | None" = None,
         df = (df.assign(date=pd.to_datetime(df["date"]))
                 .drop_duplicates("date").sort_values("date"))
         df = _split_only_adjust(df)
-        s = df.set_index("date")["close"].astype(float).dropna()
+        s = _clean_close(df.set_index("date")["close"].astype(float))
         if len(s) > len(best):
             s.name = symbol
             best = s
@@ -160,7 +184,7 @@ def load_close_matrix(symbols, start=None, end=None,
                 .drop_duplicates(["symbol", "date"]))
         for sym, g in df.groupby("symbol", sort=False):
             g = _split_only_adjust(g.sort_values("date"))
-            s = g.set_index("date")["close"].astype(float).dropna()
+            s = _clean_close(g.set_index("date")["close"].astype(float))
             if len(s) > len(best.get(sym, pd.Series(dtype=float))):
                 s.name = sym
                 best[sym] = s
@@ -432,8 +456,14 @@ def event_study(
     used = pd.DataFrame(meta)
     mean_car = car.mean(axis=0)
 
-    # unconditional base rate: mean h-day forward return over all days/symbols
-    daily = closes.pct_change()
+    # unconditional base rate: mean h-day forward return over all days/symbols.
+    # Daily returns are winsorized to +/-_DAILY_RET_CLIP first so one broken
+    # series (sub-penny OTC shell, reverse-split artifact) can't explode the
+    # cross-sectional mean -- the documented 3.36e+22 failure mode. The clip
+    # only ever binds on impossible moves, never legitimate ones (see the
+    # constant's docstring). Non-positive/inf closes are already gone (they
+    # never survive _clean_close in the loaders).
+    daily = closes.pct_change().clip(-_DAILY_RET_CLIP, _DAILY_RET_CLIP)
     baseline = pd.Series(
         {h: float((daily.mean(axis=1, skipna=True) + 1).rolling(h).apply(np.prod).mean() - 1)
          for h in HORIZONS if h <= post}, name="baseline")
