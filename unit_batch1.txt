@@ -1,0 +1,10 @@
+donchian_atr_trail_btc
+dual_bollinger_band_cross
+fractal_memory_strategy
+fvg_bos_confirmation
+ghocsiv7_gap_filling_strategy
+high_activity_penny_stock
+ihvpg6ts_stop_loss_and_take_profit_in_example
+ineficient_market_123_pattern
+joey_stochrsi_atr
+kama_adaptive_strategy

@@ -1,0 +1,17 @@
+{
+  "run_ts": "20260908T155428Z",
+  "strategies": [
+    "bollinger_bands_simple",
+    "optimized_doji_breakout_short",
+    "rsi_bb_inside_strategy"
+  ],
+  "holdout_start": "2018-01-01",
+  "n_trades": 2144,
+  "n_long": 580,
+  "n_short": 1564,
+  "total_pnl_dollars": -370103.21,
+  "win_rate_pct": 52.5,
+  "avg_pnl_pct": -0.26,
+  "median_days_held": 5.0,
+  "n_symbols": 91
+}

@@ -1,0 +1,200 @@
+{
+ "q1hxs0v6_liquidity_void_detector_zeiierman": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "q9fxt5n6_ema_pullback_adx_cvd_divergence": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "trend"
+ },
+ "qtkfi42t_macd_x_overlay_more_than_macd_by_dgt": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "breakout"
+ },
+ "rbeervr5_rolling_z_score_trend_quantalgo": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "rkhoyhji_btc_scalper_t3_volume_filter": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "sl3hurjg_fast_scalper_with_stops": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "sxo2gpsm_new_tott_strategy": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "tocozxot_the_flasher": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "tpmkahup_ema_cross": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "ukgkppqm_dynamic_volume_profile_oscillator_alphaalgos": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "breakout"
+ },
+ "undertow_backtest": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "vlbyb1vo_aroon_strategy_pro": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "wlsrg7cx_best_sma_finder": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "wrexdud4_index_option_selling": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "x5m5zevx_code_a_terminal_core": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "xaeg4zjg_how_to_set_backtest_time_ranges": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "zjzb6mii_amit_eth_strategy": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "trend"
+ },
+ "zrdrgzl3_": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ }
+}

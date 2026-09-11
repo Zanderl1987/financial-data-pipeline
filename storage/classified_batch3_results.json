@@ -1,0 +1,222 @@
+{
+ "gamszeig_logarithmic_moving_average_lma_quantalgo": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "gd1gdoyi_intersection_value_functions": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "gfzmy44j_amit_eth_strategy": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "trend"
+ },
+ "gjzhjwka_combined_institutional_pro_manager": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "i5qjdpxt_redk_everex_effort_versus_results_explorer": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "breakout"
+ },
+ "iodel1o6_cnps4_bb_sma": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "j6ku7oka_institutional_flow_strategy": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "jdtmt9ga_smb_fashionably_late_scalp_9ema_x_vwap": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "kcttv29i_option_point": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "kq3f7sfa_": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "kqpraxem_backtest_template_backtest_terminal": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "kw2v4sni_sma_4_sma_30": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "l6nreqzb_adaptive_trend_classification_moving_averages_investorunknown": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "ma35whu5_r_r_trading_system_framework": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "trend"
+ },
+ "mcwal9oa_fast_scalper_with_stops": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "noqlajrw_fast_scalper_with_stops": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "nwiweukt_": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "o52gurxf_redk_momentum_bars_redk_mo_bars": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "pbphzfy8_option_selling": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "hybrid"
+ },
+ "px2zfaxs_simple_breakout_strategy_santana": {
+  "n_trades": 4818,
+  "pnl_p": 1.0,
+  "pnl_p_5bps": 1.0,
+  "pnl_p_20bps": 1.0,
+  "profit_factor": 1.205,
+  "win_rate": 34.6,
+  "total_pnl_net": 377008.59,
+  "cost_fragile": false,
+  "mechanism_family": "breakout"
+ }
+}
