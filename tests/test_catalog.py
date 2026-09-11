@@ -55,6 +55,7 @@ EXPECTED_TABLES = [
     "world_bank",
     # Futures + COT
     "futures",
+    "agriculture",
     "cot",
     # Short interest
     "short_interest",
@@ -528,6 +529,9 @@ class TestNoOrphanedTables:
     NOT_PIPELINE_PRODUCED = {
         # written by event_backtest.py as a price cache, not fetched
         "yfinance_universe_prices",
+        # yfinance ag-futures OHLCV fetched by the backtester's AgProvider
+        # (external repo, C:\Users\zande), synced into storage/raw/agriculture
+        "agriculture",
     }
 
     def test_every_catalog_table_has_a_producing_pipeline(self):

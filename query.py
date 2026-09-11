@@ -38,6 +38,8 @@ Run directly to see a full summary:
     python query.py
 """
 
+from __future__ import annotations
+
 import glob as _glob_mod
 import os
 import duckdb
@@ -122,6 +124,7 @@ CATALOG: dict[str, str] = {
     "gas_retail":              _glob("gas_prices/retail/**/*.parquet"),
     # ── Futures + COT ───────────────────────────────────────────────────────
     "futures":                 _glob("futures/**/*.parquet"),
+    "agriculture":             _glob("agriculture/**/*.parquet"),
     "cot":                     _glob("cot/**/*.parquet"),
     # ── Finnhub events ──────────────────────────────────────────────────────
     "earnings_calendar":       _glob("finnhub/earnings_calendar/**/*.parquet"),

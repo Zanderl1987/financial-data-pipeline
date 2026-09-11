@@ -165,6 +165,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["symbol", "date", "close"],
         "date_col":    "date",
     },
+    "agriculture": {
+        "required":    ["symbol", "date", "open", "high", "low", "close", "volume"],
+        "critical_nn": ["symbol", "date", "close", "volume"],
+        "date_col":    "date",
+        "positive_cols": ["open", "high", "low", "close"],
+    },
     "cot": {
         "required":    ["date"],
         "critical_nn": ["date"],

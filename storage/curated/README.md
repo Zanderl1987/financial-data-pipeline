@@ -16,7 +16,7 @@ size_categories:
 
 # Financial Data Pipeline — Full Curated Snapshot
 
-A comprehensive financial dataset covering **227 tables** and **133,900,496 rows** across macro, market, and alternative data sources.
+A comprehensive financial dataset covering **228 tables** and **133,965,944 rows** across macro, market, and alternative data sources.
 
 ## Data Sources
 
@@ -24,7 +24,7 @@ A comprehensive financial dataset covering **227 tables** and **133,900,496 rows
 |---|---|---|
 | Market Prices | 18 | Tiingo, Schwab, Finnhub, CBOE |
 | Macro & Economic | 87 | FRED, BLS, BEA, Treasury, EIA |
-| Fundamentals | 76 | SEC EDGAR, Finnhub, SimFin, Alpha Vantage |
+| Fundamentals | 77 | SEC EDGAR, Finnhub, SimFin, Alpha Vantage |
 | Alternative Data | 32 | Congressional trades, insider transactions, patents, OpenFDA |
 | Crypto & Forex | 8 | CoinGecko, Tiingo |
 | Index & Holdings | 4 | Wikipedia, BlackRock, EdgarTools, OpenFIGI |
@@ -39,7 +39,7 @@ from datasets import load_dataset
 ds = load_dataset("ZanderL1337/financial-data-pipeline", trust_remote_code=True)
 
 # Load specific table
-df = ds["alpha_vantage_dividends"].to_pandas()
+df = ds["agriculture"].to_pandas()
 ```
 
 Or load individual parquet files directly:
@@ -86,11 +86,11 @@ Full source, tests, and architecture docs: https://github.com/Zanderl1987/financ
 
 ## Build Info
 
-- **Generated**: 2026-09-10
+- **Generated**: 2026-09-11
 - **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
-- **Tables**: 227
-- **Total Rows**: 133,900,496
-- **Total Size**: 4810.3 MB
+- **Tables**: 228
+- **Total Rows**: 133,965,944
+- **Total Size**: 4812.2 MB
 
 ## License
 

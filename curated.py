@@ -127,6 +127,8 @@ KEYS: dict[str, list[str]] = {
     "sector_etfs":            ["symbol", "date"],
     "schwab_quotes":          ["symbol"],            # snapshot table
     "futures":                ["symbol", "date"],
+    # Backtester AgProvider (external repo) — one OHLCV bar per symbol per day
+    "agriculture":            ["symbol", "date"],
     # FRED-style series — one value per series per date
     "macro":                  ["series_id", "date"],
     "commodities":            ["series_id", "date"],
