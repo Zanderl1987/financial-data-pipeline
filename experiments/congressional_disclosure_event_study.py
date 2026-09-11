@@ -91,6 +91,36 @@ def build_events(min_gap_days=0):
     return events
 
 
+def _sp500_pit_filter(events, membership=None):
+    """
+    Survivorship-bias guard (2026-09-11): keep only events whose symbol was
+    an ACTUAL S&P 500 member on its disclosure date, using the point-in-time
+    membership reconstruction (historical_constituents() semantics, vectorized
+    over the whole sp500_membership changelog: start <= date < end, both
+    bounds open when NULL -- matching the as-of query the membership
+    pipeline's tests assert). Current-flag membership would be look-ahead;
+    this is the within-log universe the index constituents actually trade.
+    `membership` is injectable for tests (default: the sp500_membership table).
+    """
+    ev = events.copy()
+    ev["date"] = pd.to_datetime(ev["date"])
+    if membership is None:
+        membership = (q.load("sp500_membership")
+                      [["symbol", "start_date", "end_date"]])
+    mem = (membership[["symbol", "start_date", "end_date"]]
+           .dropna(subset=["symbol"]).drop_duplicates("symbol").copy())
+    mem["start_date"] = pd.to_datetime(mem["start_date"], errors="coerce")
+    mem["end_date"] = pd.to_datetime(mem["end_date"], errors="coerce")
+    merged = ev.merge(mem, on="symbol", how="left", indicator=True)
+    in_idx = (
+        (merged["_merge"] == "both")
+        & (merged["start_date"].isna() | (merged["start_date"] <= merged["date"]))
+        & (merged["end_date"].isna() | (merged["end_date"] > merged["date"]))
+    )
+    keep = merged.loc[in_idx, ev.columns]
+    return keep.reset_index(drop=True)
+
+
 class _SideResult:
     """
     A per-side view of a combined EventStudyResult.
@@ -186,9 +216,19 @@ def main():
     ap.add_argument("--benchmark", default="SPY")
     ap.add_argument("--start", default=None,
                     help="only use disclosures on/after this date")
+    ap.add_argument("--sp500-only", action="store_true",
+                    help="keep only symbols that were S&P 500 members on "
+                         "their disclosure date (survivorship-bias guard, "
+                         "point-in-time membership)")
     args = ap.parse_args()
 
     events = build_events()
+    if args.sp500_only:
+        n_before = len(events)
+        events = _sp500_pit_filter(events)
+        print(f"  -> --sp500-only (PIT membership): {n_before:,} -> "
+              f"{len(events):,} events kept ("
+              f"{100 * len(events) / n_before:.1f}%)")
     if args.start:
         events = events[events["date"] >= args.start]
         print(f"  -> after --start {args.start}: {len(events):,} events")
@@ -213,9 +253,10 @@ def main():
     print(f"  aligned {res_all.n_events:,} events to the price store")
 
     results = {}
+    suffix = " (SP500 members only)" if args.sp500_only else ""
     for side in ("buy", "sell"):
         sub = _slice_side(res_all, side)
-        results[side] = (sub, report(f"DISCLOSED {side.upper()}", sub, side))
+        results[side] = (sub, report(f"DISCLOSED {side.upper()}{suffix}", sub, side))
 
     print(f"\n{'=' * 78}")
     print("VERDICT")

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Offline tests for congressional_trades_pipeline.
 
 No network: the House index is built as an in-memory ZIP and the Senate detail
@@ -13,9 +13,56 @@ import pandas as pd
 import pytest
 
 import congressional_trades_pipeline as ctp
+from experiments.congressional_disclosure_event_study import _sp500_pit_filter
 
 
-# ── Amount brackets ────────────────────────────────────────────────────────
+# â”€â”€ Survivorship-bias filter (congressional_disclosure_event_study) â”€â”€â”€â”€â”€â”€â”€â”€
+
+class TestSp500PitFilter:
+    """_sp500_pit_filter keeps only events that were index members at their
+    disclosure date (point-in-time membership, open NULL bounds), so the
+    event study's universe is free of current-flag survivorship."""
+
+    MEM = pd.DataFrame({
+        "symbol": ["AAL", "INTC"],
+        "start_date": [pd.Timestamp("2015-03-23"),
+                       pd.Timestamp("1976-07-01")],
+        "end_date": [pd.Timestamp("2024-09-23"),
+                     pd.NaT],
+    })
+
+    def _events(self):
+        return pd.DataFrame({
+            "symbol": ["AAL", "AAL", "AAL", "INTC", "ZZZZ"],
+            "date": ["2014-01-15", "2020-06-01", "2025-01-10",
+                     "2010-04-05", "2020-06-01"],
+            "side": ["buy"] * 5,
+        })
+
+    def test_open_and_closed_interval_bounds(self):
+        out = _sp500_pit_filter(self._events(), self.MEM)
+        # AAL in-window, INTC open-ended member, AAL pre-entry and
+        # post-exit dropped, unknown symbol dropped.
+        assert sorted(out["symbol"].tolist()) == ["AAL", "INTC"]
+
+    def test_na_start_date_is_an_open_lower_bound(self):
+        mem = pd.DataFrame({
+            "symbol": ["AAA"],
+            "start_date": [pd.NaT],
+            "end_date": [pd.NaT],
+        })
+        out = _sp500_pit_filter(
+            pd.DataFrame({"symbol": ["AAA"], "date": ["1980-01-01"],
+                          "side": ["buy"]}), mem)
+        assert len(out) == 1
+
+    def test_empty_events_returns_empty(self):
+        out = _sp500_pit_filter(
+            pd.DataFrame(columns=["symbol", "date", "side"]), self.MEM)
+        assert out.empty
+
+
+# â”€â”€ Amount brackets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestParseAmountRange:
 
@@ -42,7 +89,7 @@ class TestParseAmountRange:
         assert ctp.parse_amount_range("") == (None, None, None)
 
 
-# ── Output contract ────────────────────────────────────────────────────────
+# â”€â”€ Output contract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestFinalize:
 
@@ -88,7 +135,7 @@ class TestFinalize:
         assert "month" not in df.columns
 
 
-# ── House index ────────────────────────────────────────────────────────────
+# â”€â”€ House index â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 HOUSE_XML = """<?xml version="1.0" encoding="utf-8"?>
 <FinancialDisclosure>
@@ -150,7 +197,7 @@ class TestFetchHouseIndex:
         assert ctp.fetch_house_index(None, 2026) == []
 
 
-# ── House ticker extraction ────────────────────────────────────────────────
+# â”€â”€ House ticker extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestHouseTickerPatterns:
 
@@ -196,7 +243,7 @@ class TestHouseColumnAssignment:
         assert ctp._assign_column(x, self.COLS) == expected
 
 
-# ── Senate detail view ─────────────────────────────────────────────────────
+# â”€â”€ Senate detail view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 SENATE_HTML = """
 <html><body>
@@ -269,7 +316,7 @@ class TestParseSenatePtr:
         assert ctp.parse_senate_ptr(html, FILING) == []
 
 
-# ── Checkpoint resume ──────────────────────────────────────────────────────
+# â”€â”€ Checkpoint resume â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestCheckpoint:
 
