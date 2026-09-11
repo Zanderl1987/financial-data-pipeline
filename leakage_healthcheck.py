@@ -20,13 +20,13 @@ event_backtest.scenario() have an entry_lag switch to misconfigure at all:
     there is no entry_lag parameter there to ablate. This is a stronger
     guarantee than a health check could give, not a gap in this script's
     coverage.
-  * California Form 700 disclosures are OUT OF SCOPE for now -- the filings
-    disclose entity NAMES, not tickers, and no name-to-ticker resolution
-    exists yet in this repo. Add it here once one does.
   * Congressional trades (STOCK Act, real tickers, disclosure_date-keyed) is
-    the one ready roster entry today. Add more studies to ROSTER as they are
-    built -- each entry only needs a zero-arg callable returning a
-    [symbol, date] DataFrame plus the scenario() kwargs that study uses.
+    a ready roster entry. California Form 700 joined 2026-09-11 -- its filings
+    disclose entity NAMES, resolved to tickers via name_to_ticker.NameResolver
+    (see experiments/california_disclosures_event_study.py). Add more studies
+    to ROSTER as they are built -- each entry only needs a zero-arg callable
+    returning a [symbol, date] DataFrame plus the scenario() kwargs that study
+    uses.
 
 Usage:
   C:\ProgramData\anaconda3\python.exe leakage_healthcheck.py
@@ -52,6 +52,13 @@ def _congressional_events(side: str) -> pd.DataFrame:
     return events[["symbol", "date"]].reset_index(drop=True)
 
 
+def _california_events() -> pd.DataFrame:
+    from experiments.california_disclosures_event_study import build_events
+
+    events, _detail = build_events()
+    return events[["symbol", "date"]].reset_index(drop=True)
+
+
 # name -> (zero-arg events builder returning [symbol, date], scenario kwargs
 # held fixed across the safe/leaky runs). Add a study here once it has a
 # real [symbol, date] event table and goes through event_backtest.scenario()
@@ -62,6 +69,9 @@ ROSTER = {
         dict(holding_days=21, price_table="prices")),
     "congressional_disclosures_sell": (
         lambda: _congressional_events("sell"),
+        dict(holding_days=21, price_table="prices")),
+    "california_disclosures_holding": (
+        _california_events,
         dict(holding_days=21, price_table="prices")),
 }
 
