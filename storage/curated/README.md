@@ -16,7 +16,7 @@ size_categories:
 
 # Financial Data Pipeline — Full Curated Snapshot
 
-A comprehensive financial dataset covering **228 tables** and **133,965,944 rows** across macro, market, and alternative data sources.
+A comprehensive financial dataset covering **228 tables** and **134,627,700 rows** across macro, market, and alternative data sources.
 
 ## Data Sources
 
@@ -89,8 +89,8 @@ Full source, tests, and architecture docs: https://github.com/Zanderl1987/financ
 - **Generated**: 2026-09-11
 - **Pipeline**: financial-data-pipeline (https://github.com/Zanderl1987/financial-data-pipeline)
 - **Tables**: 228
-- **Total Rows**: 133,965,944
-- **Total Size**: 4812.2 MB
+- **Total Rows**: 134,627,700
+- **Total Size**: 4829.4 MB
 
 ## License
 
