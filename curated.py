@@ -115,6 +115,12 @@ def _backfill_snapshot_date(table: str, df: pd.DataFrame) -> pd.DataFrame:
 # later runs collapse to one, which already removes the bulk of the redundancy
 # without risking data loss from a wrong key guess.
 KEYS: dict[str, list[str]] = {
+    # CBOE strategy benchmark indices — one level per index per day
+    "cboe_strategy_indices":  ["date", "index_name"],
+    # BIS policy rates — the same country is published at both daily and
+    # monthly frequency, so frequency is part of the key or the monthly row
+    # would collide with the daily one on month starts.
+    "policy_rates":           ["date", "ref_area", "frequency"],
     # Fed SOMA holdings — one row per security per weekly report
     "fed_soma":               ["as_of_date", "cusip"],
     # USDA NASS — one value per commodity/series/date/period, some series

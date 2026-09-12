@@ -595,6 +595,29 @@ SCHEMAS: dict[str, dict] = {
         "value_ranges": {"close": (0, 400)},
         "positive_cols": ["close"],
     },
+    # CBOE option-strategy benchmark indices (PUT, BXM, CNDR, ...). These are
+    # index LEVELS, not volatility points, so the 0-400 range above would be
+    # wrong here: PUT passed 900 in 2007 and keeps compounding.
+    "cboe_strategy_indices": {
+        "required":    ["date", "index_name", "close", "fetched_at"],
+        "critical_nn": ["date", "index_name", "close"],
+        "date_col":    "date",
+        "value_ranges": {"close": (0, 100_000)},
+        "positive_cols": ["close"],
+    },
+    # BIS central bank policy rates. The bounds look absurd and are correct:
+    # the floor is negative because the SNB, ECB and BoJ ran negative policy
+    # rates (observed minimum -0.75), and the ceiling accommodates
+    # hyperinflation-era overnight rates -- Brazil's annualized policy rate
+    # peaked near 790,799% in the early 1990s and Croatia's near 2,790% in
+    # 1993. Verified against the source 2026-09-12; these are real
+    # observations, not parse errors.
+    "policy_rates": {
+        "required":    ["date", "ref_area", "frequency", "rate", "fetched_at"],
+        "critical_nn": ["date", "ref_area", "rate"],
+        "date_col":    "date",
+        "value_ranges": {"rate": (-10, 1_000_000)},
+    },
     # ── FDIC bank institutions ────────────────────────────────────────────────
     "fdic_institutions": {
         "required":    ["cert", "instname", "asset", "fetched_at"],

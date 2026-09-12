@@ -46,6 +46,8 @@ PIPELINE_MODULES = [
     "fama_french_pipeline",
     "shiller_pipeline",
     "cboe_pipeline",
+    "cboe_strategy_pipeline",
+    "policy_rates_pipeline",
     "fdic_pipeline",
     "fear_greed_pipeline",
     "nasdaq_data_link_pipeline",

@@ -106,6 +106,8 @@ chains are snapshot-only, hence accumulating `schwab_options` daily matters.
 | `shiller_pipeline.py` | `shiller_cape` | Robert Shiller's monthly CAPE/price/earnings/dividends back to 1871 (Yale) | — |
 | `fama_french_pipeline.py` | `ff_factors`, `ff_industry` | 5-factor model (Mkt-RF, SMB, HML, RMW, CMA) + momentum + 48 industry portfolios | — |
 | `cboe_pipeline.py` | `cboe_volatility` | VIX, VIX9D, VIX3M, VIX6M, VVIX, SKEW daily OHLC | — |
+| `cboe_strategy_pipeline.py` | `cboe_strategy_indices` | CBOE option-strategy benchmark levels: PUT (PutWrite), BXM/BXMD (BuyWrite), BXD, BXN, CLL (collar), CNDR, BFLY, CMBO, WPUT, PUTR. BXMD/CNDR/BFLY daily from 1986; PUT daily from 2007 (sparse before) | OK |
+| `policy_rates_pipeline.py` | `policy_rates` | BIS central bank policy rates (WS_CBPOL), 39 reference areas incl. the euro area, daily + monthly, from 1945. Unblocks cross-currency carry | OK |
 | `tsa_pipeline.py` | `tsa_checkpoint` | Daily TSA checkpoint traveler counts — leading indicator of travel demand | — |
 | `real_estate_pipeline.py` | `fhfa_hpi`, `zillow_zhvi`, `zillow_zori` | FHFA House Price Index (national/state/MSA) + Zillow home value/rent indices | — |
 | `shipping_pipeline.py` | `shipping_gscpi`, `shipping_freight_ppi` | NY Fed Global Supply Chain Pressure Index + FRED freight PPI series | `FRED_API_KEY` |

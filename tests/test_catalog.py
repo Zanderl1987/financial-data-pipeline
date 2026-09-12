@@ -188,6 +188,10 @@ EXPECTED_TABLES = [
     "shiller_cape",
     # CBOE volatility indices
     "cboe_volatility",
+    # CBOE option-strategy benchmark indices
+    "cboe_strategy_indices",
+    # BIS central bank policy rates
+    "policy_rates",
     # FDIC banking data
     "fdic_institutions",
     "fdic_financials",

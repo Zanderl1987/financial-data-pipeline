@@ -232,6 +232,12 @@ CATALOG: dict[str, str] = {
     "shiller_cape":            _glob("shiller/**/*.parquet"),
     # ── CBOE volatility indices (VIX, VIX9D, VIX3M, VIX6M, VVIX, SKEW) ─────
     "cboe_volatility":         _glob("cboe/**/*.parquet"),
+    # ── CBOE option-strategy benchmark indices (PUT, BXM, CNDR, ...) ─────────
+    # Separate raw dir from cboe/ so the volatility glob above does not absorb
+    # them: these are strategy total-return levels, not volatility gauges.
+    "cboe_strategy_indices":   _glob("cboe_strategy/**/cboe_strategy_indices_*.parquet"),
+    # ── BIS central bank policy rates (WS_CBPOL), 39 areas, daily + monthly ──
+    "policy_rates":            _glob("policy_rates/**/policy_rates_*.parquet"),
     # ── FDIC bank financials, institutions, failures ──────────────────────────
     "fdic_institutions":       _glob("fdic/institutions/**/*.parquet"),
     "fdic_financials":         _glob("fdic/financials/**/*.parquet"),
