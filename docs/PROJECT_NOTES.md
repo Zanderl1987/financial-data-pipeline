@@ -310,3 +310,8 @@ verified queryable via `query.py`.
 - Verified: 264 trades, 61.7% win rate, +$247k P&L, registered 4 rows
 - Task Scheduler wrapper created (`%LOCALAPPDATA%\Temp\opencode\daily_paper_trade.bat`)
 - Needs admin to install schtasks; ready for daily automation
+
+**E1 — Public Streamlit dashboard (2026-09-12, `26ec177`):**
+- `dashboard.py`: Streamlit app with 5 pages (Overview, Data Freshness, Signal Health, Eval Registry, Survivor Portfolio)
+- Reuses `freshness_dashboard.py`, `query.py`, `evaluation.registry`
+- Run: `streamlit run dashboard.py`

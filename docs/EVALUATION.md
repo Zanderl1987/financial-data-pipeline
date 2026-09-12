@@ -18,6 +18,9 @@ C:\ProgramData\anaconda3\python.exe evaluate.py --input-parquet my_sig.parquet -
 
 # report (reads artifacts only)
 C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest my_sig
+
+# dashboard (Streamlit)
+streamlit run dashboard.py
 ```
 
 ## Contracts (evaluation/contracts.py)
