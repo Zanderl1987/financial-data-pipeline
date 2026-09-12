@@ -146,8 +146,9 @@ data-mined through the Harvey-Liu haircut before trusting.
 
 ## Backtest priority (what fits this pipeline, first)
 
-Our data (see CLAUDE.md / docs/PIPELINE_CATALOG.md): 44 futures 1997-10+, 2,285 Russell-3000-ish
-equities 1962+ (**missing 285 names ≈ all mega caps — see item 3 below**), deep
+Our data (see CLAUDE.md / docs/PIPELINE_CATALOG.md): 44 futures 1997-10+, 2,570 Russell-3000-ish
+equities 1962+ (**285-name mega-cap hole backfilled 2026-09-12; alive-2026 snapshot caveat
+remains — see item 3 below**), deep
 `market_history` 1927+, forex 1999+, options 2023-12+ plus full VIX/strategy-index history
 (docs/OPTIONS_DATA_SOURCES.md), daily bars (some intraday via schwab, short retention),
 fundamentals ~1990s+, short_interest/borrow fees.
@@ -166,18 +167,23 @@ fundamentals ~1990s+, short_interest/borrow fees.
    book. Writeup: `experiments/2026-09-12_carry-futures.md`. Caveat: proxy (roll-gap
    basis), not KMPV F1/F2 carry — needs back-adjusted store for the exact version.
 3. **Cross-sectional momentum / reversal / low-vol on `yfinance_universe_prices`** — OSAP
-   patterns; intraday momentum if we accumulate schwab 1-min bars. FIRST RUN DONE but
-   INVALID: `yfinance_universe_prices` is missing 285 Russell-3000 names (≈all the
-   mega caps: AAPL, MSFT, AMZN, NVDA, GOOG, JPM, XOM, PG, …) — effectively a
-   small/mid-cap, alive-only-2026 universe. UMD (12-1/6-1/12-0 deciles) and KLN both
-   come out flat-to-negative BECAUSE OF the universe hole, not the strategy. **Do not
-   read them as momentum/seasonality verdicts.** BLOCKED until the 285-name backfill
-   lands. Writeup: `experiments/2026-09-12_equity-factors-sweep.md`.
+   patterns; intraday momentum if we accumulate schwab 1-min bars. UMD TESTED twice
+   (2026-09-12): first run was INVALID (table was missing 285 Russell-3000 names ≈ all
+   mega caps — small/mid-cap, alive-2026 slice), then **after the 285-name backfill the
+   full 2,570-name universe is still flat** — r12-1 Sharpe -0.11 (t -0.62), r6-1
+   -0.05, r12-0 -0.03. Equal-weight decile UMD is genuinely absent in this sample;
+   residual caveat is alive-2026 survivorship (no delistings → short-leg return
+   inflated, spread compressed) — the delisting-inclusive panel upgrade is tracked in
+   TASKS.md before declaring momentum dead. Writeup:
+   `experiments/2026-09-12_equity-factors-sweep.md`. NOT a priority until the
+   delisting panel exists.
 4. **OSAP / global-q long-short monthly portfolios** — pull the CSV dumps and run through
    `evaluation/ic.py` + deflated Sharpe as a replication sanity check before trading any.
 5. **101 Alphas on the equities universe** — fast win, needs volume; audit α's daily turnover.
-6. **Return seasonalities (KLN)** — FIRST RUN DONE but same universe-hole caveat as UMD
-   above (Sharpe 0.01, t 0.88). Re-run after the 285-name backfill.
+6. **Return seasonalities (KLN)** — TESTED twice (2026-09-12): flat on the broken
+   universe (Sharpe 0.01) and still flat after the 285-name backfill (Sharpe -0.00,
+   t -0.25). Same live-2026 survivorship caveat as UMD above; not a priority until the
+   delisting-inclusive panel exists.
 7. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
    FINRA NMS restore is the unblocker.
 8. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`

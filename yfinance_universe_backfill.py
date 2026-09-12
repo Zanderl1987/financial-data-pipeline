@@ -120,7 +120,11 @@ def main(batch_size=DEFAULT_BATCH_SIZE, progress_file=PROGRESS_FILE):
 
     all_symbols = russell3000_symbols()
     progress = load_progress(progress_file)
-    already_handled = set(progress["done"]) | set(progress["empty"]) | set(progress["failed"])
+    # `empty` symbols are RETRIED on every run: a bulk yf.download() can
+    # transiently return no rows for a valid symbol (the 2026-08-08 run wrongly
+    # marked real large caps like THO/TREX/SMG as empty), so empty is not a
+    # terminal state. Only done/failed are skipped during resume.
+    already_handled = set(progress["done"]) | set(progress["failed"])
     remaining = [s for s in all_symbols if s not in already_handled]
 
     print(f"Russell 3000 universe: {len(all_symbols)} symbols total, "
