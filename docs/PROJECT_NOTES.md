@@ -13,6 +13,7 @@ trust the code/live state over this file and fix the entry.
 |---|---|---|---|
 | `ClaudeAuto-PipelineQuality` | Mon 9:30 AM | `validate.py` full health check | `QUALITY_FAIL.txt` |
 | `ClaudeAuto-DailyAccumulators` | Daily 9:00 AM | `run_all.py --only tradingview,short_interest,finnhub_events` | `DAILY_ACCUMULATOR_FAIL.txt` |
+| `BackadjustSweep` | Background (manual launch) | `backadjust.py --sweep-no-reference` full ~25.5k symbols | `backadjust_sweep.log` / progress CSV |
 
 Both catch up after boot if the machine was off (`StartWhenAvailable`). See
 `docs/AUTOMATION.md` for full detail and management commands. Check both flag files at
@@ -274,3 +275,38 @@ verified queryable via `query.py`.
 **2026-07-28:** Re-synced to HuggingFace. 148 tables, 59,291,129 rows,
 2,208.1 MB uploaded to `https://huggingface.co/datasets/ZanderL1337/financial-data-pipeline`
 (public, updated from 2026-07-19's 114 tables / ~10M rows / 223.6 MB).
+
+## Recent completions (2026-09-11/12)
+
+**D3 — Backadjust no-reference sweep (RUNNING):**
+- Scope: ~25,474 symbols without yfinance reference (2,285 have reference)
+- Method: `backadjust.py --sweep-no-reference` with per-symbol yfinance `classify_one` +
+  shared checkpoint CSV resume (skips terminal statuses, retries `error`)
+- 12 new tests in `tests/test_backadjust.py` (all pass)
+- Smoke: AACB + AAUB corrected live
+- Launched 2026-09-11 18:39 as schtasks task `BackadjustSweep`
+- Progress: ~10% (~2,600/25,463) as of 2026-09-12; measured ~4.6 s/symbol (~30h ETA)
+- Auto-resumes on kill; `ALV`-type REJECTED (huge step counts) accumulate in rejects CSV
+- When done: rebuild curated to apply new offsets, run `backadjust.py --verify`
+
+**A1 — CA Form 700 / Congressional (2026-09-11, `994578e` + `c224e0d`):**
+- `name_to_ticker.py` resolver: canonical map → exact → token (≥2 sig tokens, `require_listed=True`)
+- A-1 holdings: 448 events / 254 symbols, 385 aligned → **NULL** (best p_adj 0.80)
+- Congressional PIT rerun with `--sp500-only`: fixed critical bug (non-members kept),
+  corrected retention 61.6% (not 94.5%), date-level all ns (best p_adj 0.355)
+- Both in `leakage_healthcheck.py` ROSTER, full roster clean
+
+**B1 — Earnings surprise event study (2026-09-11, `1b26dd5`):**
+- Alpha Vantage earnings: 31 symbols (DJI-ish), 3,668 quarterly events w/ surprise (1996-2026)
+- `earnings_surprise_event_study.py` with reportTime-aware entry_lag (pre=0, post=1)
+- **ASYMMETRIC SIGNAL**: BEAT → significant +drift all horizons 1-63d (p_adj~1e-4, h1 +0.42%);
+  MISS → NULL at low surprise; |surprise|≥5% → significant -drift (h1 -1.0%, p_adj=0.011)
+- Magnitude-dependent, symmetric at high surprise. Universe limitation: 31 mega-caps only
+
+**C1 — Daily paper trade cadence (2026-09-12, `59d5c48`):**
+- `strategies/portfolio.py::run_daily_paper_trade()` on latest prices (1984 dev_cache symbols)
+- Combined survivor portfolio (3 strategies, HRP sizing, $1M capital)
+- Registers forward P&L in eval registry (`evaluation=trades_daily`) with Phase-1 hygiene
+- Verified: 264 trades, 61.7% win rate, +$247k P&L, registered 4 rows
+- Task Scheduler wrapper created (`%LOCALAPPDATA%\Temp\opencode\daily_paper_trade.bat`)
+- Needs admin to install schtasks; ready for daily automation

@@ -35,6 +35,10 @@ C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest my_sig
   (universe, git commit, dropped symbols), `panel.parquet` / `trades.parquet`.
 - Registry rows in `storage/eval_registry/results.parquet` — baselines for
   the next model to beat, and the honest trial count for deflated Sharpe.
+- **Daily paper trade** (`evaluation=trades_daily`): forward P&L from live
+  price refresh on survivor portfolio, registered with full Phase-1 hygiene
+  (run_id, input_name, universe_hash, date_range, execution_hash). Run via
+  `python -m strategies.portfolio --daily --confirm-run --register`.
 
 ## The battery
 
@@ -64,3 +68,12 @@ registry as the measured baseline.
 
 Write an adapter (tens of lines — see `evaluation/adapters.py`) or dump a
 `[symbol, date, value]` parquet and use `--input-parquet`. Nothing else.
+
+## Notable completed studies (registry keys)
+
+| Study | Registry key | Result | Report |
+|---|---|---|---|
+| Earnings surprise (Alpha Vantage) | `earnings_surprise_beat` / `earnings_surprise_miss` | **Asymmetric signal**: beat +drift all h (p_adj~1e-4); miss null at low surprise, |surprise|≥5% → -drift (p_adj=0.011) | `experiments/2026-09-11_earnings-surprise-asymmetric-signal.md` |
+| CA Form 700 A-1 holdings | `california_disclosures_holding` | NULL (448 events, best p_adj=0.80) | `experiments/2026-09-11_california-disclosures-null-result.md` |
+| Congressional trades (PIT S&P 500) | `congressional_trades_sp500` | NULL (61.6% retention, best p_adj=0.355) | `experiments/2026-09-11_congressional-sp500-survivorship.md` |
+| Survivor portfolio daily | `bollinger_bands_simple+optimized_doji_breakout_short+rsi_bb_inside_strategy` (trades_daily) | 264 trades, 61.7% WR, +$247k | — |
