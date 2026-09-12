@@ -42,6 +42,9 @@ MAIN FUNCTIONS
         -> (trades_df, summary_dict)
     run_paper_trade([--confirm])           CLI: run on holdout cache, write
                                            trades to storage/eval_artifacts/...
+    run_daily_paper_trade([--confirm])     CLI: run on LATEST prices, register
+                                           forward P&L in eval registry
+                                           (for daily Task Scheduler cadence)
 
 Everything uses the exact cost model Stage 3/5 use (cost_config), so the
 portfolio results are on the same cost basis as the individual survivors.
@@ -62,8 +65,10 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evaluation import execution as ev_execution
+from evaluation import registry as ev_registry
 from evaluation import trades as ev_trades
 from evaluation.contracts import TradeRule
+from evaluation.stats import permutation_trades
 from strategies.catalog import build_catalog_rows
 from strategies.stage3 import (
     PRIMARY_COST_BPS,
@@ -75,6 +80,7 @@ from strategies.stage3 import (
 from strategies.stage5 import HOLDOUT_START, holdout_cache
 
 ARTIFACT_DIR = os.path.join("storage", "eval_artifacts", "tv_survivor_portfolio")
+DAILY_ARTIFACT_DIR = os.path.join("storage", "eval_artifacts", "tv_survivor_portfolio_daily")
 
 
 def survivor_slugs() -> "list[str]":
@@ -226,11 +232,209 @@ def run_paper_trade(confirm: bool = False, write: bool = False) -> tuple:
     return trades, summary
 
 
+def _load_live_cache(symbols: "list[str] | None" = None,
+                     lookback_days: int = 252) -> dict:
+    """Load latest price data for symbols from the curated `prices` table.
+
+    Returns a cache dict {symbol: DataFrame} with the same structure as
+    holdout_cache()/dev_cache() -- index=date, columns include close, volume.
+    Uses the `prices` table (curated, longest-series-wins) for consistency
+    with event_backtest's load_close_matrix().
+
+    Args:
+        symbols: If None, use the Stage 3 dev_cache universe (1984 symbols).
+                 If provided, use only those symbols.
+        lookback_days: How many trading days of history to load (default 252
+                       = ~1 year, enough for HRP 126-day lookback + signals).
+    """
+    import query as q
+    from strategies.stage3 import dev_cache
+
+    if symbols is None:
+        # Use the same universe Stage 3 / TV catalog uses
+        cache = dev_cache()
+        symbols = sorted(cache.keys())
+
+    # Load from curated prices table (q.load prefers curated)
+    df = q.load("prices", symbol=symbols)
+    if df.empty:
+        return {}
+
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values(["symbol", "date"])
+
+    # Keep only the last `lookback_days` trading days per symbol
+    cutoff = df["date"].max() - pd.Timedelta(days=lookback_days * 1.5)  # calendar ~1.5x trading
+    df = df[df["date"] >= cutoff]
+
+    # Build cache dict with DatetimeIndex (matching holdout_cache structure)
+    out = {}
+    for sym, g in df.groupby("symbol"):
+        g = g.set_index("date").sort_index()
+        # Ensure required columns exist
+        if "close" not in g.columns or "volume" not in g.columns:
+            continue
+        out[sym] = g
+
+    return out
+
+
+def _register_daily_paper(trades: pd.DataFrame, summary: dict, slugs: list[str],
+                          config, universe_hash: str, date_range: str) -> int:
+    """Register daily paper trade results in the eval registry.
+
+    Follows the same hygiene as evaluation/runner.run() for TradeRule:
+    - input_name = combined rule name (slug1+slug2+...)
+    - input_type = "trade_rule"
+    - evaluation = "trades_daily" (distinct from holdout "trades")
+    - horizon = -1 (portfolio/trade-level)
+    - execution_hash from config_hash()
+    """
+    from evaluation.execution import config_hash
+
+    rows = []
+    # Trade summary stats (mirrors runner._stat_rows for "trades")
+    for k, v in summary.items():
+        if k in ("n_trades", "n_long", "n_short", "n_symbols"):
+            continue  # metadata keys
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            rows.append({
+                "evaluation": "trades_daily",
+                "horizon": -1,
+                "statistic": k,
+                "value": float(v),
+                "n": int(summary.get("n_trades", 0)),
+            })
+
+    # Permutation test (same as runner does for TradeRule)
+    # Note: we don't have the cache here, so we'll skip permutation for daily
+    # (it's expensive and the holdout already did it). The registry tracks
+    # forward P&L, not significance re-testing.
+
+    if not rows:
+        return 0
+
+    run_id = ev_registry.new_run_id()
+    reg_rows = pd.DataFrame(rows)
+    reg_rows["run_id"] = run_id
+    reg_rows["input_name"] = "+".join(slugs)
+    reg_rows["input_type"] = "trade_rule"
+    reg_rows["universe_hash"] = universe_hash
+    reg_rows["date_range"] = date_range
+    reg_rows["created_at"] = datetime.now(timezone.utc).isoformat()
+    reg_rows["execution_hash"] = config_hash(config)
+
+    added = ev_registry.append(reg_rows)
+    return added
+
+
+def run_daily_paper_trade(confirm: bool = False,
+                          register: bool = True,
+                          write: bool = False,
+                          symbols: "list[str] | None" = None,
+                          lookback_days: int = 252) -> tuple:
+    """Run the combined survivor portfolio on LATEST prices (paper only),
+    register forward P&L in eval registry for daily cadence.
+
+    This is the C1 "daily refresh + forward-P&L cadence" function.
+    Designed to be called daily via Task Scheduler.
+
+    Args:
+        confirm: Actually run the simulation (required to execute)
+        register: Append results to eval registry (default True)
+        write: Also persist trades + summary to DAILY_ARTIFACT_DIR
+        symbols: Optional symbol list; default = Stage 3 dev_cache universe
+        lookback_days: History window for signals/HRP (default 252)
+
+    Returns:
+        (trades_df, summary_dict)
+    """
+    slugs = survivor_slugs()
+    if not slugs:
+        print("No Stage 5 survivors -- nothing to combine yet.")
+        return pd.DataFrame(), {}
+
+    if not confirm:
+        print(f"{len(slugs)} survivor(s): {slugs}")
+        print("Pass confirm=True to simulate the combined portfolio "
+              "on LATEST prices (paper only, daily refresh).")
+        return pd.DataFrame(), {}
+
+    print(f"\nLoading latest prices for {len(symbols) if symbols else 'dev_cache universe'} symbols...")
+    cache = _load_live_cache(symbols=symbols, lookback_days=lookback_days)
+    if not cache:
+        print("ERROR: No price data loaded.")
+        return pd.DataFrame(), {}
+
+    print(f"  Loaded {len(cache)} symbols, date range: "
+          f"{min(df.index.min() for df in cache.values())} to "
+          f"{max(df.index.max() for df in cache.values())}")
+
+    cfg = portfolio_config()
+    trades, summary = run_combined(cache, slugs, config=cfg)
+
+    print("\nDAILY PAPER TRADE (live prices, HRP-sized, shared capital)")
+    print(f"  strategies: {', '.join(slugs)}")
+    summary_keys = ["n_trades", "n_long", "n_short", "total_pnl_dollars",
+                    "win_rate_pct", "avg_pnl_pct", "median_days_held",
+                    "n_symbols"]
+    for k in summary_keys:
+        print(f"  {k}: {summary.get(k)}")
+
+    # Universe hash & date range for registry
+    from evaluation.registry import universe_hash
+    u_hash = universe_hash(list(cache.keys()))
+    d_min = min(df.index.min() for df in cache.values()).strftime("%Y-%m-%d")
+    d_max = max(df.index.max() for df in cache.values()).strftime("%Y-%m-%d")
+    date_range = f"{d_min}:{d_max}"
+
+    # Register in eval registry (Phase 1 hygiene)
+    if register:
+        added = _register_daily_paper(trades, summary, slugs, cfg, u_hash, date_range)
+        print(f"  Registered {added} rows in eval registry (evaluation=trades_daily)")
+
+    # Persist artifacts
+    if write:
+        os.makedirs(DAILY_ARTIFACT_DIR, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        trades.to_parquet(os.path.join(DAILY_ARTIFACT_DIR, f"trades_{ts}.parquet"),
+                          index=False)
+        import json
+        meta_path = os.path.join(DAILY_ARTIFACT_DIR, f"summary_{ts}.json")
+        with open(meta_path, "w", encoding="utf-8") as fh:
+            json.dump({"run_ts": ts, "strategies": slugs,
+                       "date_range": date_range,
+                       "universe_hash": u_hash,
+                       **{k: summary.get(k) for k in summary_keys}}, fh, indent=2)
+        print(f"  wrote trades -> {DAILY_ARTIFACT_DIR}/trades_{ts}.parquet")
+        print(f"  wrote summary -> {meta_path}")
+
+    return trades, summary
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--confirm-run", action="store_true",
                     help="actually run the paper-trade simulation")
     ap.add_argument("--write", action="store_true",
                     help="persist trades + summary as eval artifacts")
+    ap.add_argument("--daily", action="store_true",
+                    help="run DAILY paper trade on latest prices (registers in eval registry)")
+    ap.add_argument("--no-register", action="store_true",
+                    help="with --daily: skip eval registry append")
+    ap.add_argument("--symbols", nargs="+", default=None,
+                    help="with --daily: specific symbols (default: dev_cache universe)")
+    ap.add_argument("--lookback", type=int, default=252,
+                    help="with --daily: lookback days for price history (default 252)")
     args = ap.parse_args()
-    run_paper_trade(confirm=args.confirm_run, write=args.write)
+
+    if args.daily:
+        run_daily_paper_trade(
+            confirm=args.confirm_run,
+            register=not args.no_register,
+            write=args.write,
+            symbols=args.symbols,
+            lookback_days=args.lookback,
+        )
+    else:
+        run_paper_trade(confirm=args.confirm_run, write=args.write)
