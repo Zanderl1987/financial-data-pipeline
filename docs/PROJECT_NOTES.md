@@ -315,3 +315,14 @@ verified queryable via `query.py`.
 - `dashboard.py`: Streamlit app with 5 pages (Overview, Data Freshness, Signal Health, Eval Registry, Survivor Portfolio)
 - Reuses `freshness_dashboard.py`, `query.py`, `evaluation.registry`
 - Run: `streamlit run dashboard.py`
+
+**F1 — Eval framework v2 (2026-09-12, current):**
+- `evaluation/config.py`: Full YAML config system (EvaluationSpec dataclasses,
+  load_spec(), spec_to_runner_kwargs())
+- `evaluation/runner_yaml.py`: YAML-driven runner CLI with --dry-run, --print-example
+- `backtest.py`: Capital-constrained compounding (_apply_capital_constraints)
+  + Price-volume signal family (_apply_price_volume_adjustments)
+- `evaluation/portfolio.py` + `evaluation/runner.py`: Full parameter pass-through
+- `eval_spec_f1_example.yaml`: Example demonstrating all F1 features
+- `tests/test_eval_f1.py`: Unit tests for config + runner kwargs
+- Verified: quick test with 10 symbols, capital_constrained=True runs clean

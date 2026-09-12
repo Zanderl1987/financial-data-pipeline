@@ -178,7 +178,23 @@ def _returns_series(res):
 
 def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
                 quantiles, rebalance, long_short, n_boot, n_perm, seed,
-                registry_path):
+                registry_path,
+                capital_constrained: dict | None = None,
+                price_volume: dict | None = None,
+                cost_bps: float = 0.0,
+                spread_bps: float = 0.0,
+                borrow_fee_bps: float = 0.0,
+                slippage_model: str | None = None,
+                adv_impact_coeff: float = 0.1,
+                adv_participation_coeff: float | str | None = None,
+                aum: float = 1_000_000.0,
+                adv_window: int = 20,
+                vol_target: float | None = None,
+                max_weight: float | None = None,
+                max_drawdown_stop: float | None = None,
+                weighting_mode: str = "quantile",
+                hrp_lookback: int = 126,
+                hrp_linkage_method: str = "single"):
     lagged = ev_data.apply_lag(obj.frame, obj.lag_days)
     symbols = (sorted(universe) if universe
                else sorted(lagged["symbol"].unique()))
@@ -233,7 +249,14 @@ def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
         res = ev_portfolio.evaluate_portfolio(
             lagged, direction=obj.direction, quantiles=quantiles,
             rebalance=rebalance, long_short=long_short, start=start, end=end,
-            price_table=price_table)
+            price_table=price_table, capital_constrained=capital_constrained,
+            price_volume=price_volume,
+            cost_bps=cost_bps, spread_bps=spread_bps, borrow_fee_bps=borrow_fee_bps,
+            slippage_model=slippage_model, adv_impact_coeff=adv_impact_coeff,
+            adv_participation_coeff=adv_participation_coeff, aum=aum,
+            adv_window=adv_window, vol_target=vol_target, max_weight=max_weight,
+            max_drawdown_stop=max_drawdown_stop, weighting_mode=weighting_mode,
+            hrp_lookback=hrp_lookback, hrp_linkage_method=hrp_linkage_method)
         portfolio = ev_portfolio.summarize_portfolio(res)
         rets = _returns_series(res)
         boot_sharpe = ev_stats.bootstrap_sharpe(rets, n_boot=n_boot, seed=seed)
@@ -283,7 +306,24 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         regime_report=False, regime_benchmark="SPY", regime_k=2,
         tax=False,
         robustness=False, robustness_n_trials=100, robustness_sigma_bps=5.0,
-        robustness_alpha=0.95) -> dict:
+        robustness_alpha=0.95,
+        capital_constrained: dict | None = None,
+        price_volume: dict | None = None,
+        # Portfolio/backtest params
+        cost_bps: float = 0.0,
+        spread_bps: float = 0.0,
+        borrow_fee_bps: float = 0.0,
+        slippage_model: str | None = None,
+        adv_impact_coeff: float = 0.1,
+        adv_participation_coeff: float | str | None = None,
+        aum: float = 1_000_000.0,
+        adv_window: int = 20,
+        vol_target: float | None = None,
+        max_weight: float | None = None,
+        max_drawdown_stop: float | None = None,
+        weighting_mode: str = "quantile",
+        hrp_lookback: int = 126,
+        hrp_linkage_method: str = "single") -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -292,7 +332,12 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         input_type = "signal"
         results, rows, panel, dropped, symbols = _run_signal(
             obj, universe, start, end, benchmark, price_table, quantiles,
-            rebalance, long_short, n_boot, n_perm, seed, registry_path)
+            rebalance, long_short, n_boot, n_perm, seed, registry_path,
+            capital_constrained, price_volume,
+            cost_bps, spread_bps, borrow_fee_bps, slippage_model,
+            adv_impact_coeff, adv_participation_coeff, aum, adv_window,
+            vol_target, max_weight, max_drawdown_stop,
+            weighting_mode, hrp_lookback, hrp_linkage_method)
     elif isinstance(obj, EventSet):
         input_type = "event_set"
         lagged = ev_data.apply_lag(obj.frame, obj.lag_days)

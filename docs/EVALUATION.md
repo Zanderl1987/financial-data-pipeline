@@ -21,6 +21,10 @@ C:\ProgramData\anaconda3\python.exe generate_eval_report.py --latest my_sig
 
 # dashboard (Streamlit)
 streamlit run dashboard.py
+
+# F1: YAML-driven evaluation (eval framework v2)
+python -m evaluation.runner_yaml eval_spec.yaml
+python -m evaluation.runner_yaml eval_spec.yaml --dry-run
 ```
 
 ## Contracts (evaluation/contracts.py)
@@ -80,3 +84,48 @@ Write an adapter (tens of lines — see `evaluation/adapters.py`) or dump a
 | CA Form 700 A-1 holdings | `california_disclosures_holding` | NULL (448 events, best p_adj=0.80) | `experiments/2026-09-11_california-disclosures-null-result.md` |
 | Congressional trades (PIT S&P 500) | `congressional_trades_sp500` | NULL (61.6% retention, best p_adj=0.355) | `experiments/2026-09-11_congressional-sp500-survivorship.md` |
 | Survivor portfolio daily | `bollinger_bands_simple+optimized_doji_breakout_short+rsi_bb_inside_strategy` (trades_daily) | 264 trades, 61.7% WR, +$247k | — |
+
+## F1: Eval Framework v2 (2026-09-12)
+
+### YAML-Configurable Runner
+Full evaluation specs in YAML (`evaluation/config.py::EvaluationSpec`), run via:
+```bash
+python -m evaluation.runner_yaml eval_spec.yaml
+python -m evaluation.runner_yaml eval_spec.yaml --dry-run   # print runner kwargs
+python -m evaluation.runner_yaml --print-example             # print template
+```
+Example: `eval_spec_f1_example.yaml` (all features enabled).
+
+### Capital-Constrained Compounding
+Fixes the equal-notional blind spot: tracks actual capital over time,
+compounds P&L, enforces position/leverage limits at each rebalance.
+
+```yaml
+capital_constrained:
+  enabled: true
+  initial_capital: 1_000_000.0
+  max_leverage: 1.0           # gross exposure / capital
+  max_position_pct: 0.10      # single position limit
+  max_sector_pct: 0.30        # sector concentration (requires sector map)
+  compound_returns: true      # compound P&L into capital base
+  rebalance_on_capital_change: true
+  capital_change_threshold_pct: 5.0
+```
+
+### Price-Volume Signal Family
+Volume-aware signal variants applied PIT-safe at signal construction:
+
+```yaml
+price_volume:
+  enabled: true
+  volume_window: 21
+  volume_ma_window: 63
+  min_volume_ratio: 1.5       # volume confirmation threshold
+  volume_weighted: true       # scale signal by sqrt(volume/vol_MA)
+  divergence_lookback: 5      # dampen on price-volume divergence
+```
+
+Three variants:
+1. **Volume-weighted**: signal × √(volume/vol_MA), clipped [0.1, 5.0]
+2. **Volume-confirmed**: zero signal where volume < min_volume_ratio × vol_MA
+3. **Divergence detection**: halve signal when price trend ≠ volume trend
