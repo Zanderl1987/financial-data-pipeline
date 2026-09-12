@@ -238,6 +238,7 @@ CATALOG: dict[str, str] = {
     "cboe_strategy_indices":   _glob("cboe_strategy/**/cboe_strategy_indices_*.parquet"),
     # ── BIS central bank policy rates (WS_CBPOL), 39 areas, daily + monthly ──
     "policy_rates":            _glob("policy_rates/**/policy_rates_*.parquet"),
+    "delisting_reference":     _glob("delisting_reference/**/delisting_reference_*.parquet"),
     # ── FDIC bank financials, institutions, failures ──────────────────────────
     "fdic_institutions":       _glob("fdic/institutions/**/*.parquet"),
     "fdic_financials":         _glob("fdic/financials/**/*.parquet"),

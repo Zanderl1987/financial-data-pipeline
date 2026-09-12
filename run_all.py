@@ -515,6 +515,16 @@ PIPELINES: list[PipelineSpec] = [
         timeout=420,
     ),
     PipelineSpec(
+        name="delisting_reference",
+        file="delisting_reference_pipeline.py",
+        desc="Sharadar security master: 20,966 US companies, 70% delisted (free tier)",
+        stage=1,
+        tables=["delisting_reference"],
+        requires_env=["NASDAQ_DATA_LINK_API_KEY"],
+        backfill_args=["--table", "all"],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="fdic",
         file="fdic_pipeline.py",
         desc="FDIC bank institutions, quarterly financials, and failure history (keyless)",

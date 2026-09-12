@@ -121,6 +121,11 @@ KEYS: dict[str, list[str]] = {
     # monthly frequency, so frequency is part of the key or the monthly row
     # would collide with the daily one on month starts.
     "policy_rates":           ["date", "ref_area", "frequency"],
+    # Sharadar security master — permaticker is the stable company id and the
+    # ticker is NOT (WM was Washington Mutual, now Waste Management). The price
+    # table is part of the key because SEP (equities) and SFP (funds) are
+    # fetched as separate universes.
+    "delisting_reference":    ["permaticker", "price_table"],
     # Fed SOMA holdings — one row per security per weekly report
     "fed_soma":               ["as_of_date", "cusip"],
     # USDA NASS — one value per commodity/series/date/period, some series

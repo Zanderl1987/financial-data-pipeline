@@ -618,6 +618,18 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"rate": (-10, 1_000_000)},
     },
+    # ── Sharadar delisting reference ──────────────────────────────────────────
+    # A security master, not a time series: one row per company, so there is no
+    # date column to check monotonicity on. `lastpricedate` is a real trading
+    # date, but `firstpricedate` reads 1986-01-01 for many older companies as a
+    # floor value rather than an actual first trade, so neither is declared as
+    # THE date column.
+    "delisting_reference": {
+        "required":    ["permaticker", "ticker", "isdelisted", "price_table",
+                        "firstpricedate", "lastpricedate", "fetched_at"],
+        "critical_nn": ["permaticker", "ticker", "isdelisted"],
+        "date_col":    None,
+    },
     # ── FDIC bank institutions ────────────────────────────────────────────────
     "fdic_institutions": {
         "required":    ["cert", "instname", "asset", "fetched_at"],

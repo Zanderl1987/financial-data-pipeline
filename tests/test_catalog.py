@@ -192,6 +192,7 @@ EXPECTED_TABLES = [
     "cboe_strategy_indices",
     # BIS central bank policy rates
     "policy_rates",
+    "delisting_reference",
     # FDIC banking data
     "fdic_institutions",
     "fdic_financials",

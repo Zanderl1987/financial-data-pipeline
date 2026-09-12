@@ -48,6 +48,7 @@ PIPELINE_MODULES = [
     "cboe_pipeline",
     "cboe_strategy_pipeline",
     "policy_rates_pipeline",
+    "delisting_reference_pipeline",
     "fdic_pipeline",
     "fear_greed_pipeline",
     "nasdaq_data_link_pipeline",
