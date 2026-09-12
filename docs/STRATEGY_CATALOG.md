@@ -147,8 +147,10 @@ data-mined through the Harvey-Liu haircut before trusting.
 ## Backtest priority (what fits this pipeline, first)
 
 Our data (see CLAUDE.md / docs/PIPELINE_CATALOG.md): 44 futures 1997-10+, 2,285 Russell-3000-ish
-equities 1962+, deep `market_history` 1927+, forex 1999+, options 2023-12+, daily bars (some
-intraday via schwab, short retention), fundamentals ~1990s+, short_interest/borrow fees.
+equities 1962+ (**missing 285 names ≈ all mega caps — see item 3 below**), deep
+`market_history` 1927+, forex 1999+, options 2023-12+ plus full VIX/strategy-index history
+(docs/OPTIONS_DATA_SOURCES.md), daily bars (some intraday via schwab, short retention),
+fundamentals ~1990s+, short_interest/borrow fees.
 
 1. **TSMOM on our 44 futures (1997+)** — A-grade, fully PIT-constructible, uses existing
    `futures` table + vol targeting + our cost model. DONE (2026-09-12): Sharpe 0.23
@@ -157,17 +159,35 @@ intraday via schwab, short retention), fundamentals ~1990s+, short_interest/borr
    universe; AQR trades 13/13). Writeup: `experiments/2026-09-12_tsmom-futures.md`.
    NEXT: full forward-optimization loop (walk-forward + CPCV) or hand off to the next
    priority factor — pending back-adjusted futures availability.
-2. **Carry + Carry×TSMOM** — from AQR Century xlsx + futures/FX construction.
+2. **Carry + Carry×TSMOM** — DONE (2026-09-12): roll-gap-basis proxy on the same 44
+   futures. Long-only carry Sharpe **0.46** (2000s 0.33 / 2010s 0.42 / 2020s 0.83);
+   long-short 0.07 (contango-ag short side drags); Carry×TSMOM 50/50 0.24; TSMOM +
+   long-carry blend 0.30. Carry long-only is the strongest pure signal in the futures
+   book. Writeup: `experiments/2026-09-12_carry-futures.md`. Caveat: proxy (roll-gap
+   basis), not KMPV F1/F2 carry — needs back-adjusted store for the exact version.
 3. **Cross-sectional momentum / reversal / low-vol on `yfinance_universe_prices`** — OSAP
-   patterns; intraday momentum if we accumulate schwab 1-min bars.
+   patterns; intraday momentum if we accumulate schwab 1-min bars. FIRST RUN DONE but
+   INVALID: `yfinance_universe_prices` is missing 285 Russell-3000 names (≈all the
+   mega caps: AAPL, MSFT, AMZN, NVDA, GOOG, JPM, XOM, PG, …) — effectively a
+   small/mid-cap, alive-only-2026 universe. UMD (12-1/6-1/12-0 deciles) and KLN both
+   come out flat-to-negative BECAUSE OF the universe hole, not the strategy. **Do not
+   read them as momentum/seasonality verdicts.** BLOCKED until the 285-name backfill
+   lands. Writeup: `experiments/2026-09-12_equity-factors-sweep.md`.
 4. **OSAP / global-q long-short monthly portfolios** — pull the CSV dumps and run through
    `evaluation/ic.py` + deflated Sharpe as a replication sanity check before trading any.
 5. **101 Alphas on the equities universe** — fast win, needs volume; audit α's daily turnover.
-6. **Return seasonalities (KLN)** — constructible from price matrix; ~13%/yr gross.
+6. **Return seasonalities (KLN)** — FIRST RUN DONE but same universe-hole caveat as UMD
+   above (Sharpe 0.01, t 0.88). Re-run after the 285-name backfill.
 7. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
    FINRA NMS restore is the unblocker.
-8. **VIX term-structure slope overlay** — needs VIX futures history (`[verify]` available
-   data path); currently `synthetic_options`/`options_history` only go to 2023.
+8. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`
+   already has VIX (1990+), VIX3M, VIX6M (2008+), VIX9D, VVIX, SKEW; `cboe_strategy_indices`
+   has 11 option-strategy index levels (1986+). The VTSL slope and putwrite/buywrite/
+   condor-family backtests are buildable today. Full VIX-futures *curve* (for roll-yield
+   trading) is free-buildable via Cboe daily settlement CSVs (`…/futures/market_statistics/
+   settlement/csv?dt=YYYY-MM-DD`, keyless, verified). Historical *chain-level* options/
+   IV surfaces stay paid-only (OptionMetrics 1996+/ORATS 2010+/Databento 2013+) —
+   see `docs/OPTIONS_DATA_SOURCES.md`. Our `options_history` keeps accruing from 2023-12.
 9. **PEAD** — blocked on historical earnings (see CLAUDE.md open work) until a real
    earnings-dates backfill lands.
 
