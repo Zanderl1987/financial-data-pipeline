@@ -158,14 +158,22 @@ fundamentals ~1990s+, short_interest/borrow fees.
    roll-masked (0.15 raw), decade 2000s 0.27 / 2010s 0.38 / 2020s 0.66; monthly corr
    0.41–0.53 vs AQR official factor (2010s+ in line, 2000s capped by our 4 FX/4 rates
    universe; AQR trades 13/13). Writeup: `experiments/2026-09-12_tsmom-futures.md`.
-   NEXT: full forward-optimization loop (walk-forward + CPCV) or hand off to the next
-   priority factor — pending back-adjusted futures availability.
+   FORWARD-OPTIM LOOP DONE (2026-09-13): 7-fold expanding walk-forward + CPCV + PBO
+   + 10k random-grid-selection null. Tuning CANNOT beat the published default (12,31):
+   tuned OOS 0.25 vs default 0.33; 72.6% of coin-flip selectors beat tuned; PBO 0.54 —
+   in-sample argmax is noise. Published params VALIDATED. All 3 families closed out;
+   no tuning promotion from any. See `experiments/2026-09-13_futures-forward-optimization.md`.
 2. **Carry + Carry×TSMOM** — DONE (2026-09-12): roll-gap-basis proxy on the same 44
    futures. Long-only carry Sharpe **0.46** (2000s 0.33 / 2010s 0.42 / 2020s 0.83);
    long-short 0.07 (contango-ag short side drags); Carry×TSMOM 50/50 0.24; TSMOM +
    long-carry blend 0.30. Carry long-only is the strongest pure signal in the futures
    book. Writeup: `experiments/2026-09-12_carry-futures.md`. Caveat: proxy (roll-gap
    basis), not KMPV F1/F2 carry — needs back-adjusted store for the exact version.
+   FORWARD-OPTIM DONE (2026-09-13): mild inconclusive tuning edge to min_events=2
+   long-only (OOS 0.43 vs 0.36, 13.9th pct of 10k random-selector null, PBO 0.11);
+   long-only > long-short at every min_events. Blend sweep: pure long-only carry
+   dominated the 50/50 blend both OOS (0.36 vs 0.37) and 2016+ holdout (0.82 vs 0.53) —
+   carry-heavy blends are at least as good. See `experiments/2026-09-13_futures-forward-optimization.md`.
 3. **Cross-sectional momentum / reversal / low-vol on `yfinance_universe_prices`** — OSAP
    patterns; intraday momentum if we accumulate schwab 1-min bars. UMD TESTED twice
    (2026-09-12): first run was INVALID (table was missing 285 Russell-3000 names ≈ all
