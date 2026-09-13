@@ -214,14 +214,19 @@ fundamentals ~1990s+, short_interest/borrow fees.
     to a paid delisting-inclusive panel.
 8. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
    FINRA NMS restore is the unblocker.
-9. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`
-   already has VIX (1990+), VIX3M, VIX6M (2008+), VIX9D, VVIX, SKEW; `cboe_strategy_indices`
-   has 11 option-strategy index levels (1986+). The VTSL slope and putwrite/buywrite/
-   condor-family backtests are buildable today. Full VIX-futures *curve* (for roll-yield
-   trading) is free-buildable via Cboe daily settlement CSVs (`…/futures/market_statistics/
-   settlement/csv?dt=YYYY-MM-DD`, keyless, verified). Historical *chain-level* options/
-   IV surfaces stay paid-only (OptionMetrics 1996+/ORATS 2010+/Databento 2013+) —
-   see `docs/OPTIONS_DATA_SOURCES.md`. Our `options_history` keeps accruing from 2023-12.
+9. **VIX term-structure slope (VTSL) overlay + Cboe option-strategy indices** —
+   TESTED (2026-09-13), **first positive OOS-robust signal in the cross-asset
+   book**: SLOPE = OLS beta of log(implied-vol level) on maturity (VIX9D/VIX/
+   VIX3M/VIX6M curve, 2008+). Long PUT/BXM only when SLOPE>0 (contango), cash in
+   backwardation: PUT Sharpe 0.56->0.87 same-sample, **0.66->1.11 OOS holdout
+   (2017-05+)**; BXM 0.49->0.67 / 0.63->1.05; positive in all decades;
+   k=0 not overfit (k=0.02/0.04 worse). Long-only comparison: BXMD/CMBO/CLL/
+   CNDR dominate SPX on Sharpe at lower vol (0.66-0.72 vs 0.55). Caveats: Cboe
+   index levels are hypothetical fills (live option-writing costs not loaded);
+   pre-2007 backfills sparse; short-vol left tail mitigated but not eliminated.
+   Follow-ups queued: forward-optimization loop (CPCV/PBO) on the k grid,
+   live-execution cost load, extend to BXMD/PUTR/CLL. Writeup:
+   `experiments/2026-09-13_vix-term-structure.md`.
 10. **PEAD** — blocked on historical earnings (see CLAUDE.md open work) until a real
     earnings-dates backfill lands.
 
