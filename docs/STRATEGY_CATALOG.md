@@ -175,23 +175,27 @@ fundamentals ~1990s+, short_interest/borrow fees.
    dominated the 50/50 blend both OOS (0.36 vs 0.37) and 2016+ holdout (0.82 vs 0.53) —
    carry-heavy blends are at least as good. See `experiments/2026-09-13_futures-forward-optimization.md`.
 3. **Cross-sectional momentum / reversal / low-vol on `yfinance_universe_prices`** — OSAP
-   patterns; intraday momentum if we accumulate schwab 1-min bars. UMD TESTED twice
-   (2026-09-12): first run was INVALID (table was missing 285 Russell-3000 names ≈ all
-   mega caps — small/mid-cap, alive-2026 slice), then **after the 285-name backfill the
-   full 2,570-name universe is still flat** — r12-1 Sharpe -0.11 (t -0.62), r6-1
-   -0.05, r12-0 -0.03. Equal-weight decile UMD is genuinely absent in this sample;
-   residual caveat is alive-2026 survivorship (no delistings → short-leg return
-   inflated, spread compressed) — the delisting-inclusive panel upgrade is tracked in
-   TASKS.md before declaring momentum dead. Writeup:
-   `experiments/2026-09-12_equity-factors-sweep.md`. NOT a priority until the
-   delisting panel exists.
+    patterns; intraday momentum if we accumulate schwab 1-min bars. UMD TESTED twice
+    (2026-09-12): first run was INVALID (table was missing 285 Russell-3000 names ≈ all
+    mega caps — small/mid-cap, alive-2026 slice), then **after the 285-name backfill the
+    full 2,570-name universe is still flat** — r12-1 Sharpe -0.11 (t -0.62), r6-1
+    -0.05, r12-0 -0.03. Equal-weight decile UMD is genuinely absent in this sample;
+    survivorship MEASURED (2026-09-13): a delisting-inclusive panel is NOT buildable
+    free — genuine dead-name recovery 0/0/1/166 of 14,641 delisted SEP names by decade
+    in the wide `prices` table (0 in the yf panel's decades); the survivorship effect
+    is conservative for L/S (missing delisted losers compress the short leg) and a
+    constructive bound lifts UMD to at most ~0.1–0.3 Sharpe — not promotable. Verdict
+    stands: momentum dead in this panel, subject to a paid CRSP/Sharadar-class panel.
+    Writeups: `experiments/2026-09-12_equity-factors-sweep.md`,
+    `experiments/2026-09-13_survivorship-bias.md`.
 4. **OSAP / global-q long-short monthly portfolios** — pull the CSV dumps and run through
    `evaluation/ic.py` + deflated Sharpe as a replication sanity check before trading any.
 5. **101 Alphas on the equities universe** — fast win, needs volume; audit α's daily turnover.
 6. **Return seasonalities (KLN)** — TESTED twice (2026-09-12): flat on the broken
-   universe (Sharpe 0.01) and still flat after the 285-name backfill (Sharpe -0.00,
-   t -0.25). Same live-2026 survivorship caveat as UMD above; not a priority until the
-   delisting-inclusive panel exists.
+    universe (Sharpe 0.01) and still flat after the 285-name backfill (Sharpe -0.00,
+    t -0.25). Same survivorship logic as UMD; the bias is measured as bounded-small
+    and conservative for L/S (2026-09-13) — not a priority; verdict stands subject
+    to a paid delisting-inclusive panel.
 7. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
    FINRA NMS restore is the unblocker.
 8. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`
