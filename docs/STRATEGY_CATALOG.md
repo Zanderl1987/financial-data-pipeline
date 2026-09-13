@@ -66,7 +66,8 @@ survivors from ghosts.
 - **TSMOM** is the futures-side workhorse and directly buildable on our `futures` table
   (44 contracts since 1997-10): 12-month lookback, 1-month hold, ex-ante vol target.
 - **QMJ/BAB** both need a shortable junk side; BAB's post-2010 decade is weak. Long-side
-  low-vol is the investable, alpha-carrying part.
+  low-vol is the investable, alpha-carrying part. QMJ TESTED on our panel (2026-09-13):
+  Q approximation L/S Sharpe -0.04, flat null — dead end free (see Backtest priority item 4).
 - **Carry** crashes cluster in global recessions (2008/09, 2014–15 CHF/EM); standalone FX
   carry weakened after ~2007.
 - **PEAD** is the most "behaviorally real" anomaly but the magnitude has shrunk since
@@ -188,17 +189,32 @@ fundamentals ~1990s+, short_interest/borrow fees.
     stands: momentum dead in this panel, subject to a paid CRSP/Sharadar-class panel.
     Writeups: `experiments/2026-09-12_equity-factors-sweep.md`,
     `experiments/2026-09-13_survivorship-bias.md`.
-4. **OSAP / global-q long-short monthly portfolios** — pull the CSV dumps and run through
+4. **QMJ (quality minus junk, Q approximation)** — TESTED (2026-09-13): built as
+    profitability + growth + safety (payout leg not available free) from
+    first-report PIT EDGAR 10-K/20-F/40-F fundamentals x the 2,570-name universe.
+    Q L/S Sharpe **-0.04** (t -0.16), Q_PROF alone -0.03, long-only top decile
+    17.9% (just universe beta), decile slope flat. Flat null, consistent with the
+    other equity anomalies in this panel; survivorship bound carried (realistic
+    0.1-0.3, max +0.56 at the unrealistic corner) — not promotable. Payout
+    cross-check on 26 simfin names: Spearman(payout, Q) = -0.36, the leg would
+    fight the sort. Free-data QMJ = dead end subject to a paid CRSP/Sharadar-class
+    panel. Writeup: `experiments/2026-09-13_quality-factor.md`.
+    NOTE: `analytics/features.py::_asof_fundamentals` reads the curated
+    `fundamentals_annual` snapshot whose `filed` is the latest comparative
+    re-report, not the original 10-K date — those feature_matrix fundamentals are
+    PIT-late by up to ~12 months (found during this build). QMJ itself bypassed it
+    (raw + first-report); a curated `filed` fix is a pending pipeline task.
+5. **OSAP / global-q long-short monthly portfolios** — pull the CSV dumps and run through
    `evaluation/ic.py` + deflated Sharpe as a replication sanity check before trading any.
-5. **101 Alphas on the equities universe** — fast win, needs volume; audit α's daily turnover.
-6. **Return seasonalities (KLN)** — TESTED twice (2026-09-12): flat on the broken
+6. **101 Alphas on the equities universe** — fast win, needs volume; audit α's daily turnover.
+7. **Return seasonalities (KLN)** — TESTED twice (2026-09-12): flat on the broken
     universe (Sharpe 0.01) and still flat after the 285-name backfill (Sharpe -0.00,
     t -0.25). Same survivorship logic as UMD; the bias is measured as bounded-small
     and conservative for L/S (2026-09-13) — not a priority; verdict stands subject
     to a paid delisting-inclusive panel.
-7. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
+8. **Short-interest / borrow-fee cross-section** — data exists but coverage is watchlist-only;
    FINRA NMS restore is the unblocker.
-8. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`
+9. **VIX term-structure slope overlay** — NO LONGER BLOCKED on data. `cboe_volatility`
    already has VIX (1990+), VIX3M, VIX6M (2008+), VIX9D, VVIX, SKEW; `cboe_strategy_indices`
    has 11 option-strategy index levels (1986+). The VTSL slope and putwrite/buywrite/
    condor-family backtests are buildable today. Full VIX-futures *curve* (for roll-yield
@@ -206,8 +222,8 @@ fundamentals ~1990s+, short_interest/borrow fees.
    settlement/csv?dt=YYYY-MM-DD`, keyless, verified). Historical *chain-level* options/
    IV surfaces stay paid-only (OptionMetrics 1996+/ORATS 2010+/Databento 2013+) —
    see `docs/OPTIONS_DATA_SOURCES.md`. Our `options_history` keeps accruing from 2023-12.
-9. **PEAD** — blocked on historical earnings (see CLAUDE.md open work) until a real
-   earnings-dates backfill lands.
+10. **PEAD** — blocked on historical earnings (see CLAUDE.md open work) until a real
+    earnings-dates backfill lands.
 
 Everything netted with: bps + spread + borrow-fee matrix + ADV participation (adv_participation
 costs in `backtest.py`), vol-targeted, walk-forward OOS, deflated-Sharpe multiple-testing gate.
