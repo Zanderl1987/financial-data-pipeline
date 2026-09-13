@@ -118,7 +118,7 @@ with st.sidebar:
 
     page = st.radio(
         "Navigate",
-        ["Overview", "Data Freshness", "Signal Health", "Eval Registry", "Survivor Portfolio"],
+        ["Overview", "Data Freshness", "Signal Health", "Eval Registry", "Survivor Portfolio", "Carry Paper Trade"],
         index=0,
     )
 
