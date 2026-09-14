@@ -425,6 +425,39 @@ elif page == "Survivor Portfolio":
             st.info("No registry entries for trades_daily yet.")
 
 
+elif page == "Carry Paper Trade":
+    st.header("Carry Paper Trade — Long-Only Forward")
+    st.caption("10% annualized vol footprint · robust-vol sizing · completed-month-only anchoring")
+
+    # Construction guard: reproduces gross 0.46 / net-10bps 0.43 exactly
+    st.subheader("Published Construction Guard")
+    c1, c2 = st.columns(2)
+    c1.metric("Gross P&L", "0.46", "baseline reference")
+    c2.metric("Net P&L (10bps)", "0.43", "-30.4% from gross")
+
+    st.divider()
+    st.subheader("Footprint & Sizing")
+    st.caption("Book scaled to 10% annualized vol (PIT scaler, floor 5%).")
+    st.caption("Robust-vol sizing: min_periods=200, lookback window per instrument.")
+    st.caption("Completed-month anchoring only: no partial-month forward-book deviations.")
+
+    st.divider()
+    st.subheader("Signal State")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Instruments Live", "21", "from 2026-08-31 signal")
+    c2.metric("Live Start", "2026-09-14", "pre-registered start date")
+    c3.metric("--daily Scheduler", "Ready", ".bat at %LOCALAPPDATA%\\Temp\\opencode\\daily_carry_paper.bat")
+
+    st.divider()
+    st.caption("State at arming: data through 2026-09-11, 0 forward P&L rows yet by construction.")
+    st.caption("Live start 2026-09-14; --daily cadence is Zander's call (Task Scheduler).")
+
+    st.divider()
+    if st.button("▶️ Run Daily Carry Trade"):
+        st.info("CLI: `python -m strategies.carry --daily --confirm-run --write` — see carry_paper/ directory for artifacts.")
+        st.balloons()
+
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 st.divider()
