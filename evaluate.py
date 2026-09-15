@@ -17,6 +17,7 @@ sentiment, TV ratings) are added by evaluation/adapters.py (Task 10).
 """
 
 import argparse
+import json
 import sys
 
 
@@ -49,6 +50,22 @@ def _print_signal_summary(res):
     if dsr.get("dsr_prob") is not None:
         print(f"deflated sharpe prob {_fmt(dsr['dsr_prob'])} "
               f"(n_trials={dsr.get('n_trials')})")
+    fwd = res["results"].get("forward_opt") or {}
+    if fwd.get("tuned_oos_sharpe") is not None:
+        cpcv_d = fwd.get("cpcv_default") or {}
+        print(f"forward-opt: tuned OOS sharpe {_fmt(fwd['tuned_oos_sharpe'])} "
+              f"vs default {_fmt(fwd.get('default_oos_sharpe'))} "
+              f"(default picked {fwd.get('n_folds_pick_default')}/"
+              f"{fwd.get('n_folds')} folds, n_variants={fwd.get('n_variants')}, "
+              f"pbo {_fmt(fwd.get('pbo'))})")
+        if cpcv_d.get("cpcv_oos_sharpe_median") is not None:
+            print(f"  cpcv default median {_fmt(cpcv_d['cpcv_oos_sharpe_median'])} "
+                  f"[{_fmt(cpcv_d.get('cpcv_oos_sharpe_p5'))}, "
+                  f"{_fmt(cpcv_d.get('cpcv_oos_sharpe_p95'))}] "
+                  f"pct_positive {_fmt(cpcv_d.get('cpcv_pct_positive'))}% "
+                  f"(purge={cpcv_d.get('purge')})")
+    elif fwd:
+        print(f"forward-opt: {fwd.get('fwdopt_reason')}")
 
 
 def _print_events_summary(res):
@@ -200,6 +217,33 @@ def main(argv=None) -> int:
                     help="noise-test trial count")
     ap.add_argument("--robustness-sigma-bps", type=float, default=5.0,
                     help="noise-test per-bar lognormal jitter, in bps")
+    ap.add_argument("--forward-opt", action="store_true",
+                    help="signal runs only: walk-forward optimization + PBO + "
+                         "CPCV (evaluation/optimizer.py forward_opt) over a "
+                         "grid of portfolio constructions -- tuned OOS Sharpe "
+                         "vs the default construction, how often the default "
+                         "is re-selected, PBO, and CPCV OOS-Sharpe stability "
+                         "for the default and full-sample-best variants. ",
+                    )
+    ap.add_argument("--forward-opt-grid", default=None,
+                    help="JSON construction grid for --forward-opt, e.g. "
+                         '{"quantiles":[5,10],"rebalance":["M","W"]}. Default: '
+                         "quantiles x {current,5,10} x rebalance x "
+                         '{current,"M","W"} keeping the run\'s long/short. '
+                         "A grid of one variant (=the run's own construction) "
+                         "disables selection-noise measures (PBO) honestly "
+                         "rather than fabricating a grid")
+    ap.add_argument("--forward-opt-n-folds", type=int, default=7,
+                    help="--forward-opt: number of expanding-window WFA folds")
+    ap.add_argument("--forward-opt-min-train", type=int, default=252,
+                    help="--forward-opt: minimum in-sample rows before the "
+                         "first test fold")
+    ap.add_argument("--forward-opt-n-groups", type=int, default=6,
+                    help="--forward-opt: CPCV group count")
+    ap.add_argument("--forward-opt-k-test", type=int, default=2,
+                    help="--forward-opt: CPCV test groups per split")
+    ap.add_argument("--forward-opt-embargo-pct", type=float, default=0.01,
+                    help="--forward-opt: CPCV embargo as a fraction of rows")
     ap.add_argument("--out-root", default=None)
     ap.add_argument("--registry-path", default=None)
     ap.add_argument("--no-registry", action="store_true",
@@ -301,6 +345,19 @@ def main(argv=None) -> int:
                   tax=args.tax, robustness=args.robustness,
                   robustness_n_trials=args.robustness_n_trials,
                   robustness_sigma_bps=args.robustness_sigma_bps)
+    if args.forward_opt_grid:
+        try:
+            fwd_grid = json.loads(args.forward_opt_grid)
+        except json.JSONDecodeError as exc:
+            ap.error(f"--forward-opt-grid is not valid JSON: {exc}")
+        kwargs["forward_opt_grid"] = fwd_grid
+    if args.forward_opt:
+        kwargs.update(forward_opt=True,
+                      forward_opt_n_folds=args.forward_opt_n_folds,
+                      forward_opt_min_train=args.forward_opt_min_train,
+                      forward_opt_n_groups=args.forward_opt_n_groups,
+                      forward_opt_k_test=args.forward_opt_k_test,
+                      forward_opt_embargo_pct=args.forward_opt_embargo_pct)
     if cache is not None:
         kwargs["cache"] = cache
     if args.out_root:

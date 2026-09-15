@@ -482,6 +482,68 @@ class TestRegistryExecutionHash:
         from evaluation import registry as reg
         assert expected != reg.UNKNOWN_EXECUTION
 
+    def test_backfill_recomputes_campaign_rows(self, tmp_path):
+        import pandas as pd
+        from evaluation import registry as reg
+        campaign_hash = ex.config_hash(ex.TV_CAMPAIGN)
+        legacy_hash = ex.config_hash(ex.LEGACY)
+        rows = pd.DataFrame([
+            {"run_id": "r1", "input_name": "x", "input_type": "signal",
+             "evaluation": "tv_strategy_catalog_stage3", "horizon": -1,
+             "statistic": "sharpe", "value": 0.01, "n": 10,
+             "universe_hash": "u", "date_range": "..",
+             "created_at": "2026-01-01"},
+            {"run_id": "r2", "input_name": "y", "input_type": "signal",
+             "evaluation": "tv_strategy_catalog_stage5", "horizon": -1,
+             "statistic": "sharpe", "value": 0.02, "n": 10,
+             "universe_hash": "u", "date_range": "..",
+             "created_at": "2026-01-02"},
+            {"run_id": "r3", "input_name": "z", "input_type": "signal",
+             "evaluation": "ic", "horizon": 1, "statistic": "ic",
+             "value": 0.03, "n": 10, "universe_hash": "u",
+             "date_range": "..", "created_at": "2026-01-03"},
+        ])
+        path = str(tmp_path / "reg.parquet")
+        reg.append(rows, path)
+        assert (reg.load(path)["execution_hash"] == reg.UNKNOWN_EXECUTION).all()
+        out = reg.backfill_execution_hashes(path)
+        assert out["recomputed"] == 2
+        assert out["kept_unknown"] == 1
+        loaded = reg.load(path)
+        hashes = dict(zip(loaded["evaluation"], loaded["execution_hash"]))
+        assert hashes["tv_strategy_catalog_stage3"] == campaign_hash
+        assert hashes["tv_strategy_catalog_stage5"] == campaign_hash
+        assert hashes["ic"] == reg.UNKNOWN_EXECUTION
+
+    def test_backfill_is_idempotent(self, tmp_path):
+        import pandas as pd
+        from evaluation import registry as reg
+        rows = pd.DataFrame([{
+            "run_id": "r1", "input_name": "x", "input_type": "signal",
+            "evaluation": "tv_strategy_catalog_stage3", "horizon": -1,
+            "statistic": "sharpe", "value": 0.01, "n": 10,
+            "universe_hash": "u", "date_range": "..",
+            "created_at": "2026-01-01",
+        }])
+        path = str(tmp_path / "reg.parquet")
+        reg.append(rows, path)
+        out1 = reg.backfill_execution_hashes(path)
+        assert out1["recomputed"] == 1
+        out2 = reg.backfill_execution_hashes(path)
+        assert out2["recomputed"] == 0
+
+    def test_config_from_flat_mirror(self):
+        """config_from_flat must agree with the engine's actual CostModel path."""
+        from evaluation import execution as ex2
+        cfg = ex2.config_from_flat(cost_bps=10, spread_bps=2, borrow_fee_bps=1,
+                                   slippage_model=None, impact_coeff=0.1,
+                                   max_weight=0.5)
+        expected_costs = ex2.costs_from_legacy_kwargs(
+            cost_bps=10, spread_bps=2, borrow_fee_bps=1,
+            slippage_model=None, impact_coeff=0.1)
+        assert cfg.costs == expected_costs
+        assert cfg.sizing.max_weight == 0.5
+
 
 class TestSignatureCompatibility:
     """The two callers that constrain simulate_symbol's signature."""

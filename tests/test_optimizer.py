@@ -44,6 +44,18 @@ def _toy_cache(n_days: int = 60, symbols=("AAA", "BBB"),
     return cache
 
 
+def _sharpe_of(x) -> float:
+    """Mirror of robustness._sharpe -- mean/std (ddof=1), 0.0 when degenerate."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if len(x) < 2:
+        return 0.0
+    sd = x.std(ddof=1)
+    if sd < 1e-12:
+        return 0.0
+    return float(x.mean() / sd)
+
+
 @pytest.fixture()
 def reg_path(tmp_path):
     return str(tmp_path / "registry" / "results.parquet")
@@ -452,6 +464,72 @@ class TestCpcvStability:
         assert 0.0 <= out["cpcv_pct_positive"] <= 100.0
         # a real, low-vol positive drift should clear positive on most folds
         assert out["cpcv_pct_positive"] > 50.0
+
+
+class TestForwardOpt:
+    """WFA + PBO + CPCV across construction variants (optimizer.forward_opt)."""
+
+    def _matrix(self, n=200, drift=0.003, noise=0.01, seed=3):
+        rng = np.random.default_rng(seed)
+        return pd.DataFrame({
+            "best": rng.normal(drift, noise, n),      # real edge
+            "other": rng.normal(0.0, noise, n),       # default = noise
+        })
+
+    def test_dominant_variant_picked_every_fold(self):
+        matrix = self._matrix(n=200)
+        out = opt.forward_opt(matrix, 1, n_folds=4, min_train=50)
+        assert "fwdopt_reason" not in out
+        # column "best" must dominate every in-sample fold's argmax
+        assert out["folds_argmax"] == ["best"] * 4
+        assert out["n_folds_pick_default"] == 0
+        assert out["n_variants"] == 2 and out["n_folds"] == 4
+        assert out["tuned_oos_sharpe"] > out["default_oos_sharpe"]
+        # selection generalizes: a real edge drives PBO to 0 on a seeded input
+        assert out["pbo"] == 0.0
+        # CPCV: the best column stays positive across folds; the default
+        # (noise) column does not
+        assert out["cpcv_best"]["cpcv_pct_positive"] > 90.0
+        assert out["cpcv_default"]["cpcv_pct_positive"] < 60.0
+        assert out["purge"] == "embargo-only"
+
+    def test_single_variant_is_honest_not_a_fabricated_grid(self):
+        matrix = pd.DataFrame({"only": self._matrix(n=200)["best"]})
+        out = opt.forward_opt(matrix, 0, n_folds=4, min_train=50)
+        assert out["tuned_oos_sharpe"] is not None
+        assert out["tuned_oos_sharpe"] == out["default_oos_sharpe"]
+        assert out["n_folds_pick_default"] == out["n_folds"]
+        assert out["pbo"] is None
+        assert "single variant" in out["pbo_reason"]
+
+    def test_default_col_must_be_valid_position(self):
+        matrix = self._matrix(n=200)
+        out = opt.forward_opt(matrix, 7, n_folds=4, min_train=50)
+        assert out["tuned_oos_sharpe"] is None
+        assert "not a valid positional index" in out["fwdopt_reason"]
+
+    def test_empty_matrix_reason(self):
+        out = opt.forward_opt(pd.DataFrame(), 0)
+        assert out["tuned_oos_sharpe"] is None
+        assert "empty return matrix" in out["fwdopt_reason"]
+
+    def test_too_few_rows_for_folds(self):
+        matrix = self._matrix(n=40)
+        out = opt.forward_opt(matrix, 0, n_folds=7, min_train=252)
+        assert out["tuned_oos_sharpe"] is None
+        assert "min_train (252) + n_folds (7)" in out["fwdopt_reason"]
+
+    def test_stitched_oos_equals_a_single_dominant_column(self):
+        # with a single variant the stitched tuned OOS is literally that
+        # column's returns after min_train -- check the fold-stitching
+        # arithmetic end to end
+        rng = np.random.default_rng(11)
+        col = rng.normal(0.0005, 0.01, 200)
+        matrix = pd.DataFrame({"only": col})
+        out = opt.forward_opt(matrix, 0, n_folds=4, min_train=50)
+        expect = _sharpe_of(col[50:])   # folds stitch contiguously [50,200]
+        assert out["tuned_oos_sharpe"] == round(expect, 4)
+        assert out["tuned_oos_sharpe"] == out["default_oos_sharpe"]
 
 
 # --------------------------------------------------- walk-forward optimize

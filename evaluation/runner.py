@@ -15,6 +15,7 @@ import pandas as pd
 
 from evaluation import data as ev_data
 from evaluation import events as ev_events
+from evaluation import execution as ev_execution
 from evaluation import ic as ev_ic
 from evaluation import portfolio as ev_portfolio
 from evaluation import registry as ev_registry
@@ -64,6 +65,9 @@ _METADATA_KEYS = {
     "n_boot", "boot_days", "n_days", "n_trials", "n_population", "n_perm",
     "n_trades", "n_long", "n_short", "n_symbols", "n_scored", "n_kept",
     "n_wash_events",
+    # CV/robustness configuration, not measured signal quality
+    "n_groups", "k_test", "n_splits", "embargo_obs",
+    "n_folds", "n_variants",
 }
 
 
@@ -117,6 +121,90 @@ def _meta_label_result(trades_df: pd.DataFrame, cache: dict, threshold: float,
                           "n_scored": result["n_scored"],
                           "n_kept": result["n_kept"]}, n_key="n_scored"))
     return result, rows
+
+
+def _forward_opt_variants(quantiles: int, rebalance: str, long_short: bool,
+                          grid: "dict | None") -> "list[dict]":
+    """Expand a forward-opt construction grid into variant deltas.
+
+    The default construction (the run's own quantiles/rebalance/long_short)
+    is always first, so its column lands at position 0 -- callers pass
+    default_col=0. Dedupes exact repeats. Without `grid`, the default grid is
+    quantiles x {current,5,10} x rebalance x {current,"M","W"} keeping the
+    run's long_short setting.
+    """
+    if grid is None:
+        grid = {"quantiles": [quantiles, 5, 10],
+                "rebalance": [rebalance, "M", "W"],
+                "long_short": [long_short]}
+    if not isinstance(grid, dict):
+        raise ValueError("forward_opt_grid must be a JSON object")
+    allowed = {"quantiles", "rebalance", "long_short"}
+    unknown = set(grid) - allowed
+    if unknown:
+        raise ValueError(f"forward_opt_grid unknown keys: {sorted(unknown)} "
+                         f"(allowed: {sorted(allowed)})")
+
+    qs = [quantiles] + list(grid.get("quantiles", [quantiles]))
+    rb = [rebalance] + list(grid.get("rebalance", [rebalance]))
+    ls = [long_short] + list(grid.get("long_short", [long_short]))
+
+    variants, seen = [], set()
+    for l in ls:
+        for r in rb:
+            for q in qs:
+                key = (q, r, l)
+                if key in seen:
+                    continue
+                seen.add(key)
+                variants.append({"quantiles": q, "rebalance": r,
+                                 "long_short": bool(l)})
+    return variants
+
+
+def _forward_opt_eval(lagged: pd.DataFrame, port_kwargs: dict,
+                      quantiles: int, rebalance: str, long_short: bool,
+                      grid: "dict | None", n_folds: int, min_train: int,
+                      n_groups: int, k_test: int, embargo_pct: float) -> dict:
+    """Run the WFA + PBO + CPCV battery over a grid of portfolio
+    constructions (evaluation/optimizer.py forward_opt). Best-effort: a
+    failure anywhere is reported via *_reason, never fatal."""
+    from evaluation import optimizer as ev_optimizer
+
+    variants = _forward_opt_variants(quantiles, rebalance, long_short, grid)
+    series, default_label = {}, None
+    for delta in variants:
+        kwargs = dict(port_kwargs)
+        kwargs.update(delta)
+        res = ev_portfolio.evaluate_portfolio(lagged, **kwargs)
+        rets = _returns_series(res)
+        if rets is None or len(rets) == 0:
+            continue
+        label = (f"q{delta['quantiles']}_r{delta['rebalance']}"
+                 f"_{'ls' if delta['long_short'] else 'ss'}")
+        series[label] = rets
+        if (delta["quantiles"], delta["rebalance"], delta["long_short"]) == \
+                (quantiles, rebalance, long_short):
+            default_label = label
+
+    if not series:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": "no construction variant produced returns"}
+    matrix = pd.concat(series, axis=1).dropna(how="any")
+    if matrix.empty:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": "nothing left after dropping rows with any "
+                                 "missing return"}
+    if default_label not in matrix.columns:
+        default_label = matrix.columns[0]
+
+    result = ev_optimizer.forward_opt(
+        matrix, matrix.columns.get_loc(default_label), n_folds=n_folds,
+        min_train=min_train, n_groups=n_groups, k_test=k_test,
+        embargo_pct=embargo_pct)
+    result["grid"] = variants
+    result["default_col"] = default_label
+    return result
 
 
 _REGIME_LABEL_CACHE: dict = {}
@@ -194,7 +282,14 @@ def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
                 max_drawdown_stop: float | None = None,
                 weighting_mode: str = "quantile",
                 hrp_lookback: int = 126,
-                hrp_linkage_method: str = "single"):
+                hrp_linkage_method: str = "single",
+                forward_opt: bool = False,
+                forward_opt_grid: "dict | None" = None,
+                forward_opt_n_folds: int = 7,
+                forward_opt_min_train: int = 252,
+                forward_opt_n_groups: int = 6,
+                forward_opt_k_test: int = 2,
+                forward_opt_embargo_pct: float = 0.01):
     lagged = ev_data.apply_lag(obj.frame, obj.lag_days)
     symbols = (sorted(universe) if universe
                else sorted(lagged["symbol"].unique()))
@@ -244,19 +339,25 @@ def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
                                        n_key="n_days")
 
     # Quantile portfolio (wraps backtest.backtest) + Sharpe bootstrap + DSR
+    port_kwargs = dict(direction=obj.direction, quantiles=quantiles,
+                       rebalance=rebalance, long_short=long_short,
+                       start=start, end=end, price_table=price_table,
+                       capital_constrained=capital_constrained,
+                       price_volume=price_volume,
+                       cost_bps=cost_bps, spread_bps=spread_bps,
+                       borrow_fee_bps=borrow_fee_bps,
+                       slippage_model=slippage_model,
+                       adv_impact_coeff=adv_impact_coeff,
+                       adv_participation_coeff=adv_participation_coeff,
+                       aum=aum, adv_window=adv_window, vol_target=vol_target,
+                       max_weight=max_weight,
+                       max_drawdown_stop=max_drawdown_stop,
+                       weighting_mode=weighting_mode,
+                       hrp_lookback=hrp_lookback,
+                       hrp_linkage_method=hrp_linkage_method)
     portfolio = None
     try:
-        res = ev_portfolio.evaluate_portfolio(
-            lagged, direction=obj.direction, quantiles=quantiles,
-            rebalance=rebalance, long_short=long_short, start=start, end=end,
-            price_table=price_table, capital_constrained=capital_constrained,
-            price_volume=price_volume,
-            cost_bps=cost_bps, spread_bps=spread_bps, borrow_fee_bps=borrow_fee_bps,
-            slippage_model=slippage_model, adv_impact_coeff=adv_impact_coeff,
-            adv_participation_coeff=adv_participation_coeff, aum=aum,
-            adv_window=adv_window, vol_target=vol_target, max_weight=max_weight,
-            max_drawdown_stop=max_drawdown_stop, weighting_mode=weighting_mode,
-            hrp_lookback=hrp_lookback, hrp_linkage_method=hrp_linkage_method)
+        res = ev_portfolio.evaluate_portfolio(lagged, **port_kwargs)
         portfolio = ev_portfolio.summarize_portfolio(res)
         rets = _returns_series(res)
         boot_sharpe = ev_stats.bootstrap_sharpe(rets, n_boot=n_boot, seed=seed)
@@ -277,6 +378,25 @@ def _run_signal(obj: Signal, universe, start, end, benchmark, price_table,
         portfolio = {"portfolio_reason": f"{type(exc).__name__}: {exc}"}
     results["portfolio"] = portfolio
     results["tier3"] = tier3
+
+    # Forward-opt: WFA + PBO + CPCV over construction variants (opt-in)
+    if forward_opt:
+        try:
+            fwd = _forward_opt_eval(
+                lagged, port_kwargs, quantiles, rebalance, long_short,
+                forward_opt_grid, forward_opt_n_folds, forward_opt_min_train,
+                forward_opt_n_groups, forward_opt_k_test,
+                forward_opt_embargo_pct)
+        except Exception as exc:   # best-effort, never fatal to the run
+            fwd = {"tuned_oos_sharpe": None,
+                   "fwdopt_reason": f"{type(exc).__name__}: {exc}"}
+        results["forward_opt"] = fwd
+        if "fwdopt_reason" not in fwd:
+            rows += (_stat_rows("forward_opt", -1, fwd, n_key="n_folds")
+                     + _stat_rows("forward_opt_cpcv_default", -1,
+                                  fwd["cpcv_default"], n_key="n_groups")
+                     + _stat_rows("forward_opt_cpcv_best", -1,
+                                  fwd["cpcv_best"], n_key="n_groups"))
 
     # BH-FDR across every p-value this run produced
     records = []
@@ -323,7 +443,14 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         max_drawdown_stop: float | None = None,
         weighting_mode: str = "quantile",
         hrp_lookback: int = 126,
-        hrp_linkage_method: str = "single") -> dict:
+        hrp_linkage_method: str = "single",
+        forward_opt: bool = False,
+        forward_opt_grid: "dict | None" = None,
+        forward_opt_n_folds: int = 7,
+        forward_opt_min_train: int = 252,
+        forward_opt_n_groups: int = 6,
+        forward_opt_k_test: int = 2,
+        forward_opt_embargo_pct: float = 0.01) -> dict:
     registry_path = registry_path or ev_registry.REG_PATH
     panel = trades_df = None
     dropped = {}
@@ -337,7 +464,10 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
             cost_bps, spread_bps, borrow_fee_bps, slippage_model,
             adv_impact_coeff, adv_participation_coeff, aum, adv_window,
             vol_target, max_weight, max_drawdown_stop,
-            weighting_mode, hrp_lookback, hrp_linkage_method)
+            weighting_mode, hrp_lookback, hrp_linkage_method,
+            forward_opt, forward_opt_grid, forward_opt_n_folds,
+            forward_opt_min_train, forward_opt_n_groups, forward_opt_k_test,
+            forward_opt_embargo_pct)
     elif isinstance(obj, EventSet):
         input_type = "event_set"
         lagged = ev_data.apply_lag(obj.frame, obj.lag_days)
@@ -490,7 +620,14 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
                        "tax": tax,
                        "robustness": robustness,
                        "robustness_n_trials": robustness_n_trials if robustness else None,
-                       "robustness_sigma_bps": robustness_sigma_bps if robustness else None}}
+                       "robustness_sigma_bps": robustness_sigma_bps if robustness else None,
+                       "forward_opt": forward_opt,
+                       "forward_opt_grid": forward_opt_grid if forward_opt else None,
+                       "forward_opt_n_folds": forward_opt_n_folds if forward_opt else None,
+                       "forward_opt_min_train": forward_opt_min_train if forward_opt else None,
+                       "forward_opt_n_groups": forward_opt_n_groups if forward_opt else None,
+                       "forward_opt_k_test": forward_opt_k_test if forward_opt else None,
+                       "forward_opt_embargo_pct": forward_opt_embargo_pct if forward_opt else None}}
     with open(os.path.join(out_dir, "run_meta.json"), "w",
               encoding="utf-8") as fh:
         json.dump(_json_safe(meta), fh, indent=2, default=str)
@@ -513,6 +650,19 @@ def run(obj, universe=None, start=None, end=None, benchmark="SPY",
         frame["universe_hash"] = uhash
         frame["date_range"] = date_range
         frame["created_at"] = created_at
+        # Execution provenance, stamped here so unified-eval rows stop
+        # defaulting to UNKNOWN: the cost params only reach an execution
+        # engine on the Signal path (backtest.py weight-matrix engine);
+        # EventSet and TradeRule evaluations run no cost-bearing engine
+        # today, so their honest hash is the legacy no-cost config.
+        if input_type == "signal":
+            exec_hash = ev_execution.config_hash(ev_execution.config_from_flat(
+                cost_bps=cost_bps, spread_bps=spread_bps,
+                borrow_fee_bps=borrow_fee_bps, slippage_model=slippage_model,
+                impact_coeff=adv_impact_coeff, max_weight=max_weight))
+        else:
+            exec_hash = ev_execution.config_hash(ev_execution.LEGACY)
+        frame["execution_hash"] = exec_hash
         rows_written = ev_registry.append(frame, path=registry_path)
 
     return {"name": obj.name, "input_type": input_type, "run_id": run_id,

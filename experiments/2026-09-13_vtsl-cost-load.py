@@ -66,6 +66,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from evaluation import execution as ev_execution
+
 ANN = 252
 DEV_END = pd.Timestamp("2016-01-01")          # 2016+ holdout, same split as the VTSL writeups
 FEE_BPS_MONTH_GRID = [0.0, 0.5, 1.0, 2.0, 5.0]  # bps notional per active month (one write)
@@ -109,16 +111,15 @@ def apply_costs(src: pd.Series, pos: pd.Series, dates: pd.DatetimeIndex,
     Costs: (1) fee once per ACTIVE calendar month on the first active day (the
     one option write per roll month; write-side half-spread already in index),
     (2) optional annual equity-leg drag (bps/yr) on active days only (BXM long
-    leg implemented via ETF/basket instead of the notional S&P 500)."""
-    held = pos.reindex(dates).fillna(0.0)
-    active = held > 0.5
-    month = active.index.to_period("M")
-    first_active_day = active.groupby(month).cumsum() == 1   # True on 1st active day each month
-    cost = pd.Series(0.0, index=dates)
-    cost[first_active_day] = fee_bps_per_active_month / 1e4
-    if eq_leg_bps_yr:
-        cost = cost + (eq_leg_bps_yr / 1e4 / ANN) * active.astype(float)
-    return (src.reindex(dates).fillna(0.0) - cost)
+    leg implemented via ETF/basket instead of the notional S&P 500).
+    The model itself lives in evaluation/execution.py (option_write_cost_daily);
+    this is a local shim matching the pre-registered function exactly."""
+    net = (src.reindex(dates).fillna(0.0)
+           - ev_execution.option_write_cost_daily(
+               pos.reindex(dates).fillna(0.0),
+               fee_bps_active_month=fee_bps_per_active_month,
+               eq_leg_bps_yr=eq_leg_bps_yr, ann=ANN))
+    return net
 
 
 def main() -> None:

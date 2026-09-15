@@ -222,8 +222,13 @@ fundamentals ~1990s+, short_interest/borrow fees.
    (2017-05+)**; BXM 0.49->0.67 / 0.63->1.05; positive in all decades;
    k=0 not overfit (k=0.02/0.04 worse). Long-only comparison: BXMD/CMBO/CLL/
    CNDR dominate SPX on Sharpe at lower vol (0.66-0.72 vs 0.55). Caveats: Cboe
-   index levels are hypothetical fills (live option-writing costs not loaded);
-   pre-2007 backfills sparse; short-vol left tail mitigated but not eliminated.
+   index levels are hypothetical fills (live costs now modeled via
+   `evaluation.execution.option_write_cost_daily` -- per-active-month fee grid
+   + BXM equity-leg drag; conclusion: no verdict flips, breakeven fee ~83 bps/
+   active month to zero, see `experiments/2026-09-13_vtsl-cost-load.md`; the
+   write-side half-spread is embedded in the index by methodology and NOT
+   double-charged); pre-2007 backfills sparse; short-vol left tail mitigated
+   but not eliminated.
    Follow-ups queued: forward-optimization loop (CPCV/PBO) on the k grid,
    live-execution cost load, extend to BXMD/PUTR/CLL. Writeup:
    `experiments/2026-09-13_vix-term-structure.md`.

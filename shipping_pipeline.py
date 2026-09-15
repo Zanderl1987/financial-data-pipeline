@@ -13,9 +13,11 @@ Two keyless-ish sources tracking global shipping/supply-chain pressure:
     coverage across ocean, inland water, rail, truck, and air freight (PPI
     indexes + volume/activity series like Cass Freight Index, ATA Truck
     Tonnage, BTS Air Ton Miles, and AAR Rail Carloads/Intermodal), plus
-    a diesel fuel cost proxy. These substitute for the Baltic Dry Index /
-    Freightos FBX, which require paid licenses or ToS-restricted attribution
-    for time-series use.
+    diesel and residual/bunker fuel cost proxies. These substitute for the
+    Baltic Dry Index / Freightos FBX and for marine bunker price indexes
+    (Ship & Bunker, MABUX, Platts), which require paid licenses or
+    ToS-restricted attribution for time-series use — Ship & Bunker's
+    robots.txt explicitly disallows AI-crawler access.
 
 CLI:
   python shipping_pipeline.py             # incremental (last 90 days)
@@ -85,6 +87,7 @@ FREIGHT_SERIES = {
     "FRGEXPUSM649NCIS":  ("Cass Freight Index: Expenditures", "monthly", "Index Jan 1990=1"),
     # ── Fuel cost proxy ──────────────────────────────────────────────────────
     "WPU057303":         ("No. 2 Diesel Fuel PPI", "monthly", "Index"),
+    "WPU057407":         ("Residual Fuel Oil (Bunker Fuel) PPI", "monthly", "Index Jun 1985=100"),
 }
 
 

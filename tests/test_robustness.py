@@ -410,3 +410,65 @@ class TestCPCV:
             list(rb.cpcv_splits(300, n_groups=4, k_test=4))
         with pytest.raises(ValueError, match="observations"):
             list(rb.cpcv_splits(3, n_groups=6, k_test=2))
+
+
+class TestCpcvOnLabels:
+    def test_exact_purge_distribution(self):
+        n = 240
+        t1 = np.minimum(np.arange(n) + 20, n - 1)
+        values = np.linspace(-1, 1, n)
+        out = rb.cpcv_on_labels(n, t1=t1, values=values)
+        assert out["purge"] == "exact"
+        assert out["n_splits"] == 15
+        assert out["cpcv_oos_median"] is not None
+        # nanmean of the positive tail should still be positive
+        assert out["cpcv_pct_positive"] > 0
+
+    def test_degenerate_zero_horizon_equals_embargo_only(self):
+        # t1 = i (a label that resolves at its own observation) adds no purge
+        # beyond the test block itself -- with embargo 0 the splits are
+        # identical to the unlabeled generator
+        n = 240
+        t1 = np.arange(n)
+        with_t1 = list(rb.cpcv_splits(n, n_groups=6, k_test=2,
+                                      embargo_pct=0.0, t1=t1))
+        without = list(rb.cpcv_splits(n, n_groups=6, k_test=2,
+                                      embargo_pct=0.0))
+        for (tr1, te1), (tr2, te2) in zip(with_t1, without):
+            np.testing.assert_array_equal(tr1, tr2)
+            np.testing.assert_array_equal(te1, te2)
+
+    def test_nan_padded_values_do_not_vote(self):
+        n = 240
+        t1 = np.minimum(np.arange(n) + 10, n - 1)
+        values = np.linspace(-1, 1, n)
+        hidden = values.copy()
+        hidden[::2] = np.nan              # evens excluded from every mean
+        out = rb.cpcv_on_labels(n, t1=t1, values=hidden)
+        manual = [np.nanmean(hidden[test])
+                  for _, test in rb.cpcv_splits(n, n_groups=6, k_test=2,
+                                                embargo_pct=0.01, t1=t1)]
+        assert out["cpcv_oos_median"] == pytest.approx(
+            float(np.nanmedian(manual)), abs=0.001)
+        assert out["agg"] == "nanmean"
+
+    def test_invalid_t1_raises(self):
+        n = 60
+        with pytest.raises(ValueError, match="i <= t1"):
+            rb.cpcv_on_labels(n, t1=np.zeros(n), values=np.arange(n))  # t1 < i
+
+    def test_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="length n_obs"):
+            rb.cpcv_on_labels(60, t1=np.arange(60), values=np.arange(59))
+
+    def test_too_few_observations_reason(self):
+        out = rb.cpcv_on_labels(3, t1=np.arange(3), values=np.arange(3))
+        assert out["cpcv_oos_median"] is None
+        assert "observations" in out["cpcv_reason"]
+
+    def test_all_nan_partitions_reason(self):
+        n = 240
+        t1 = np.minimum(np.arange(n) + 10, n - 1)
+        out = rb.cpcv_on_labels(n, t1=t1, values=np.full(n, np.nan))
+        assert out["cpcv_oos_median"] is None
+        assert "finite" in out["cpcv_reason"]

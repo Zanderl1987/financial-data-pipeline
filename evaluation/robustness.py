@@ -18,6 +18,7 @@ A null that pays no costs while the strategy pays 10 bps is not a null.
 from __future__ import annotations
 
 import math
+import warnings
 from itertools import combinations
 
 import numpy as np
@@ -493,3 +494,69 @@ def cpcv_splits(n_obs: int, *, n_groups: int = 6, k_test: int = 2,
 
         train_idx = idx[~drop]
         yield train_idx, test_idx
+
+
+# ---------------------------------------------------------- 6. CPCCV on labels
+
+
+def cpcv_on_labels(n_obs: int, *, t1, values, agg=np.nanmean,
+                   n_groups: int = 6, k_test: int = 2,
+                   embargo_pct: float = 0.01) -> dict:
+    """
+    EXACT-purge CPCV OOS statistic over LABELED observations.
+
+    optimizer.cpcv_stability() is deliberately embargo-only: already-realized
+    daily P&L has no forward label horizon to purge against. Sample-level
+    evaluations DO -- each observation (a trade, a labeled signal) carries a
+    label window [i, t1[i]] that resolves in the FUTURE, so a training sample
+    whose outcome lands inside a test block can be dropped precisely, not
+    just embargoed. This is the labeled complement to cpcv_stability().
+
+    `t1`: label-end positional index per observation in the SAME positional
+    space as np.arange(n_obs) -- `t1[i]` is the last observation position up
+    to which observation i's outcome is still pending. meta_label.
+    label_end_indices() builds this from realized trades; callers must order
+    observations so contiguous groups = contiguous time blocks (entry time
+    for trades). `values`: per-observation outcome aligned to 0..n_obs-1,
+    aggregated over each TEST partition with `agg` (default nanmean; pass
+    NaN-padded values + nanmean to restrict a partition's vote to a subset).
+
+    Returns a distribution dict shaped like cpcv_stability()'s, plus the
+    explicit `purge: "exact"` provenance (cpcv_report() says "exact" only
+    when t1 is supplied).
+    """
+    meta = cpcv_report(n_obs, n_groups=n_groups, k_test=k_test,
+                       embargo_pct=embargo_pct, t1=t1)
+    if meta.get("n_splits") is None:
+        return {"cpcv_oos_median": None, "cpcv_reason": meta.get("cpcv_reason")}
+
+    t1_arr = np.asarray(t1, dtype=int)
+    vals = np.asarray(values, dtype=float)
+    if t1_arr.shape[0] != n_obs or vals.shape[0] != n_obs:
+        raise ValueError(f"t1 and values must be length n_obs "
+                         f"(got {t1_arr.shape[0]} and {vals.shape[0]})")
+    if ((t1_arr < np.arange(n_obs)) | (t1_arr >= n_obs)).any():
+        raise ValueError("t1 must satisfy i <= t1[i] < n_obs for every i "
+                         "(label end is at or after its own observation)")
+
+    with warnings.catch_warnings():
+        # an all-NaN partition makes nanmean warn; that case is reported via
+        # the finite-check below, not allowed to scream
+        warnings.simplefilter("ignore", RuntimeWarning)
+        per = [float(agg(vals[test_idx]))
+               for _, test_idx in cpcv_splits(n_obs, n_groups=n_groups,
+                                              k_test=k_test,
+                                              embargo_pct=embargo_pct,
+                                              t1=t1_arr)]
+    arr = np.asarray(per, dtype=float)
+    if not np.isfinite(arr).any():
+        return {"cpcv_oos_median": None,
+                "cpcv_reason": "no finite per-split statistic (nanmean over "
+                               "all-NaN partitions)"}
+    return {"cpcv_oos_median": round(float(np.nanmedian(arr)), 4),
+            "cpcv_oos_p5": round(float(np.nanpercentile(arr, 5)), 4),
+            "cpcv_oos_p95": round(float(np.nanpercentile(arr, 95)), 4),
+            "cpcv_pct_positive": round(100.0 * float((arr > 0).mean()), 1),
+            "n_splits": meta["n_splits"], "purge": meta["purge"],
+            "n_groups": meta["n_groups"], "k_test": meta["k_test"],
+            "agg": getattr(agg, "__name__", "callable")}

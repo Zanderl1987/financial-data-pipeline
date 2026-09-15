@@ -35,6 +35,64 @@ class TestTripleBarrierLabels:
         assert out.tolist() == [1, 0, 0, 1]
 
 
+class TestLabelEndIndices:
+    def test_known_answer_rank_of_last_entry_before_exit(self):
+        idx = pd.bdate_range("2020-01-01", periods=8)
+        trades = pd.DataFrame({
+            "entry_signal_date": [idx[0], idx[1], idx[5], idx[6]],
+            "exit_date": [idx[6], idx[1], idx[7], idx[6]]})
+        t1 = ml.label_end_indices(trades)
+        # entries sorted -> ranks: idx0->0, idx1->1, idx5->2, idx6->3
+        # t1[0]: last entry <= idx6 -> rank 3
+        # t1[1]: last entry <= idx1 -> rank 1
+        # t1[2]: last entry <= idx7 -> rank 3
+        # t1[3]: last entry <= idx6 -> rank 3
+        np.testing.assert_array_equal(t1, [3, 1, 3, 3])
+
+    def test_alignment_preserved_for_shuffled_rows(self):
+        idx = pd.bdate_range("2020-01-01", periods=5)
+        trades = pd.DataFrame({
+            "symbol": ["C", "A", "D", "B"],
+            "entry_signal_date": [idx[3], idx[0], idx[4], idx[1]],
+            "exit_date": [idx[4], idx[2], idx[4], idx[2]]})
+        t1 = ml.label_end_indices(trades)
+        assert len(t1) == 4
+        # last entry <= idx2 is rank1 (idx0); <= idx4 is rank3 (idx3)
+        np.testing.assert_array_equal(t1, [3, 1, 3, 1])
+
+    def test_exit_before_later_entry_clamps_to_own_rank(self):
+        # an exit before several later entries still resolves at or after
+        # the trade's OWN rank (the label is pending over [rank, t1[rank]])
+        idx = pd.bdate_range("2020-01-01", periods=6)
+        trades = pd.DataFrame({
+            "entry_signal_date": [idx[0], idx[2], idx[3]],
+            "exit_date": [idx[1], idx[4], idx[5]]})
+        t1 = ml.label_end_indices(trades)
+        np.testing.assert_array_equal(t1, [0, 2, 2])
+
+    def test_satisfies_positional_invariant(self):
+        idx = pd.bdate_range("2020-01-01", periods=60)
+        n = 50
+        trades = pd.DataFrame({
+            "entry_signal_date": idx[:n],
+            "exit_date": idx[np.minimum(np.arange(n) + 5, n - 1)]})
+        t1 = ml.label_end_indices(trades)
+        assert t1.shape == (n,)
+        assert (t1 >= np.arange(n)).all() and (t1 < n).all()
+
+    def test_missing_exit_column_raises(self):
+        with pytest.raises(ValueError):
+            ml.label_end_indices(pd.DataFrame({"entry_signal_date": [pd.Timestamp("2020-01-01")]}))
+
+    def test_nat_exit_raises(self):
+        idx = pd.bdate_range("2020-01-01", periods=3)
+        trades = pd.DataFrame({
+            "entry_signal_date": idx,
+            "exit_date": pd.to_datetime([idx[0], None, idx[2]])})
+        with pytest.raises(ValueError, match="realized exit_date"):
+            ml.label_end_indices(trades)
+
+
 class TestBuildFeatures:
     def test_trailing_return_known_answer(self):
         closes = [100.0] * 25
@@ -275,3 +333,61 @@ class TestEvaluateMetaFilter:
         out = ml.evaluate_meta_filter(scored, threshold=0.6)
         assert "meta_reason" not in out
         assert out["filtered"]["win_rate_pct"] > out["unfiltered"]["win_rate_pct"]
+
+
+class TestMetaFilterPurgedCpcv:
+    def _scored(self, seed=4):
+        rng = np.random.default_rng(seed)
+        n = 300
+        ret_5d = rng.normal(0, 1, n)
+        wins = (ret_5d + rng.normal(0, 0.6, n)) > 0
+        pnl_pct = np.where(wins, rng.uniform(1, 5, n), -rng.uniform(1, 5, n))
+        dates = pd.bdate_range("2020-01-01", periods=n)
+        trades = pd.DataFrame({"symbol": "S",
+                               "entry_signal_date": dates,
+                               "exit_date": dates + pd.offsets.BDay(5),
+                               "pnl_pct": pnl_pct,
+                               "pnl_dollars": pnl_pct * 100,
+                               "side": "long", "days_held": 5})
+        feats = pd.DataFrame({"ret_5d": ret_5d}, index=trades.index)
+        return ml.walk_forward_meta_labels(trades, feats, min_train=60,
+                                           refit_every=10)
+
+    def test_purge_is_exact_and_keys_present(self):
+        scored = self._scored()
+        out = ml.cpcv_evaluate_meta_filter(scored, threshold=0.6)
+        assert "cpcv_reason" not in out
+        assert out["purge"] == "exact"
+        assert out["n_scored"] == len(scored.dropna(subset=["meta_proba"]))
+        for blk in ("unfiltered", "filtered_hits", "filtered_flat"):
+            assert out[blk]["purge"] == "exact"
+            assert out[blk]["cpcv_oos_median"] is not None
+            assert out[blk]["n_splits"] > 0
+
+    def test_filtered_hits_excludes_dropped_trades(self):
+        # dropped trades carry NaN in the hits series, so per-split means
+        # equal manual means over the NaN-padded series within each test
+        scored = self._scored()
+        scored = scored.dropna(subset=["meta_proba"]).sort_values(
+            "entry_signal_date").reset_index(drop=True)
+        t1 = ml.label_end_indices(scored)
+        kept = (scored["meta_proba"] >= 0.6).to_numpy()
+        pnl = scored["pnl_pct"].to_numpy()
+        hits = np.where(kept, pnl, np.nan)
+        from evaluation import robustness as rb
+        n_groups, k_test, embargo = 6, 2, 0.01
+        manual = [float(np.nanmean(hits[test]))
+                  for _, test in rb.cpcv_splits(len(scored), n_groups=n_groups,
+                                                k_test=k_test,
+                                                embargo_pct=embargo, t1=t1)]
+        out = ml.cpcv_evaluate_meta_filter(scored, threshold=0.6)
+        got = out["filtered_hits"]["cpcv_oos_median"]
+        assert got == pytest.approx(float(np.nanmedian(manual)), abs=0.001)
+
+    def test_too_few_scored_trades_reason(self):
+        scored = pd.DataFrame({
+            "pnl_pct": [1.0, -1.0],
+            "meta_proba": np.nan,
+        })
+        out = ml.cpcv_evaluate_meta_filter(scored)
+        assert out == {"cpcv_reason": "no out-of-sample-scored trades"}

@@ -89,6 +89,13 @@ class AdvancedParams:
     robustness_n_trials: int = 100
     robustness_sigma_bps: float = 5.0
     robustness_alpha: float = 0.95
+    forward_opt: bool = False
+    forward_opt_grid: dict | None = None
+    forward_opt_n_folds: int = 7
+    forward_opt_min_train: int = 252
+    forward_opt_n_groups: int = 6
+    forward_opt_k_test: int = 2
+    forward_opt_embargo_pct: float = 0.01
 
 
 @dataclass
@@ -261,6 +268,16 @@ def spec_to_runner_kwargs(spec: EvaluationSpec) -> dict:
     kwargs["robustness_sigma_bps"] = spec.advanced.robustness_sigma_bps
     kwargs["robustness_alpha"] = spec.advanced.robustness_alpha
 
+    # Forward-opt (WFA + PBO + CPCV over construction variants, signal runs)
+    if spec.advanced.forward_opt:
+        kwargs["forward_opt"] = True
+        kwargs["forward_opt_grid"] = spec.advanced.forward_opt_grid
+        kwargs["forward_opt_n_folds"] = spec.advanced.forward_opt_n_folds
+        kwargs["forward_opt_min_train"] = spec.advanced.forward_opt_min_train
+        kwargs["forward_opt_n_groups"] = spec.advanced.forward_opt_n_groups
+        kwargs["forward_opt_k_test"] = spec.advanced.forward_opt_k_test
+        kwargs["forward_opt_embargo_pct"] = spec.advanced.forward_opt_embargo_pct
+
     # Portfolio params (passed through to backtest via runner)
     kwargs["cost_bps"] = spec.portfolio.cost_bps
     kwargs["spread_bps"] = spec.portfolio.spread_bps
@@ -337,6 +354,13 @@ advanced:
   robustness_n_trials: 100
   robustness_sigma_bps: 5.0
   robustness_alpha: 0.95
+  forward_opt: false
+  # forward_opt_grid: {"quantiles": [5, 10], "rebalance": ["M", "W"]}
+  forward_opt_n_folds: 7
+  forward_opt_min_train: 252
+  forward_opt_n_groups: 6
+  forward_opt_k_test: 2
+  forward_opt_embargo_pct: 0.01
 
 portfolio:
   cost_bps: 1.0

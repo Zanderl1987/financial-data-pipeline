@@ -186,6 +186,61 @@ def load(path: str = REG_PATH) -> pd.DataFrame:
     return df
 
 
+def backfill_execution_hashes(path: str = REG_PATH,
+                              known: "dict[str, str] | None" = None) -> dict:
+    """
+    Recompute execution_hash where the producing config is DETERMINISTICALLY
+    known, leaving every other row as UNKNOWN_EXECUTION.
+
+    "unknown" is missing data, not a value -- this can never re-label the
+    bulk of pre-Step-B unified-eval rows (their cost config is unrecoverable
+    from the rows themselves), so those stay unknown. The single class we
+    CAN reconstruct is the TV strategy-catalog campaign: stage3/stage5 were
+    always run net of the pre-registered 10 bps per side (flat, via the
+    cost_adjusted monkeypatch or cost_config), which hashes to
+    TV_CAMPAIGN. `known` overrides that mapping ({evaluation: hash}).
+
+    Idempotent: rows that already carry a real hash are never touched.
+    Returns {"rows": n, "recomputed": n, "kept_unknown": n}.
+    """
+    from evaluation import execution as ev_execution
+
+    df = load(path)
+    if df.empty:
+        return {"rows": 0, "recomputed": 0, "kept_unknown": 0}
+    if known is None:
+        legacy_campaign_hash = ev_execution.config_hash(ev_execution.TV_CAMPAIGN)
+        known = {
+            # Stage-3 catalog rows were produced net of 10 bps a side; Stage-5
+            # used the same campaign cost model. Name excluded from the hash by
+            # design, so TV_CAMPAIGN is the exact legacy-flat hash either way.
+            "tv_strategy_catalog_stage3": legacy_campaign_hash,
+            "tv_strategy_catalog_stage5": legacy_campaign_hash,
+        }
+
+    df = df.copy()
+    unknown = df["execution_hash"] == UNKNOWN_EXECUTION
+    mapped = df["evaluation"].isin(known)
+    idx = (unknown & mapped).to_numpy().nonzero()[0]
+    recomputed = 0
+    for i in idx:
+        df.loc[i, "execution_hash"] = known[str(df.loc[i, "evaluation"])]
+        recomputed += 1
+
+    if recomputed:
+        fd = _acquire_lock(path)
+        try:
+            tmp = path + ".tmp"
+            df.to_parquet(tmp, index=False)
+            os.replace(tmp, path)
+        finally:
+            _release_lock(fd, path)
+
+    kept_unknown = int(((df["execution_hash"] == UNKNOWN_EXECUTION)).sum())
+    return {"rows": int(len(df)), "recomputed": recomputed,
+            "kept_unknown": kept_unknown}
+
+
 def append(rows: pd.DataFrame, path: str = REG_PATH) -> int:
     """Append rows atomically (write temp, os.replace). Returns rows added.
 

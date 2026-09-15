@@ -1034,6 +1034,42 @@ class TestRunner:
         assert (reg["statistic"] == "sharpe").any()
         assert reg["run_id"].nunique() == 1
 
+    def test_runner_stamps_execution_hash(self, tmp_path, monkeypatch):
+        from evaluation import execution as ev_execution
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path, n_boot=50,
+                            n_perm=10, seed=0)
+        reg = ev_registry.load(reg_path)
+        assert res["rows_written"] > 0
+        assert (reg["execution_hash"] != ev_registry.UNKNOWN_EXECUTION).all()
+        # Default kwargs (cost_bps=0) match the legacy no-cost config,
+        # since config_from_flat's name is excluded from the hash.
+        assert reg["execution_hash"].iloc[0] == ev_execution.config_hash(
+            ev_execution.LEGACY)
+
+    def test_runner_hash_varies_with_cost_bps(self, tmp_path, monkeypatch):
+        from evaluation import execution as ev_execution
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_gross = str(tmp_path / "gross.parquet")
+        reg_costly = str(tmp_path / "costly.parquet")
+        ev_runner.run(sig, out_root=str(tmp_path / "r1"),
+                      registry_path=reg_gross, cost_bps=0.0,
+                      n_boot=50, n_perm=10, seed=0)
+        ev_runner.run(sig, out_root=str(tmp_path / "r2"),
+                      registry_path=reg_costly, cost_bps=20.0,
+                      n_boot=50, n_perm=10, seed=0)
+        h_gross = ev_registry.load(reg_gross)["execution_hash"].iloc[0]
+        h_costly = ev_registry.load(reg_costly)["execution_hash"].iloc[0]
+        assert h_gross != h_costly
+        assert h_costly == ev_execution.config_hash(
+            ev_execution.config_from_flat(cost_bps=20.0))
+
     def test_dsr_trials_exclude_own_prior_run(self, tmp_path, monkeypatch):
         """A re-run of an already-registered signal must not double-count
         its own prior sharpe in the DSR trial population (finding 1)."""
@@ -1074,6 +1110,71 @@ class TestRunner:
         # still be counted.
         assert 2.0 in trials
         assert len(trials) == 2          # [other_sig's 2.0, this run's own]
+
+    def test_forward_opt_grid_path(self, tmp_path, monkeypatch):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path,
+                            n_boot=20, n_perm=5, seed=0,
+                            forward_opt=True,
+                            forward_opt_n_folds=3, forward_opt_min_train=10)
+        fwd = res["results"]["forward_opt"]
+        assert "fwdopt_reason" not in fwd, fwd
+        assert fwd["tuned_oos_sharpe"] is not None
+        # default grid: quantiles {5,10} x rebalance {M,W} = 4 variants
+        assert fwd["n_variants"] == 4
+        assert fwd["n_folds"] == 3
+        assert len(fwd["folds_argmax"]) == 3
+        # PBO runs over the grid; identical columns rank-tie, so the fit
+        # is defined (not None) even though every variant is degenerate here
+        assert fwd["pbo"] is not None
+        reg = ev_registry.load(reg_path)
+        assert (reg["evaluation"] == "forward_opt").any()
+        assert (reg["evaluation"] == "forward_opt_cpcv_best").any()
+        # run_meta records the request
+        with open(os.path.join(res["out_dir"], "run_meta.json")) as fh:
+            meta = json.load(fh)
+        assert meta["params"]["forward_opt"] is True
+        assert meta["params"]["forward_opt_n_folds"] == 3
+
+    def test_forward_opt_single_variant_is_honest(self, tmp_path, monkeypatch):
+        closes = _fake_price_world()
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path,
+                            n_boot=20, n_perm=5, seed=0,
+                            forward_opt=True,
+                            forward_opt_grid={"quantiles": [5],
+                                              "rebalance": ["M"]},
+                            forward_opt_n_folds=3, forward_opt_min_train=10)
+        fwd = res["results"]["forward_opt"]
+        assert "fwdopt_reason" not in fwd, fwd
+        assert fwd["n_variants"] == 1
+        assert fwd["tuned_oos_sharpe"] == fwd["default_oos_sharpe"]
+        assert fwd["pbo"] is None
+        assert "single variant" in fwd["pbo_reason"]
+
+    def test_forward_opt_reason_when_too_short(self, tmp_path, monkeypatch):
+        closes = _fake_price_world(n=40)
+        _install_fake_market(monkeypatch, closes)
+        sig = _runner_signal(closes, n_sig_dates=30)
+        reg_path = str(tmp_path / "reg" / "results.parquet")
+        res = ev_runner.run(sig, out_root=str(tmp_path / "reports"),
+                            registry_path=reg_path,
+                            n_boot=20, n_perm=5, seed=0,
+                            forward_opt=True,
+                            forward_opt_n_folds=7, forward_opt_min_train=252)
+        fwd = res["results"]["forward_opt"]
+        assert "fwdopt_reason" in fwd
+        assert "min_train (252) + n_folds (7)" in fwd["fwdopt_reason"]
+        # a failed forward-opt block never crashes the run
+        assert res["n_evaluations"] >= 2
+        assert res["rows_written"] >= 0
 
     def test_signal_no_registry_write(self, tmp_path, monkeypatch):
         closes = _fake_price_world()

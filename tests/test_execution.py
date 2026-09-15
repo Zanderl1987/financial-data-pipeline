@@ -176,6 +176,59 @@ class TestConfigContract:
             ex.PortfolioLimits(**kwargs)
 
 
+class TestOptionWriteCost:
+    """The VTSL overlay's pre-registered cost load (migrated into production
+    from experiments/2026-09-13_vtsl-cost-load.py)."""
+
+    def _months(self, first="2026-01-05", last="2026-03-31"):
+        idx = pd.bdate_range(first, last)
+        pos = pd.Series(1.0, index=idx)                # active every day
+        pos.loc["2026-01-12":"2026-01-16"] = 0.0       # one inactive week in Jan
+        pos.loc["2026-02-01":"2026-02-28"] = 0.0       # Feb flat (inactive)
+        return pos
+
+    def test_one_fee_per_active_month_on_first_active_day(self):
+        pos = self._months()
+        cost = ex.option_write_cost_daily(pos, fee_bps_active_month=5.0)
+        first_active = (pos > 0.5).groupby(pos.index.to_period("M")).cumsum() == 1
+        assert float(cost[first_active].sum()) == 2 * (5.0 / 1e4)  # Jan, Mar
+        assert float(cost[~first_active].sum()) == 0.0
+
+    def test_equity_leg_drag_only_on_active_days(self):
+        pos = self._months()
+        cost = ex.option_write_cost_daily(pos, fee_bps_active_month=0.0,
+                                          eq_leg_bps_yr=10.0)
+        active = (pos > 0.5).astype(float)
+        ann = ex.TRADING_DAYS
+        nonzero = cost[cost != 0.0]
+        assert len(nonzero) > 0
+        assert set(nonzero.unique()) == {(10.0 / 1e4 / ann)}
+        # No drag where inactive (Feb, and the Jan gap).
+        assert float(cost[pos <= 0.5].sum()) == 0.0
+        assert float(cost.sum()) == pytest.approx(
+            float((10.0 / 1e4 / ann) * active.sum()))
+
+    def test_zero_fee_and_zero_drag_is_a_copy(self):
+        pos = self._months()
+        import numpy as np
+        assert np.allclose(ex.option_write_cost_daily(
+            pos, fee_bps_active_month=0.0, eq_leg_bps_yr=0.0).to_numpy(),
+            np.zeros(len(pos)))
+
+    def test_matches_experiment_apply_costs_semantics(self):
+        """Net-of-fee equals gross minus exactly one fee per active month --
+        the same arithmetic evaluation/execution.py.option_write_cost_daily
+        replaced the experiment-local implementation with."""
+        src = pd.Series(0.001, index=self._months().index)
+        pos = self._months()
+        cost = ex.option_write_cost_daily(pos, fee_bps_active_month=2.0)
+        net = src - cost
+        active_months = (pos > 0.5).groupby(pos.index.to_period("M")).any()
+        assert float(active_months.sum()) == 2
+        expected_drag = float(active_months.sum()) * (2.0 / 1e4)
+        assert float((src - net).sum()) == pytest.approx(expected_drag)
+
+
 class TestStage3CostEquivalence:
     """
     The campaign's realized cost arithmetic, pinned against the ORIGINAL

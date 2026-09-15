@@ -315,6 +315,49 @@ def daily_cost(costs: CostModel,
     return costs_series
 
 
+def option_write_cost_daily(position: pd.Series, *,
+                            fee_bps_active_month: float,
+                            eq_leg_bps_yr: float = 0.0,
+                            ann: int = TRADING_DAYS) -> pd.Series:
+    """
+    Per-day cost series (fraction of notional) for an option-WRITING overlay
+    (PUT / BXM) -- the VTSL strategy's "last gate before tradeable" load.
+
+    Pre-registered model -- do not change without re-running the writeup that
+    fixed it (experiments/2026-09-13_vtsl-cost-load.md). The published write
+    index ALREADY nets ~half the option bid-ask spread on the write (Whaley
+    2002: the BXM writes at bid, ~6 bps/month; current Cboe method VWAP-fills
+    the roll bid-floored, cash-settled at SOQ). Charging a modeled half-spread
+    again would double-count, so the honest incremental load is:
+
+      1. fee_bps_active_month -- per-contract exchange/clearing/ORF fees plus
+         residual slippage beyond the quoted VWAP/bid fill, charged ONCE per
+         ACTIVE calendar month on its first active day. The overlay holds a
+         constant target inside a month, so this is exactly one charge per
+         written option. (SPX options quote per contract, $100 multiplier:
+         sub-basis-point per contract; the 0/0.5/1/2/5 bps grid in the writeup
+         brackets zero-fee to a ~10-50x slippage blow-up.)
+      2. eq_leg_bps_yr -- BXM-only annual drag on ACTIVE days for holding the
+         long S&P 500 leg via ETF/basket (SPY-class ER ~10 bps/yr) instead of
+         the notional index. PUT has no equity leg (T-bill collateral, already
+         credited by the methodology); pass 0.0.
+
+    `position` is the effective position, already t0+1 shifted -- the same
+    series the daily P&L was computed on. Returns a Series on position's
+    index; subtract it from gross P&L:
+        net = gross.reindex(position.index).fillna(0.0) - option_write_cost_daily(...)
+    which reproduces the experiment's apply_costs() exactly.
+    """
+    active = position > 0.5
+    month = active.index.to_period("M")
+    first_active_day = active.groupby(month).cumsum() == 1
+    cost = pd.Series(0.0, index=active.index)
+    cost[first_active_day] = fee_bps_active_month / 1e4
+    if eq_leg_bps_yr:
+        cost = cost + (eq_leg_bps_yr / 1e4 / ann) * active.astype(float)
+    return cost
+
+
 def costs_from_legacy_kwargs(cost_bps: float = 0.0,
                              spread_bps: float = 0.0,
                              borrow_fee_bps: float = 0.0,
@@ -343,3 +386,32 @@ def costs_from_legacy_kwargs(cost_bps: float = 0.0,
     return CostModel(commission_bps=cost_bps, spread_bps=spread_bps,
                      borrow_fee_bps=borrow_fee_bps,
                      impact_model="sqrt", impact_coeff=impact_coeff)
+
+
+def config_from_flat(cost_bps: float = 0.0,
+                     spread_bps: float = 0.0,
+                     borrow_fee_bps: float = 0.0,
+                     slippage_model: "str | None" = None,
+                     impact_coeff: float = 0.0,
+                     max_weight: "float | None" = None) -> ExecutionConfig:
+    """
+    Build the ExecutionConfig a weight-matrix run with these flat kwargs
+    ACTUALLY executed, so a runner can stamp a truthful execution_hash.
+
+    The CostModel is built with the exact rules the engine applies
+    (costs_from_legacy_kwargs -- a run and this function can never disagree
+    on what `slippage_model` meant). `max_weight` is the one sizing field the
+    weight-matrix engine reads.
+
+    Deliberately NOT represented: vol_target and max_drawdown_stop (equity-
+    curve controls with no 1:1 ExecutionConfig field yet), and per-share fill
+    params. Two runs differing only on those hash equal today -- documented
+    rather than guessed into a field with different semantics.
+    """
+    return ExecutionConfig(
+        name="weight_matrix",
+        costs=costs_from_legacy_kwargs(
+            cost_bps=cost_bps, spread_bps=spread_bps,
+            borrow_fee_bps=borrow_fee_bps, slippage_model=slippage_model,
+            impact_coeff=impact_coeff),
+        sizing=Sizing(max_weight=max_weight))

@@ -53,6 +53,45 @@ def triple_barrier_labels(trades: pd.DataFrame) -> pd.Series:
     return (trades["pnl_pct"] > 0).astype(int).rename("meta_label")
 
 
+def label_end_indices(trades: pd.DataFrame) -> np.ndarray:
+    """
+    Positional t1 -- the label-END index per trade -- for CPCV EXACT purge.
+
+    robustness.cpcv_report() reports ``"purge": "exact"`` only when a t1
+    array is supplied; this is the t1 producer for labeled samples (trade
+    outcomes). A trade's label is its forward pnl, resolved at `exit_date`.
+    Over the entry-sorted positional index 0..N-1 a trade's label window is
+    [rank, t1[rank]], where t1[rank] is the positional rank of the LAST
+    trade whose entry_signal_date is <= this trade's exit_date -- every
+    subsequent observation position up to which this trade's outcome was
+    still pending at its own entry. cpcv_splits() drops any training trade
+    whose window overlaps a test block; embargo-only can only approximate
+    that.
+
+    Returns an int array aligned to `trades.index` (the caller's order is
+    preserved; sorting happens internally on entry_signal_date). Raises on
+    missing columns or a non-realized (NaT) exit -- an open position has no
+    label end to purge against, and silently clamping it would under-purge.
+    """
+    need = {"entry_signal_date", "exit_date"}
+    missing = need.difference(trades.columns)
+    if missing:
+        raise ValueError(f"label_end_indices needs columns {sorted(need)}, "
+                         f"missing {sorted(missing)}")
+    s = trades[["entry_signal_date", "exit_date"]]
+    if s["exit_date"].isna().any():
+        raise ValueError("label_end_indices needs a realized exit_date for "
+                         "every trade (open positions have no label end to "
+                         "purge against)")
+    order = s["entry_signal_date"].sort_values(kind="stable").index
+    entries = s["entry_signal_date"].loc[order].to_numpy()
+    exits = s["exit_date"].loc[order].to_numpy()
+    # rank of the last entry <= this exit; >= own rank since exit >= entry
+    t1 = np.searchsorted(entries, exits, side="right") - 1
+    t1 = np.maximum(t1, np.arange(len(s)))   # defensive; provably >= own rank
+    return pd.Series(t1, index=order).loc[trades.index].to_numpy()
+
+
 # --------------------------------------------------------------- features
 
 def _indicator_frames(cache: dict, indicator_cols) -> dict:
@@ -269,3 +308,58 @@ def evaluate_meta_filter(trades_with_proba: pd.DataFrame,
            "kept_fraction": round(len(kept) / len(scored), 3),
            "unfiltered": trade_summary(scored),
            "filtered": trade_summary(kept)}
+
+
+def cpcv_evaluate_meta_filter(trades_with_proba: pd.DataFrame,
+                              threshold: float = 0.5,
+                              n_groups: int = 6, k_test: int = 2,
+                              embargo_pct: float = 0.01) -> dict:
+    """
+    EXACT-purge CPCV of the meta-filter decision at `threshold`, per
+    robustness.cpcv_on_labels() on the scored (non-NaN meta_proba) trades.
+
+    Three per-split out-of-sample series over the purged test partitions:
+
+    - unfiltered      -- mean pnl_pct of EVERY test trade (primary-signal
+                         baseline),
+    - filtered_hits   -- mean pnl_pct of the KEPT trades only (filter's hit
+                         quality; NaN-padded so dropped trades simply don't
+                         vote),
+    - filtered_flat   -- mean pnl_pct of kept trades and 0.0 for dropped
+                         ones (what the filtered strategy actually realizes
+                         per signal -- the flat stance dilutes it).
+
+    `purge` is reported as "exact": t1 comes from label_end_indices(), so a
+    training trade whose outcome RESOLVES inside a test block is dropped --
+    the improvement over cpcv_stability()'s embargo-only path, which only
+    holds for realized P&L series with no label horizon.
+    """
+    from evaluation.robustness import cpcv_report as _cpcv_report
+    from evaluation.robustness import cpcv_on_labels as _cpcv_on_labels
+
+    scored = trades_with_proba.dropna(subset=["meta_proba"]).copy()
+    if scored.empty:
+        return {"cpcv_reason": "no out-of-sample-scored trades"}
+    scored = scored.sort_values(["entry_signal_date", "symbol"],
+                                kind="stable").reset_index(drop=True)
+    n_obs = len(scored)
+    meta = _cpcv_report(n_obs, n_groups=n_groups, k_test=k_test,
+                        embargo_pct=embargo_pct, t1=np.zeros(n_obs))
+    if meta.get("n_splits") is None:
+        return {"cpcv_reason": meta.get("cpcv_reason")}
+
+    t1 = label_end_indices(scored)
+    pnl = scored["pnl_pct"].to_numpy(dtype=float)
+    kept = (scored["meta_proba"] >= threshold).to_numpy()
+    hits = np.where(kept, pnl, np.nan)
+    flat = np.where(kept, pnl, 0.0)
+
+    common = dict(n_groups=n_groups, k_test=k_test, embargo_pct=embargo_pct)
+    unf = _cpcv_on_labels(n_obs, t1=t1, values=pnl, **common)
+    hit = _cpcv_on_labels(n_obs, t1=t1, values=hits, **common)
+    flt = _cpcv_on_labels(n_obs, t1=t1, values=flat, **common)
+    return {"threshold": threshold, "n_scored": int(n_obs),
+            "n_kept": int(kept.sum()),
+            "kept_fraction": round(float(kept.mean()), 3),
+            "purge": "exact",
+            "unfiltered": unf, "filtered_hits": hit, "filtered_flat": flt}

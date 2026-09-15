@@ -350,7 +350,7 @@ class TrialLog:
             "n": res.n_days or res.n_trades,
             "universe_hash": self.universe_hash,
             "date_range": self.date_range,
-            "created_at": pd.Timestamp.utcnow().isoformat(),
+            "created_at": pd.Timestamp.now("UTC").isoformat(),
             "execution_hash": self.execution_hash,
         }
         self._pending.append(row)
@@ -371,7 +371,7 @@ class TrialLog:
             "n": n,
             "universe_hash": self.universe_hash,
             "date_range": self.date_range,
-            "created_at": pd.Timestamp.utcnow().isoformat(),
+            "created_at": pd.Timestamp.now("UTC").isoformat(),
             "execution_hash": self.execution_hash,
         })
 
@@ -470,6 +470,120 @@ def cpcv_stability(matrix: pd.DataFrame, best_col: "int | None", *,
            "cpcv_pct_positive": round(100.0 * float((arr > 0).mean()), 1),
            "n_splits": meta["n_splits"], "purge": meta["purge"],
            "n_groups": meta["n_groups"], "k_test": meta["k_test"]}
+
+
+# ------------------------------------------------- forward-opt WFA + PBO + CPCV
+
+
+def forward_opt(matrix: pd.DataFrame, default_col: "int",
+                *, n_folds: int = 7, min_train: int = 252,
+                n_groups: int = 6, k_test: int = 2,
+                embargo_pct: float = 0.01) -> dict:
+    """
+    Walk-forward optimisation with PBO and CPCV on a construction-variant
+    return matrix.
+
+    `matrix` is (T days, N variants) of daily net returns, one column per
+    construction variant. `default_col` is the positional index (int) of the
+    user's default construction.
+
+    Expanding-window WFA (identical IS/OOS to the experiment scripts):
+      - For each of `n_folds` folds the in-sample window is everything
+        before the fold's test chunk; the argmax variant on IS Sharpe is
+        chosen, and its test returns are stitched into the tuned OOS curve.
+      - The default variant's OOS returns are stitched in parallel.
+    PBO: probability of backtest overfitting across all N variants.
+    CPCV: OOS Sharpe stability of both the default and the full-sample-best
+    columns.
+
+    Returns a dict suitable for registering as evaluation="forward_opt" rows
+    and for including verbatim in results["forward_opt"].
+    """
+    from evaluation.robustness import pbo as _pbo
+    from evaluation.robustness import _sharpe as _rb_sharpe
+
+    if matrix.empty or len(matrix.columns) == 0:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": "empty return matrix"}
+
+    cols = list(matrix.columns)
+    n, c = matrix.shape
+
+    # --- validate default_col ------------------------------------------------
+    if not (isinstance(default_col, (int, np.integer))
+            and 0 <= int(default_col) < c):
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": f"default_col={default_col!r} not a valid "
+                                 f"positional index for matrix with {c} columns"}
+    default_pos = int(default_col)
+    default_label = cols[default_pos]
+
+    arr = matrix.to_numpy(dtype=float)
+    if n < min_train + n_folds:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": (f"need at least min_train ({min_train}) + "
+                                  f"n_folds ({n_folds}) = {min_train + n_folds} "
+                                  f"rows, got {n}")}
+
+    # --- expanding-window WFA ------------------------------------------------
+    bounds = np.linspace(min_train, n, n_folds + 1).astype(int)
+    if len(np.unique(bounds)) < n_folds + 1:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": f"n_folds={n_folds} produced duplicate "
+                                 f"boundaries on {n} rows"}
+    tuned_parts, def_parts, picks = [], [], []
+    for f in range(n_folds):
+        s, e = int(bounds[f]), int(bounds[f + 1])
+        if e - s < 1:
+            continue
+        is_perf = np.asarray([_rb_sharpe(arr[:s, j]) for j in range(c)])
+        best = (int(np.nanargmax(is_perf))
+                if np.isfinite(is_perf).any() else default_pos)
+        picks.append(best)
+        tuned_parts.append(arr[s:e, best])
+        def_parts.append(arr[s:e, default_pos])
+
+    if not tuned_parts:
+        return {"tuned_oos_sharpe": None,
+                "fwdopt_reason": "no usable test folds after splitting"}
+
+    tuned = np.concatenate(tuned_parts)
+    default = np.concatenate(def_parts)
+    tuned_oos  = round(float(_rb_sharpe(tuned)), 4)
+    default_oos = round(float(_rb_sharpe(default)), 4)
+
+    out = {
+        "tuned_oos_sharpe":  tuned_oos,
+        "default_oos_sharpe": default_oos,
+        "n_folds": len(picks),
+        "n_variants": c,
+        "folds_argmax": [cols[p] for p in picks],
+        "n_folds_pick_default": int(sum(1 for p in picks if p == default_pos)),
+    }
+
+    # --- PBO (needs >= 2 variants) -------------------------------------------
+    if c >= 2:
+        pbo_res = _pbo(matrix)
+        out["pbo"] = pbo_res.get("pbo")
+        out["pbo_n_combinations"] = pbo_res.get("n_combinations")
+        out["pbo_reason"] = pbo_res.get("pbo_reason")
+    else:
+        out["pbo"] = None
+        out["pbo_reason"] = ("single variant: selection noise measures "
+                             "require a grid (n_variants=1)")
+
+    # --- CPCV: default + full-sample-best columns ----------------------------
+    full_best = int(np.nanargmax(
+        [_rb_sharpe(arr[:, j]) for j in range(c)]))
+    cpcv_params = dict(n_groups=n_groups, k_test=k_test,
+                       embargo_pct=embargo_pct)
+    cpcv_default = cpcv_stability(matrix, default_pos, **cpcv_params)
+    cpcv_best    = cpcv_stability(matrix, full_best,    **cpcv_params)
+    out["cpcv_default"] = cpcv_default
+    out["cpcv_best"]    = cpcv_best
+    out["purge"] = cpcv_default.get("purge")
+
+    return out
 
 
 # ------------------------------------------------------------------ solvers
