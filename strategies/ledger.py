@@ -10,16 +10,17 @@ Resolvers:
     carry_futures  reads storage/reports/eval/carry_paper/position_current.parquet
                    + book_state.json -- the authoritatively persisted weights of
                    the carry forward book (10% book-vol scaled, long-only).
-    tv_survivor    replays the Stage-5 survivor union rule's entry/exit flags over
-                   the LATEST live price cache and reports positions still open at
-                   the data edge. The daily paper-trade artifacts store only CLOSED
-                   trades (evaluation/trades.py emits a row when a position closes,
-                   never while it is open), so the open book cannot come from those
-                   files -- the engine's own rule_flags + single-cursor entry/exit
-                   walk are mirrored verbatim (risk-free path: the TV portfolio
-                   config sets no stops). HRP weights for the open cohort are not
-                   known until the next portfolio run sizes it, so tv rows carry
-                   weight=None.
+    tv_survivor    reads the daily portfolio run's persisted OPEN BOOK first
+                   (storage/eval_artifacts/tv_survivor_portfolio_daily/
+                   open_holdings_current.parquet + open_book_state.json): the
+                   true ADMITTED cohort pinned at the data edge, with the
+                   allocation share (weight) HRP admission assigned. Since the
+                   daily run overwrites this book every day, what the ledger
+                   lists is exactly what the portfolio engine decided to hold
+                   open -- no replay drift. Weeks when the daily run has not
+                   refreshed (no file) fall back to a rule_open replay over the
+                   live cache with weight=None (mirrored flag walk; see
+                   _open_positions_from_flags).
 
 OUTPUT
     storage/ledger/holdings_current.parquet   unified rows
@@ -49,6 +50,8 @@ COLUMNS = ["strategy", "symbol", "side", "weight",
 
 CARRY_PAPER_DIR = os.path.join("storage", "reports", "eval", "carry_paper")
 LEDGER_DIR = os.path.join("storage", "ledger")
+TV_OPEN_BOOK_DIR = os.path.join("storage", "eval_artifacts",
+                                "tv_survivor_portfolio_daily")
 
 
 def _utc_ts() -> str:
@@ -130,10 +133,66 @@ def _open_positions_from_flags(index, close, long_entry, long_exit,
     return []
 
 
+def _read_open_book(open_book_dir: "str | None" = None) -> "tuple[list[dict], dict] | None":
+    """The daily portfolio run's persisted admitted-open cohort, if present."""
+    open_book_dir = open_book_dir or TV_OPEN_BOOK_DIR
+    parquet_path = os.path.join(open_book_dir, "open_holdings_current.parquet")
+    state_path = os.path.join(open_book_dir, "open_book_state.json")
+    if not os.path.exists(parquet_path):
+        return None
+    ob = pd.read_parquet(parquet_path)
+    if ob.empty:
+        return None
+    state = {}
+    if os.path.exists(state_path):
+        with open(state_path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    rows = []
+    for _, r in ob.iterrows():
+        weight = r.get("weight")
+        weight = float(weight) if weight is not None and pd.notna(weight) else None
+        row = {
+            "strategy": "tv_survivor",
+            "symbol": str(r["symbol"]),
+            "side": str(r["side"]),
+            "weight": round(weight, 6) if weight is not None else None,
+            "signal_date": None if pd.isna(r.get("entry_signal_date")) or r.get("entry_signal_date") is None
+                           else str(pd.Timestamp(r["entry_signal_date"]).date()),
+            "entry_date": None if pd.isna(r.get("entry_date")) or r.get("entry_date") is None
+                          else str(pd.Timestamp(r["entry_date"]).date()),
+            "entry_price": None if pd.isna(r.get("entry_price")) or r.get("entry_price") is None
+                           else round(float(r["entry_price"]), 6),
+            "source": "admitted cohort pinned by the daily portfolio run "
+                      "(open_holdings_current.parquet; allocation share = weight)",
+        }
+        rows.append(row)
+    meta = {
+        "n": len(rows),
+        "slugs": state.get("strategies"),
+        "data_edge": state.get("data_edge"),
+        "date_range": state.get("date_range"),
+        "note": ("true admitted cohort pinned at the daily portfolio run's data "
+                 "edge (HRP/fractional allocation shares recorded at admission); "
+                 "refreshed by each daily run"),
+        "source_files": [parquet_path, state_path],
+    }
+    return rows, meta
+
+
 def resolve_tv(cache: "dict | None" = None, slugs: "list[str] | None" = None,
-               rule: "object | None" = None) -> "tuple[list[dict], dict]":
-    """TV survivor holdings currently open at the data edge of the live cache."""
+               rule: "object | None" = None,
+               open_book_dir: "str | None" = None) -> "tuple[list[dict], dict]":
+    """TV survivor holdings currently open, from the daily run's open book
+    when one is present, else a rule-open replay over the live cache.
+
+    The persisted open book is the authoritative source (the admitted cohort
+    with its allocation shares).  The flag replay is the fallback for
+    windows when no daily run has written a book: positions the survivor
+    union rule has left open at the cache's data edge, weight=None."""
     from strategies import portfolio as tv_portfolio
+    persisted = _read_open_book(open_book_dir)
+    if persisted is not None:
+        return persisted
     if slugs is None and rule is not None:
         slugs = [rule.name]
     if slugs is None:
@@ -157,16 +216,17 @@ def resolve_tv(cache: "dict | None" = None, slugs: "list[str] | None" = None,
                          "signal_date": hit["signal_date"],
                          "entry_date": hit["entry_date"],
                          "entry_price": hit["entry_price"],
-                         "source": "open position at data edge under the survivor "
-                                   "union rule (weights set by next HRP portfolio run)"})
+                         "source": "rule-open replay (no daily open book on disk); "
+                                   "weights set by the next portfolio run"})
     edges = [df.index.max() for df in cache.values()
              if df is not None and not df.empty and "close" in df.columns]
     meta = {
         "n": len(rows),
         "slugs": sorted(slugs),
         "data_edge": str(max(edges).strftime("%Y-%m-%d")) if edges else None,
-        "note": ("replay of the survivor union rule entry/exit flags on the latest "
-                 "live cache; only positions still open at the data edge are listed; "
+        "note": ("fallback replay of the survivor union rule entry/exit flags "
+                 "(no open_holdings_current.parquet from a daily portfolio run); "
+                 "only positions still open at the data edge are listed; "
                  "HRP weights are assigned at the next portfolio run"),
         "source_files": [],
     }

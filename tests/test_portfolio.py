@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import evaluation.trades as ev_trades  # noqa: E402
 import strategies.portfolio as pf  # noqa: E402
 from evaluation.contracts import TradeRule  # noqa: E402
@@ -186,6 +185,114 @@ class TestRunCombined:
         trades, summary = pf.run_combined(cache)
         assert called["cfg"].sizing.mode == "hrp"
         assert summary["strategies"] == ["solo"]
+
+
+class TestRunCombinedOpen:
+    def test_returns_trades_open_and_summary(self, monkeypatch):
+        captured = {}
+        open_df = pd.DataFrame({
+            "symbol": ["S0"], "side": ["long"],
+            "entry_signal_date": pd.Timestamp("2026-01-03"),
+            "entry_date": pd.Timestamp("2026-01-04"),
+            "entry_price": [10.0], "weight": [0.4], "size": [40000.0]})
+
+        def fake_simulate_open(rule, cache, notional=None, config=None):
+            captured["rule"] = rule
+            captured["config"] = config
+            return pd.DataFrame(columns=ev_trades.TRADE_COLS), open_df
+
+        monkeypatch.setattr(ev_trades, "simulate_open", fake_simulate_open)
+        monkeypatch.setattr(pf, "survivor_slugs", lambda: ["a", "b"])
+        monkeypatch.setattr(pf, "load_rule_for",
+                            lambda slug: (_long_rule(slug), "unit_tested"))
+        monkeypatch.setattr(pf, "with_price_floor", lambda r, floor: r)
+
+        cfg = pf.portfolio_config()
+        trades, open_out, summary = pf.run_combined_open(
+            {"S0": _ohlcv(pd.date_range("2026-01-01", periods=6), [10] * 6)},
+            config=cfg)
+        assert captured["rule"].name == "a+b"
+        assert captured["config"] is cfg
+        assert trades.empty
+        assert list(open_out["symbol"]) == ["S0"]
+        assert open_out["weight"].iloc[0] == 0.4
+        assert summary["strategies"] == ["a", "b"]
+
+    def test_default_survivors(self, monkeypatch):
+        called = {}
+
+        def fake_simulate_open(rule, cache, notional=None, config=None):
+            called["cfg"] = config
+            return (pd.DataFrame(columns=ev_trades.TRADE_COLS),
+                    pd.DataFrame(columns=ev_trades.OPEN_COLS))
+
+        monkeypatch.setattr(ev_trades, "simulate_open", fake_simulate_open)
+        monkeypatch.setattr(pf, "survivor_slugs", lambda: ["solo"])
+        monkeypatch.setattr(pf, "load_rule_for",
+                            lambda slug: (_long_rule(slug), "unit_tested"))
+        monkeypatch.setattr(pf, "with_price_floor", lambda r, floor: r)
+        trades, open_out, summary = pf.run_combined_open(
+            {"S0": _ohlcv(pd.date_range("2026-01-01", periods=5), [1, 2, 3, 4, 5])})
+        assert open_out.empty
+        assert called["cfg"].sizing.mode == "hrp"
+
+
+class TestDailyOpenBookPersistence:
+    def test_daily_run_writes_current_open_book(self, monkeypatch, tmp_path):
+        open_df = pd.DataFrame({
+            "symbol": ["AAPL"], "side": ["long"],
+            "entry_signal_date": pd.Timestamp("2026-09-11"),
+            "entry_date": pd.Timestamp("2026-09-14"),
+            "entry_price": [210.5], "weight": [0.25], "size": [250000.0]})
+        trades = pd.DataFrame(columns=ev_trades.TRADE_COLS)
+        summary = {"n_trades": 0, "summary_reason": "no realized trades",
+                   "strategies": ["a"]}
+        dates = pd.date_range("2025-09-01", periods=10)
+        cache = {"S0": _ohlcv(dates, [10.0] * 10)}
+
+        monkeypatch.setattr(pf, "survivor_slugs", lambda: ["a"])
+        monkeypatch.setattr(pf, "_load_live_cache",
+                            lambda symbols=None, lookback_days=252: cache)
+        monkeypatch.setattr(pf, "run_combined_open",
+                            lambda c, slugs=None, config=None, notional=None:
+                            (trades, open_df, summary))
+        monkeypatch.setattr(pf, "DAILY_ARTIFACT_DIR", str(tmp_path))
+
+        out_trades, out_summary = pf.run_daily_paper_trade(
+            confirm=True, register=False, write=False)
+        parquet_path = tmp_path / pf.OPEN_BOOK_FILE
+        assert parquet_path.exists()
+        saved = pd.read_parquet(parquet_path)
+        assert list(saved["symbol"]) == ["AAPL"]
+        assert saved["weight"].iloc[0] == 0.25
+        state_path = tmp_path / pf.OPEN_BOOK_STATE
+        assert state_path.exists()
+        import json
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["n_open"] == 1
+        assert state["data_edge"] == dates[-1].strftime("%Y-%m-%d")
+        assert state["strategies"] == ["a"]
+        assert out_trades is trades
+        assert out_summary is summary
+
+    def test_daily_empty_book_writes_empty_state(self, monkeypatch, tmp_path):
+        trades = pd.DataFrame(columns=ev_trades.TRADE_COLS)
+        open_df = pd.DataFrame(columns=ev_trades.OPEN_COLS)
+        summary = {"n_trades": 0, "summary_reason": "no realized trades",
+                   "strategies": ["a"]}
+        cache = {"S0": _ohlcv(pd.date_range("2025-09-01", periods=10), [10.0] * 10)}
+        monkeypatch.setattr(pf, "survivor_slugs", lambda: ["a"])
+        monkeypatch.setattr(pf, "_load_live_cache",
+                            lambda symbols=None, lookback_days=252: cache)
+        monkeypatch.setattr(pf, "run_combined_open",
+                            lambda c, slugs=None, config=None, notional=None:
+                            (trades, open_df, summary))
+        monkeypatch.setattr(pf, "DAILY_ARTIFACT_DIR", str(tmp_path))
+        pf.run_daily_paper_trade(confirm=True, register=False, write=False)
+        assert (tmp_path / pf.OPEN_BOOK_FILE).exists()
+        import json
+        state = json.loads((tmp_path / pf.OPEN_BOOK_STATE).read_text(encoding="utf-8"))
+        assert state["n_open"] == 0
 
 
 if __name__ == "__main__":

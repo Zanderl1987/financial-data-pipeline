@@ -877,3 +877,148 @@ class TestHrpSizing:
         a = ev_stats.permutation_trades(_rule(), cache, n_perm=15, seed=6, config=cfg)
         b = ev_stats.permutation_trades(_rule(), cache, n_perm=15, seed=6, config=cfg)
         assert a == b
+
+
+class TestOpenBook:
+    """allow_open/keep_open (the open-book path, evaluation/trades.py) --
+    positions still open at the data edge, reported with the allocation
+    share admission assigned instead of silently dropped.
+
+    Default behavior is untouched: keep_open=False stays identical to the
+    historical engine (an open candidate is terminal for its symbol and
+    appears nowhere).  These tests pin the NEW opt-in path and the "true
+    book" semantics of an open holding -- its committed capital and its
+    concurrent slot stay consumed for the rest of the sim."""
+
+    def _cand(self, df, allow_open=False, cfg=None):
+        cfg = cfg if cfg is not None else ex.ExecutionConfig()
+        return tr._next_candidate(
+            [(int(i), "long") for i in np.flatnonzero(df["_e"].to_numpy(bool))],
+            0, df["close"].astype(float),
+            df["_x"].to_numpy(bool), df["_x"].to_numpy(bool),
+            "AAA", 10_000.0, cfg, len(df), None, allow_open=allow_open)
+
+    def test_default_treats_open_position_as_terminal(self):
+        df = _frame([100, 100, 105, 105, 105],
+                    [True, False, False, False, False],
+                    [False] * 5)
+        assert self._cand(df, allow_open=False) is None
+
+    def test_allow_open_returns_open_candidate(self):
+        idx = pd.bdate_range("2024-01-01", periods=5)
+        df = _frame([100, 100, 105, 105, 105],
+                    [True, False, False, False, False],
+                    [False] * 5)
+        df.index = idx
+        cand = self._cand(df, allow_open=True)
+        assert cand["open"] is True
+        assert cand["row"]["symbol"] == "AAA"
+        assert cand["row"]["entry_date"] == idx[1]
+        assert cand["row"]["entry_signal_date"] == idx[0]
+        assert cand["row"]["entry_price"] == 100.0
+
+    def test_open_candidate_after_a_closed_trade(self):
+        # entry idx0 closes (exit sig idx2 -> exit_i 3), scanning resumes at
+        # cursor 4; a second entry at idx4 has no exit -> OPEN at the edge.
+        df = _frame([100.0] * 10,
+                    [True, False, False, False, True, False, False, False, False, False],
+                    [False, False, True, False, False, False, False, False, False, False])
+        first = self._cand(df, allow_open=True)
+        assert first.get("open") is not True
+        second = tr._next_candidate(
+            [(int(i), "long") for i in np.flatnonzero(df["_e"].to_numpy(bool))],
+            first["exit_i"] + 1, df["close"].astype(float),
+            df["_x"].to_numpy(bool), df["_x"].to_numpy(bool),
+            "AAA", 10_000.0, ex.ExecutionConfig(), len(df), None,
+            allow_open=True)
+        assert second["open"] is True
+        assert second["row"]["entry_signal_date"] == df.index[4]
+        assert second["row"]["entry_date"] == df.index[5]
+
+    def test_open_holding_consumes_capital_and_blocks_later_admission(self):
+        """The true-book semantic: an open position's committed capital stays
+        consumed, so a later candidate that the DEFAULT engine would admit
+        (the open symbol was dropped entirely) is now REJECTED."""
+        n = 15
+        a_entries = [False] * n
+        a_entries[1] = True          # open: entry_idx[2], never exits
+        c_entries = [False] * n
+        c_entries[4] = True          # entry_idx[5]
+        c_exits = [False] * n
+        c_exits[8] = True            # exit_idx[9]
+        aaa = _frame([100.0] * n, a_entries, [False] * n)
+        ccc = _frame([100.0] * n, c_entries, c_exits)
+        cache = {"AAA": aaa, "CCC": ccc}
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="fixed_fraction", fraction=1.0),
+            limits=ex.PortfolioLimits(capital=10_000.0))
+
+        realized, open_df = tr.simulate_open(_rule(), cache, config=cfg)
+        assert realized.empty                       # CCC was blocked by AAA's open hold
+        assert list(open_df["symbol"]) == ["AAA"]
+        row = open_df.iloc[0]
+        assert row["entry_date"] == aaa.index[2]
+        assert row["size"] == pytest.approx(10_000.0)
+        assert row["weight"] == pytest.approx(1.0)  # whole book committed
+
+        # Default engine: AAA's open position is dropped entirely, so CCC
+        # gets the budget -> the two must disagree here by design.
+        default = tr.simulate(_rule(), cache, config=cfg)
+        assert list(default["symbol"]) == ["CCC"]
+
+    def test_simulate_open_matches_simulate_when_everything_closes(self):
+        rng = np.random.default_rng(15)
+        n = 70
+        cache = {}
+        for s in ("AAA", "BBB", "CCC"):
+            px = 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, n)))
+            cache[s] = _frame(px, rng.random(n) < 0.15, rng.random(n) < 0.2)
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="fixed_fraction", fraction=0.05),
+            limits=ex.PortfolioLimits(capital=10_000_000.0))
+
+        realized, open_df = tr.simulate_open(_rule(), cache, config=cfg)
+        assert open_df.empty
+        default = tr.simulate(_rule(), cache, config=cfg)
+        pd.testing.assert_frame_equal(realized.reset_index(drop=True),
+                                      default.reset_index(drop=True))
+
+    def test_simulate_open_rejects_plain_fixed_notional(self):
+        cache = {"AAA": _frame([100, 100, 105, 105, 105],
+                               [True, False, False, False, False],
+                               [False] * 5)}
+        with pytest.raises(ValueError, match="requires a portfolio config"):
+            tr.simulate_open(_rule(), cache)
+
+    def test_hrp_open_cohort_carries_weighted_allocation_shares(self):
+        n = 80
+        rng_a = 100 + np.cumsum(np.random.default_rng(20).normal(0, 0.3, n))
+        rng_b = 100 + np.cumsum(np.random.default_rng(21).normal(0, 1.5, n))
+        a_entries = [False] * n
+        a_entries[30] = True
+        b_entries = [False] * n
+        b_entries[35] = True
+        aaa = _frame(rng_a, a_entries, [False] * n)
+        bbb = _frame(rng_b, b_entries, [False] * n)
+        cache = {"AAA": aaa, "BBB": bbb}
+        cfg = ex.ExecutionConfig(
+            sizing=ex.Sizing(mode="hrp", fraction=0.4, hrp_lookback=30),
+            limits=ex.PortfolioLimits(capital=100_000.0, max_concurrent=4))
+
+        realized, open_df = tr.simulate_open(_rule(), cache, config=cfg)
+        assert realized.empty
+        assert list(open_df["symbol"]) == ["AAA", "BBB"]
+        a_row = open_df.set_index("symbol").loc["AAA"]
+        b_row = open_df.set_index("symbol").loc["BBB"]
+        # AAA opened solo -> the n=1 special case gets the whole fraction
+        # budget (weight == size / equity, admission-assigned).
+        assert a_row["weight"] == pytest.approx(0.4, rel=1e-6)
+        assert a_row["size"] == pytest.approx(0.4 * 100_000.0, rel=1e-6)
+        # BBB joins AAA's open cohort; HRP gives the choppier name a
+        # sub-budget share -> its allocation share lands in (0, 0.4) and
+        # size == weight * equity.
+        assert 0.0 < b_row["weight"] < 0.4
+        assert b_row["size"] == pytest.approx(b_row["weight"] * 100_000.0,
+                                              rel=1e-3)
+        assert (open_df["weight"] > 0.0).all()
+        assert (open_df["weight"] <= 0.4).all()

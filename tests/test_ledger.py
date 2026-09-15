@@ -140,11 +140,12 @@ class TestOpenPositionsFromFlags:
 
 
 class TestResolveTv:
-    def test_injected_cache_and_rule(self):
+    def test_injected_cache_and_rule(self, tmp_path):
         idx = _bdate()
         cache = {"TEST": pd.DataFrame({"close": [100.0] * 8}, index=idx)}
         rows, meta = ledger.resolve_tv(cache=cache, rule=_trivial_rule(),
-                                       slugs=["test_union"])
+                                       slugs=["test_union"],
+                                       open_book_dir=str(tmp_path))
         assert len(rows) == 1
         assert rows[0]["strategy"] == "tv_survivor"
         assert rows[0]["symbol"] == "TEST"
@@ -156,13 +157,14 @@ class TestResolveTv:
         assert meta["slugs"] == ["test_union"]
         assert meta["data_edge"] == "2026-08-12"
 
-    def test_no_slugs_returns_empty_with_note(self):
-        rows, meta = ledger.resolve_tv(cache={}, slugs=[])
+    def test_no_slugs_returns_empty_with_note(self, tmp_path):
+        rows, meta = ledger.resolve_tv(cache={}, slugs=[],
+                                       open_book_dir=str(tmp_path))
         assert rows == []
         assert meta["n"] == 0
         assert "no Stage 5 survivors" in meta["note"]
 
-    def test_all_closed_returns_empty(self):
+    def test_all_closed_returns_empty(self, tmp_path):
         idx = _bdate()
         le = np.zeros(8, dtype=bool)
         le[1] = True
@@ -177,9 +179,73 @@ class TestResolveTv:
                          exits=closed_exits,
                          short_entries=lambda df: np.zeros(len(df), bool),
                          short_exits=lambda df: np.zeros(len(df), bool))
-        rows, meta = ledger.resolve_tv(cache=cache, rule=rule, slugs=["closure"])
+        rows, meta = ledger.resolve_tv(cache=cache, rule=rule, slugs=["closure"],
+                                       open_book_dir=str(tmp_path))
         assert rows == []
         assert meta["n"] == 0
+
+
+class TestResolveTvOpenBook:
+    """resolve_tv reads the daily portfolio run's persisted open book first
+    (the true admitted cohort with its allocation shares) and falls back to
+    the rule-open replay only when that book is absent."""
+
+    def _write_book(self, tmp_path, rows, state=None):
+        (tmp_path / "open_book_state.json").write_text(
+            json.dumps(state or {"strategies": ["a+b"], "data_edge": "2026-09-14",
+                                 "date_range": "2025-09-01:2026-09-14",
+                                 "n_open": len(rows)}), encoding="utf-8")
+        pd.DataFrame(rows).to_parquet(tmp_path / "open_holdings_current.parquet",
+                                      index=False)
+
+    def test_reads_persisted_open_book(self, tmp_path):
+        rows = [{"symbol": "AAPL", "side": "long",
+                 "entry_signal_date": pd.Timestamp("2026-09-11"),
+                 "entry_date": pd.Timestamp("2026-09-14"),
+                 "entry_price": 210.5, "weight": 0.25, "size": 250000.0}]
+        self._write_book(tmp_path, rows)
+        out, meta = ledger.resolve_tv(open_book_dir=str(tmp_path))
+        assert len(out) == 1
+        assert out[0]["strategy"] == "tv_survivor"
+        assert out[0]["symbol"] == "AAPL"
+        assert out[0]["weight"] == 0.25
+        assert out[0]["entry_date"] == "2026-09-14"
+        assert out[0]["signal_date"] == "2026-09-11"
+        assert out[0]["entry_price"] == 210.5
+        assert "admitted cohort" in out[0]["source"]
+        assert meta["n"] == 1
+        assert meta["slugs"] == ["a+b"]
+        assert meta["data_edge"] == "2026-09-14"
+        assert len(meta["source_files"]) == 2
+
+    def test_persisted_book_beats_flag_replay(self, tmp_path):
+        # A rule that would replay an open position AND a persisted book that
+        # disagrees -> the persisted book must win (it is the authoritative
+        # admitted cohort; the replay is only the fallback).
+        idx = _bdate()
+        cache = {"TEST": pd.DataFrame({"close": [100.0] * 8}, index=idx)}
+        self._write_book(tmp_path,
+                         [{"symbol": "OTHER", "side": "short",
+                           "entry_signal_date": pd.Timestamp("2026-09-01"),
+                           "entry_date": pd.Timestamp("2026-09-02"),
+                           "entry_price": 50.0, "weight": 0.4, "size": 40000.0}])
+        out, meta = ledger.resolve_tv(cache=cache, rule=_trivial_rule(),
+                                      slugs=["test_union"],
+                                      open_book_dir=str(tmp_path))
+        assert [r["symbol"] for r in out] == ["OTHER"]
+
+    def test_empty_open_book_falls_back_to_flags(self, tmp_path):
+        pd.DataFrame(columns=["symbol", "side", "entry_signal_date", "entry_date",
+                              "entry_price", "weight", "size"]).to_parquet(
+            tmp_path / "open_holdings_current.parquet", index=False)
+        idx = _bdate()
+        cache = {"TEST": pd.DataFrame({"close": [100.0] * 8}, index=idx)}
+        out, meta = ledger.resolve_tv(cache=cache, rule=_trivial_rule(),
+                                      slugs=["test_union"],
+                                      open_book_dir=str(tmp_path))
+        assert len(out) == 1
+        assert out[0]["weight"] is None
+        assert "replay" in meta["note"]
 
 
 class TestWriteSnapshot:

@@ -311,7 +311,7 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
             # needs_portfolio) -- both go through _simulate_single_pass, or the
             # null and the observed run aren't a fair comparison. See
             # docs/superpowers/specs/2026-09-03-single-pass-portfolio-engine-design.md.
-            rows = tr._simulate_single_pass(symbol_flags, rule.notional, _cfg)
+            rows, _ = tr._simulate_single_pass(symbol_flags, rule.notional, _cfg)
             perm = pd.DataFrame(rows, columns=tr.TRADE_COLS)
             if perm.empty:
                 continue

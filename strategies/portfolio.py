@@ -190,6 +190,33 @@ def run_combined(cache: dict, slugs: "list[str] | None" = None,
     return trades, summary
 
 
+OPEN_BOOK_FILE = "open_holdings_current.parquet"
+OPEN_BOOK_STATE = "open_book_state.json"
+
+
+def run_combined_open(cache: dict, slugs: "list[str] | None" = None,
+                      config=None, notional: "float | None" = None) -> tuple:
+    """Like run_combined, but ALSO returns positions still open at the data
+    edge with the allocation share (weight) admission assigned.
+
+    Returns (trades_df, open_df, summary_dict). The open df is the true
+    admitted cohort (not a rule-open replay) -- candidates whose exit never
+    fired before the last close, committed at their admission size/weight
+    under the same capital / concurrency / HRP gates as realized trades.
+    strategies/ledger.py's tv_survivor resolver reads the persisted
+    open_holdings_current.parquet from the daily run as the authoritative
+    live book and falls back to the flag replay only when it is absent."""
+    if slugs is None:
+        slugs = survivor_slugs()
+    rule = combine_survivors(slugs)
+    cfg = config if config is not None else portfolio_config()
+    trades, open_df = ev_trades.simulate_open(rule, cache, notional=notional,
+                                              config=cfg)
+    summary = ev_trades.trade_summary(trades)
+    summary["strategies"] = slugs
+    return trades, open_df, summary
+
+
 def run_paper_trade(confirm: bool = False, write: bool = False) -> tuple:
     """Run the combined portfolio on the Stage 5 holdout cache (paper only).
     With confirm=True the simulation actually runs; write=True persists
@@ -371,7 +398,7 @@ def run_daily_paper_trade(confirm: bool = False,
           f"{max(df.index.max() for df in cache.values())}")
 
     cfg = portfolio_config()
-    trades, summary = run_combined(cache, slugs, config=cfg)
+    trades, open_df, summary = run_combined_open(cache, slugs, config=cfg)
 
     print("\nDAILY PAPER TRADE (live prices, HRP-sized, shared capital)")
     print(f"  strategies: {', '.join(slugs)}")
@@ -387,6 +414,31 @@ def run_daily_paper_trade(confirm: bool = False,
     d_min = min(df.index.min() for df in cache.values()).strftime("%Y-%m-%d")
     d_max = max(df.index.max() for df in cache.values()).strftime("%Y-%m-%d")
     date_range = f"{d_min}:{d_max}"
+
+    # Persist the STILL-OPEN cohort + allocation shares as the authoritative
+    # TV book for the unified ledger (strategies/ledger.py tv_survivor reads
+    # this when present and falls back to a rule-open replay only when it is
+    # missing). Overwritten every run, carry-style; stable path so the
+    # ledger sees the true admitted cohort pinned at the data edge.
+    os.makedirs(DAILY_ARTIFACT_DIR, exist_ok=True)
+    book_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    open_df.to_parquet(os.path.join(DAILY_ARTIFACT_DIR, OPEN_BOOK_FILE),
+                       index=False)
+    import json
+    with open(os.path.join(DAILY_ARTIFACT_DIR, OPEN_BOOK_STATE), "w",
+              encoding="utf-8") as fh:
+        json.dump({"run_ts": book_ts, "strategies": slugs,
+                   "date_range": date_range,
+                   "universe_hash": u_hash,
+                   "data_edge": d_max,
+                   "n_open": int(len(open_df)),
+                   "note": "positions admitted and still open at the data "
+                           "edge, with the allocation share (weight) "
+                           "assigned at admission"},
+                  fh, indent=2)
+    if not open_df.empty:
+        print(f"  open book -> {DAILY_ARTIFACT_DIR}/{OPEN_BOOK_FILE} "
+              f"({len(open_df)} open, data edge {d_max})")
 
     # Register in eval registry (Phase 1 hygiene)
     if register:

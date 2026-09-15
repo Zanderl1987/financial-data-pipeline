@@ -165,7 +165,8 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
 
 def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     long_exit, short_exit, symbol: str, notional: float,
-                    cfg, n: int, volume: "pd.Series | None" = None) -> "dict | None":
+                    cfg, n: int, volume: "pd.Series | None" = None,
+                    allow_open: bool = False) -> "dict | None":
     """
     First eligible candidate trade for one symbol, searching entry signals
     starting at `cursor` (an index into the signal array, not a date). The
@@ -222,6 +223,20 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     exit_sig_i, reason = j, "rule"
                     break
         if exit_sig_i is None:
+            if allow_open:
+                # The entry is still OPEN at the data edge. Default callers
+                # (keep the None path) treat this as terminal and drop it;
+                # the open-book path (simulate_open -> keep_open=True) wants
+                # the position itself so the caller can report the live
+                # cohort with its admission-assigned size/weight.
+                row = {
+                    "symbol": symbol, "side": side,
+                    "entry_signal_date": close.index[sig_i],
+                    "entry_date": close.index[entry_i],
+                    "entry_price": float(entry_price),
+                    "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0),
+                }
+                return {"sig_i": sig_i, "exit_i": n - 1, "row": row, "open": True}
             return None                     # still open: blocks the symbol
         exit_i = exit_sig_i + 1
         if exit_i >= n:
@@ -476,7 +491,7 @@ def _portfolio_pass(rows: "list[dict]", cfg) -> "list[dict]":
 
 
 def _push_next(heap: list, sym: str, state: dict, cursor: int,
-              notional: float, cfg) -> None:
+              notional: float, cfg, allow_open: bool = False) -> None:
     """Generate one more candidate for `sym` starting at `cursor` and push
     it onto the shared heap, keyed (entry_date, symbol) -- symbol breaks
     ties because at most one candidate per symbol is ever heap-resident at
@@ -484,12 +499,14 @@ def _push_next(heap: list, sym: str, state: dict, cursor: int,
     themselves. Pushes nothing when the symbol has no further candidate."""
     cand = _next_candidate(state["entry_positions"], cursor, state["close"],
                            state["long_exit"], state["short_exit"], sym,
-                           notional, cfg, state["n"], state.get("volume"))
+                           notional, cfg, state["n"], state.get("volume"),
+                           allow_open=allow_open)
     if cand is not None:
         heapq.heappush(heap, (cand["row"]["entry_date"], sym, cand))
 
 
-def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dict]":
+def _simulate_single_pass(symbol_flags: dict, notional: float, cfg, *,
+                          keep_open: bool = False) -> "tuple[list, list]":
     """
     True single-pass portfolio simulation: candidates are generated ONE AT A
     TIME per symbol (via _next_candidate) and merged across symbols in
@@ -525,6 +542,18 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
     needs the live set of currently-open symbols to know what cohort to
     compute correlation-aware weights over at each admission decision. See
     evaluation/hrp.py and Sizing's own docstring for the full design.
+
+    With `keep_open=True` a candidate whose exit never fires before the data
+    ends is treated as an OPEN HOLDING instead of being dropped: it is
+    admitted subject to the same concurrency / sizing / capital gates, sits
+    in `open_positions` for the rest of the sim (its committed capital and
+    its concurrent slot stay consumed), and is returned in a second list so
+    the caller can report the live cohort. A rejected open candidate resumes
+    the symbol's search at sig_i+1 like any other rejection. keep_open=False
+    (the default) is the historical behavior: such a candidate is terminal
+    for its symbol and appears nowhere.
+
+    Returns (admitted_rows, open_rows); open_rows is [] with keep_open=False.
     """
     limits, sizing = cfg.limits, cfg.sizing
     capital = limits.capital
@@ -546,11 +575,13 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
         symbols[sym] = {"close": close, "volume": volume,
                         "long_exit": long_exit, "short_exit": short_exit,
                         "entry_positions": entry_positions, "n": n}
-        _push_next(heap, sym, symbols[sym], 0, notional, cfg)
+        _push_next(heap, sym, symbols[sym], 0, notional, cfg,
+                   allow_open=keep_open)
 
     equity = capital if capital is not None else 0.0
     open_positions = []          # (exit_date, committed, pnl_dollars, symbol)
     admitted = []
+    open_rows = []
 
     while heap:
         _, sym, cand = heapq.heappop(heap)
@@ -580,6 +611,20 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
             admit = committed_now + size <= capital + 1e-9
 
         if admit:
+            if cand.get("open"):
+                # Still-open position admitted as a live holding: consumes
+                # its slot + capital forever (terminal, like the default
+                # path drops it), and is reported with the allocation share
+                # (weight) admission assigned, so the wrap callers can pin
+                # the true cohort with its HRP/fractional weights.
+                share = round(size / equity, 6) if equity > 0 else None
+                open_rows.append({"symbol": sym, "side": row["side"],
+                                  "entry_signal_date": row["entry_signal_date"],
+                                  "entry_date": row["entry_date"],
+                                  "entry_price": row["entry_price"],
+                                  "weight": share, "size": round(size, 2)})
+                open_positions.append((pd.Timestamp.max, size, 0.0, sym))
+                continue                        # open: terminal, do not resume
             out_row = _admit_row(row, size, sizing)
             admitted.append(out_row)
             open_positions.append((out_row["exit_date"], size,
@@ -588,9 +633,10 @@ def _simulate_single_pass(symbol_flags: dict, notional: float, cfg) -> "list[dic
         else:
             next_cursor = cand["sig_i"] + 1     # THE fix: resume at entry, not exit
 
-        _push_next(heap, sym, symbols[sym], next_cursor, notional, cfg)
+        _push_next(heap, sym, symbols[sym], next_cursor, notional, cfg,
+                   allow_open=keep_open)
 
-    return admitted
+    return admitted, open_rows
 
 
 def simulate(rule, cache: dict, notional: "float | None" = None,
@@ -619,7 +665,7 @@ def simulate(rule, cache: dict, notional: "float | None" = None,
                 continue
             le, lx, se, sx = rule_flags(rule, df)
             symbol_flags[sym] = (df.index, df["close"], df.get("volume"), le, lx, se, sx)
-        rows = _simulate_single_pass(symbol_flags, notional, cfg) if symbol_flags else []
+        rows, _ = _simulate_single_pass(symbol_flags, notional, cfg) if symbol_flags else ([], [])
     else:
         rows = []
         for sym, df in cache.items():
@@ -645,3 +691,46 @@ def trade_summary(trades: pd.DataFrame) -> dict:
             "avg_pnl_pct": round(float(trades["pnl_pct"].mean()), 3),
             "median_days_held": float(trades["days_held"].median()),
             "n_symbols": int(trades["symbol"].nunique())}
+
+
+OPEN_COLS = ["symbol", "side", "entry_signal_date", "entry_date", "entry_price",
+             "weight", "size"]
+
+
+def simulate_open(rule, cache: dict, notional: "float | None" = None,
+                  *, config=None) -> "tuple[pd.DataFrame, pd.DataFrame]":
+    """
+    Like simulate(), but also returns the positions still open at the data
+    edge, carrying the committed size and the allocation share (weight) that
+    admission assigned.
+
+    Requires a portfolio config (capital, concurrency, or non-fixed sizing);
+    unconstrained fixed-notional runs have no budget semantics so there is no
+    meaningful weight to carry and this function raises.  When every admitted
+    candidate also closes within the window the open frame is empty and the
+    realized frame equals what simulate() returns.
+    """
+    cfg = ev_execution.resolve(config)
+    notional = rule.notional if notional is None else notional
+    needs_portfolio = (cfg.limits.capital is not None
+                       or cfg.limits.max_concurrent is not None
+                       or cfg.sizing.mode != "fixed_notional")
+    if not needs_portfolio:
+        raise ValueError(
+            "simulate_open requires a portfolio config "
+            "(capital, max_concurrent, or a non-fixed sizing mode); "
+            "unconstrained fixed-notional runs have no weight semantics."
+        )
+    symbol_flags = {}
+    for sym, df in cache.items():
+        if df.empty or "close" not in df.columns:
+            continue
+        le, lx, se, sx = rule_flags(rule, df)
+        symbol_flags[sym] = (df.index, df["close"], df.get("volume"),
+                             le, lx, se, sx)
+    if not symbol_flags:
+        return pd.DataFrame(columns=TRADE_COLS), pd.DataFrame(columns=OPEN_COLS)
+    admitted, open_rows = _simulate_single_pass(symbol_flags, notional, cfg,
+                                                keep_open=True)
+    return (pd.DataFrame(admitted, columns=TRADE_COLS),
+            pd.DataFrame(open_rows, columns=OPEN_COLS))
