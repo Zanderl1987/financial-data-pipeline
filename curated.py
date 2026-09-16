@@ -216,6 +216,7 @@ KEYS: dict[str, list[str]] = {
     # EIA refinery activity / crude trade
     "eia_refinery_activity":  ["series_id", "date"],
     "eia_crude_trade":        ["series_id", "date"],
+    "eia_petroleum_demand":   ["series_id", "date"],
     # USGS helium tables. MCS releases restate earlier stat years (the 2023
     # release re-covers 2018-2022), so the newest fetched snapshot per key
     # wins; country is part of the key because world production/reserves rows

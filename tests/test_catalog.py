@@ -216,6 +216,7 @@ EXPECTED_TABLES = [
     # Shipping / logistics (NY Fed GSCPI + FRED freight PPI)
     "shipping_gscpi",
     "shipping_freight_ppi",
+    "shipping_diesel_trade",
     # Piracy incidents (ICC IMB live-map archive + Wikipedia Somali hijacking log)
     "piracy_incidents",
     "somali_hijackings",
@@ -227,6 +228,8 @@ EXPECTED_TABLES = [
     # EIA refinery + crude trade (oil/transportation depth batch)
     "eia_refinery_activity",
     "eia_crude_trade",
+    # EIA distillate (diesel) product supplied / demand
+    "eia_petroleum_demand",
     # TSA checkpoint travel volumes
     "tsa_checkpoint",
     # Open-Meteo weather

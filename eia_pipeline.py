@@ -12,6 +12,7 @@ Outputs:
   storage/raw/eia/crude_production/**/*.parquet    (CATALOG: eia_crude_production)
   storage/raw/eia/refinery_activity/**/*.parquet   (CATALOG: eia_refinery_activity)
   storage/raw/eia/crude_trade/**/*.parquet         (CATALOG: eia_crude_trade)
+  storage/raw/eia/petroleum_demand/**/*.parquet    (CATALOG: eia_petroleum_demand)
 
 Usage:
   python eia_pipeline.py              # incremental (last 6 months)
@@ -40,6 +41,7 @@ NATGAS_DIR    = os.path.join(EIA_DIR, "natgas_storage")
 CRUDE_DIR     = os.path.join(EIA_DIR, "crude_production")
 REFINERY_DIR  = os.path.join(EIA_DIR, "refinery_activity")
 TRADE_DIR     = os.path.join(EIA_DIR, "crude_trade")
+DEMAND_DIR    = os.path.join(EIA_DIR, "petroleum_demand")
 
 REQUEST_INTERVAL = 0.25   # 240 req/min — EIA suspends keys on abuse
 MAX_RETRIES      = 3
@@ -60,6 +62,21 @@ STOCK_SERIES: dict[str, str] = {
     "WKJXUS1A": "Kerosene-Type Jet Fuel",
     "WRESTUS1": "Residual Fuel Oil",
     "WPRSTUS1": "Propane/Propylene",
+    # Distillate (diesel) stocks by PADD region — verified live via EIA API
+    "WDISTP11": "Distillate Fuel Oil, PADD 1 (East Coast)",
+    "WDISTP21": "Distillate Fuel Oil, PADD 2 (Midwest)",
+    "WDISTP31": "Distillate Fuel Oil, PADD 3 (Gulf Coast)",
+    "WDISTP41": "Distillate Fuel Oil, PADD 4 (Rocky Mountain)",
+    "WDISTP51": "Distillate Fuel Oil, PADD 5 (West Coast)",
+}
+
+# ---------------------------------------------------------------------------
+# Distillate (diesel) demand — weekly product supplied (route: petroleum/cons/wpsup)
+# Units: thousand barrels per day; frequency: weekly. National only — EIA does
+# not publish weekly product-supplied at PADD granularity (verified live).
+# ---------------------------------------------------------------------------
+DEMAND_SERIES: dict[str, str] = {
+    "WDIUPUS2": "Distillate Fuel Oil (Diesel), Product Supplied",
 }
 
 # ---------------------------------------------------------------------------
@@ -381,11 +398,50 @@ def fetch_crude_trade(start_date: str | None = None) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Distillate (diesel) demand — weekly product supplied
+# ---------------------------------------------------------------------------
+
+def fetch_petroleum_demand(start_date: str | None = None) -> pd.DataFrame:
+    print("Fetching weekly distillate (diesel) product supplied (EIA petroleum/cons/wpsup)...")
+    rows = _fetch_paginated(
+        "petroleum/cons/wpsup/data/",
+        base_params={
+            "api_key":            EIA_API_KEY,
+            "data[]":             "value",
+            "frequency":          "weekly",
+            "sort[0][column]":    "period",
+            "sort[0][direction]": "asc",
+        },
+        list_params={"facets[series][]": list(DEMAND_SERIES.keys())},
+        start_date=start_date,
+        label="demand",
+    )
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={"period": "date", "series": "series_id"})
+    df["date"]        = pd.to_datetime(df["date"], errors="coerce")
+    df["value"]       = pd.to_numeric(df["value"], errors="coerce")
+    df["series_name"] = df["series_id"].map(DEMAND_SERIES)
+    df["units"]       = df.get("units", "Thousand Barrels per Day")
+    df["frequency"]   = "weekly"
+    df["source"]      = "EIA"
+    df["fetched_at"]  = datetime.datetime.utcnow().isoformat()
+
+    keep = ["series_id", "series_name", "date", "value", "units",
+            "frequency", "source", "fetched_at"]
+    keep = [c for c in keep if c in df.columns]
+    df = df[keep].dropna(subset=["date", "value"])
+    return df.sort_values(["series_id", "date"]).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main(backfill: bool = False) -> None:
-    for d in (STOCKS_DIR, NATGAS_DIR, CRUDE_DIR, REFINERY_DIR, TRADE_DIR):
+    for d in (STOCKS_DIR, NATGAS_DIR, CRUDE_DIR, REFINERY_DIR, TRADE_DIR, DEMAND_DIR):
         os.makedirs(d, exist_ok=True)
 
     now   = datetime.datetime.utcnow()
@@ -483,6 +539,23 @@ def main(backfill: bool = False) -> None:
         print(f"    {len(df_trade):,} rows | {n_series} series | {d_min} to {d_max}")
     else:
         print("[!] No crude trade data returned.")
+
+    time.sleep(REQUEST_INTERVAL)
+
+    # ── Distillate (diesel) demand ─────────────────────────────────────────────
+    df_demand = fetch_petroleum_demand(start_date)
+    if not df_demand.empty:
+        path = write_partitioned(
+            df_demand, DEMAND_DIR,
+            f"eia_petroleum_demand_{mode_tag}_{today}.parquet",
+        )
+        n_series = df_demand["series_id"].nunique()
+        d_min    = df_demand["date"].min().strftime("%Y-%m-%d")
+        d_max    = df_demand["date"].max().strftime("%Y-%m-%d")
+        print(f"[+] {path}")
+        print(f"    {len(df_demand):,} rows | {n_series} series | {d_min} to {d_max}")
+    else:
+        print("[!] No distillate demand data returned.")
 
     print("\n--- COMPLETE ---")
 

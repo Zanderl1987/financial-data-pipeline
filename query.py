@@ -172,6 +172,7 @@ CATALOG: dict[str, str] = {
     "eia_crude_production":    _glob("eia/crude_production/**/*.parquet"),
     "eia_refinery_activity":   _glob("eia/refinery_activity/**/*.parquet"),
     "eia_crude_trade":         _glob("eia/crude_trade/**/*.parquet"),
+    "eia_petroleum_demand":    _glob("eia/petroleum_demand/**/*.parquet"),
     "eia_hourly_grid":         _glob("eia/hourly_grid/**/*.parquet"),
     # ── Index constituents (Iceberg) ──────────────────────────────────────────
     "index_members":           _iceberg_glob("constituents/index_members/**/*.parquet"),
@@ -302,6 +303,7 @@ CATALOG: dict[str, str] = {
     # ── Shipping / logistics (Iceberg) ──────────────────────────────────────
     "shipping_gscpi":         _iceberg_glob("shipping/gscpi/**/*.parquet"),
     "shipping_freight_ppi":   _iceberg_glob("shipping/freight_ppi/**/*.parquet"),
+    "shipping_diesel_trade":  _iceberg_glob("shipping/diesel_trade/**/*.parquet"),
     # ── Piracy incidents (ICC IMB live-map archive + Wikipedia Somali log) ────
     "piracy_incidents":        _glob("piracy/imb/**/*.parquet"),
     "somali_hijackings":       _glob("piracy/wiki/**/*.parquet"),

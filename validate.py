@@ -521,6 +521,12 @@ SCHEMAS: dict[str, dict] = {
         "date_col":    "date",
         "value_ranges": {"value": (0, 2_000_000)},   # thousand barrels
     },
+    "eia_petroleum_demand": {
+        "required":    ["series_id", "series_name", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 20_000)},   # thousand barrels per day
+    },
     "eia_natgas_storage": {
         "required":    ["duoarea", "date", "value", "fetched_at"],
         "critical_nn": ["duoarea", "date", "value"],
@@ -933,6 +939,12 @@ SCHEMAS: dict[str, dict] = {
         "required":    ["series_id", "date", "value", "fetched_at"],
         "critical_nn": ["series_id", "date", "value"],
         "date_col":    "date",
+    },
+    "shipping_diesel_trade": {
+        "required":    ["series_id", "date", "value", "fetched_at"],
+        "critical_nn": ["series_id", "date", "value"],
+        "date_col":    "date",
+        "value_ranges": {"value": (0, 10_000)},   # thousand barrels per day
     },
     # ── Piracy incidents ─────────────────────────────────────────────────────
     # incident_year is nullable (~2% of IMB pins carry no parseable year);

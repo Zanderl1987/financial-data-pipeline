@@ -36,9 +36,22 @@ FREIGHT_PPI_SCHEMA = Schema(
     NestedField(7,  "fetched_at", TimestamptzType(), required=True),
 )
 
+DIESEL_TRADE_SCHEMA = Schema(
+    NestedField(1,  "date",        DateType(),        required=True),
+    NestedField(2,  "value",       DoubleType(),      required=True),
+    NestedField(3,  "series_id",   StringType(),      required=True),
+    NestedField(4,  "name",        StringType(),      required=False),
+    NestedField(5,  "region",      StringType(),      required=False),
+    NestedField(6,  "region_name", StringType(),      required=False),
+    NestedField(7,  "frequency",   StringType(),      required=False),
+    NestedField(8,  "unit",        StringType(),      required=False),
+    NestedField(9,  "fetched_at",  TimestamptzType(), required=True),
+)
+
 TABLES = {
-    "shipping.gscpi":       GSCPI_SCHEMA,
-    "shipping.freight_ppi": FREIGHT_PPI_SCHEMA,
+    "shipping.gscpi":        GSCPI_SCHEMA,
+    "shipping.freight_ppi":  FREIGHT_PPI_SCHEMA,
+    "shipping.diesel_trade": DIESEL_TRADE_SCHEMA,
 }
 
 

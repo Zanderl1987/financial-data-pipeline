@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Shipping / Logistics Pipeline — NY Fed GSCPI + FRED freight PPI series.
+Shipping / Logistics Pipeline — NY Fed GSCPI + FRED freight PPI + EIA diesel trade.
 
-Two keyless-ish sources tracking global shipping/supply-chain pressure:
+Three keyless-ish sources tracking global shipping/supply-chain pressure:
 
   GSCPI (NY Fed Global Supply Chain Pressure Index) — single composite
   monthly index (z-score) built from shipping cost + PMI delivery-time
@@ -19,13 +19,22 @@ Two keyless-ish sources tracking global shipping/supply-chain pressure:
     ToS-restricted attribution for time-series use — Ship & Bunker's
     robots.txt explicitly disallows AI-crawler access.
 
+  EIA diesel (distillate fuel oil) waterborne trade (uses existing
+  EIA_API_KEY) — U.S. exports/imports of distillate fuel oil, national and
+  PADD-region imports. Diesel exports/imports are overwhelmingly seaborne,
+  so this is a genuine shipping-volume proxy, not another price index.
+  Verified live: EIA does not publish PADD-level distillate exports (only
+  national), so exports are national-only while imports include the 5
+  PADD regions.
+
 CLI:
   python shipping_pipeline.py             # incremental (last 90 days)
   python shipping_pipeline.py --backfill  # full available history
 
 Output (Apache Iceberg with Snappy compression):
-  shipping.gscpi       —  storage/iceberg/shipping/gscpi/
-  shipping.freight_ppi —  storage/iceberg/shipping/freight_ppi/
+  shipping.gscpi        —  storage/iceberg/shipping/gscpi/
+  shipping.freight_ppi  —  storage/iceberg/shipping/freight_ppi/
+  shipping.diesel_trade —  storage/iceberg/shipping/diesel_trade/
 """
 
 import argparse
@@ -48,6 +57,9 @@ load_dotenv()
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY")
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+
+EIA_API_KEY = os.environ.get("EIA_API_KEY")
+EIA_BASE = "https://api.eia.gov/v2"
 
 STORAGE_ROOT = Path(__file__).parent / "storage"
 ICEBERG_WAREHOUSE = STORAGE_ROOT / "iceberg"
@@ -88,6 +100,19 @@ FREIGHT_SERIES = {
     # ── Fuel cost proxy ──────────────────────────────────────────────────────
     "WPU057303":         ("No. 2 Diesel Fuel PPI", "monthly", "Index"),
     "WPU057407":         ("Residual Fuel Oil (Bunker Fuel) PPI", "monthly", "Index Jun 1985=100"),
+}
+
+# EIA distillate (diesel) waterborne trade — route: petroleum/move/wkly
+# Units: thousand barrels per day; frequency: weekly.
+# Verified live: exports have no PADD breakdown (national only); imports do.
+DIESEL_TRADE_SERIES = {
+    "WDIEXUS2":         ("U.S. Distillate Exports", "NUS-Z00", "U.S."),
+    "WDIIMUS2":         ("U.S. Distillate Imports", "NUS-Z00", "U.S."),
+    "WDIIM_R10-Z00_2":  ("Distillate Imports, PADD 1 (East Coast)", "R10-Z00", "PADD 1"),
+    "WDIIM_R20-Z00_2":  ("Distillate Imports, PADD 2 (Midwest)", "R20-Z00", "PADD 2"),
+    "WDIIM_R30-Z00_2":  ("Distillate Imports, PADD 3 (Gulf Coast)", "R30-Z00", "PADD 3"),
+    "WDIIM_R40-Z00_2":  ("Distillate Imports, PADD 4 (Rocky Mountain)", "R40-Z00", "PADD 4"),
+    "WDIIM_R50-Z00_2":  ("Distillate Imports, PADD 5 (West Coast)", "R50-Z00", "PADD 5"),
 }
 
 
@@ -204,6 +229,91 @@ def fetch_freight_ppi(now: datetime.datetime, backfill: bool) -> pd.DataFrame | 
 
 
 # ---------------------------------------------------------------------------
+# EIA diesel (distillate) waterborne trade
+# ---------------------------------------------------------------------------
+
+def _eia_get_with_backoff(url, params):
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            if r.status_code == 200:
+                return r
+            if r.status_code == 429:
+                wait = BACKOFF_SECONDS * attempt
+                print(f"  429 from EIA. Backing off {wait}s (attempt {attempt}/{MAX_RETRIES}).")
+                time.sleep(wait)
+            else:
+                print(f"  HTTP {r.status_code} from EIA: {r.text[:120]}")
+                return None
+        except requests.RequestException as e:
+            print(f"  Request error (attempt {attempt}): {e}")
+            time.sleep(BACKOFF_SECONDS)
+    return None
+
+
+def fetch_diesel_trade(now: datetime.datetime, backfill: bool) -> pd.DataFrame | None:
+    if not EIA_API_KEY:
+        print("[diesel_trade] EIA_API_KEY not set — skipping.")
+        return None
+
+    start_date = None if backfill else (now - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
+    print(f"[diesel_trade] Fetching {len(DIESEL_TRADE_SERIES)} EIA series "
+          f"({'full history' if backfill else f'from {start_date}'})...")
+
+    url = f"{EIA_BASE}/petroleum/move/wkly/data/"
+    page_size = 5000
+    all_rows: list[dict] = []
+    offset = 0
+
+    while True:
+        params = {
+            "api_key": EIA_API_KEY,
+            "data[0]": "value",
+            "frequency": "weekly",
+            "facets[series][]": list(DIESEL_TRADE_SERIES.keys()),
+            "sort[0][column]": "period",
+            "sort[0][direction]": "asc",
+            "offset": offset,
+            "length": page_size,
+        }
+        if start_date:
+            params["start"] = start_date
+
+        r = _eia_get_with_backoff(url, params)
+        if not r:
+            break
+        page = r.json().get("response", {}).get("data", [])
+        if not page:
+            break
+        all_rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+        time.sleep(REQUEST_INTERVAL)
+
+    if not all_rows:
+        return None
+
+    df = pd.DataFrame(all_rows)
+    df = df.rename(columns={"period": "date", "series": "series_id"})
+    df["date"]  = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["name"]        = df["series_id"].map(lambda s: DIESEL_TRADE_SERIES[s][0])
+    df["region"]      = df["series_id"].map(lambda s: DIESEL_TRADE_SERIES[s][1])
+    df["region_name"] = df["series_id"].map(lambda s: DIESEL_TRADE_SERIES[s][2])
+    df["frequency"]   = "weekly"
+    df["unit"]        = "MBBL/D"
+    df["fetched_at"]  = now.isoformat()
+    df = df.dropna(subset=["date", "value"])
+
+    keep = ["date", "value", "series_id", "name", "region", "region_name",
+            "frequency", "unit", "fetched_at"]
+    df = df[[c for c in keep if c in df.columns]]
+    print(f"  Parsed {len(df):,} rows across {df['series_id'].nunique()} series.")
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Iceberg write helpers
 # ---------------------------------------------------------------------------
 
@@ -235,6 +345,20 @@ def _freight_ppi_arrow_schema():
         pa.field("frequency",  pa.string(),                nullable=True),
         pa.field("unit",       pa.string(),                nullable=True),
         pa.field("fetched_at", pa.timestamp("us", tz="UTC"), nullable=False),
+    ])
+
+
+def _diesel_trade_arrow_schema():
+    return pa.schema([
+        pa.field("date",        pa.date32(),               nullable=False),
+        pa.field("value",       pa.float64(),               nullable=False),
+        pa.field("series_id",   pa.string(),                nullable=False),
+        pa.field("name",        pa.string(),                nullable=True),
+        pa.field("region",      pa.string(),                nullable=True),
+        pa.field("region_name", pa.string(),                nullable=True),
+        pa.field("frequency",   pa.string(),                nullable=True),
+        pa.field("unit",        pa.string(),                nullable=True),
+        pa.field("fetched_at",  pa.timestamp("us", tz="UTC"), nullable=False),
     ])
 
 
@@ -326,6 +450,37 @@ def write_freight_ppi_to_iceberg(df: pd.DataFrame, backfill: bool) -> int:
     return result[0]
 
 
+def write_diesel_trade_to_iceberg(df: pd.DataFrame, backfill: bool) -> int:
+    """Write EIA diesel trade to Iceberg — overwrite on backfill, append otherwise."""
+    from pyiceberg.expressions import AlwaysTrue
+
+    catalog = _load_catalog()
+    table = catalog.load_table("shipping.diesel_trade")
+
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.date
+    out["fetched_at"] = pd.Timestamp.now(tz="UTC")
+
+    arrow_table = pa.Table.from_pandas(
+        out, schema=_diesel_trade_arrow_schema(), preserve_index=False
+    )
+
+    if backfill:
+        table.overwrite(arrow_table, overwrite_filter=AlwaysTrue())
+        print(f"  [iceberg] Overwrote {len(arrow_table)} rows to shipping.diesel_trade")
+    else:
+        table.append(arrow_table)
+        print(f"  [iceberg] Appended {len(arrow_table)} rows to shipping.diesel_trade")
+
+    import duckdb
+    result = duckdb.sql(
+        f"SELECT count(*) FROM read_parquet("
+        f"'{ICEBERG_WAREHOUSE.as_posix()}/shipping/diesel_trade/**/*.parquet', "
+        f"hive_partitioning=true)"
+    ).fetchone()
+    return result[0]
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -348,7 +503,13 @@ def main():
     freight_df = fetch_freight_ppi(datetime.datetime.utcnow(), args.backfill)
     if freight_df is not None and not freight_df.empty:
         total = write_freight_ppi_to_iceberg(freight_df, args.backfill)
-        print(f"  Total rows in shipping.freight_ppi: {total:,}")
+        print(f"  Total rows in shipping.freight_ppi: {total:,}\n")
+
+    # ── EIA diesel trade ──────────────────────────────────────────────────────
+    diesel_df = fetch_diesel_trade(datetime.datetime.utcnow(), args.backfill)
+    if diesel_df is not None and not diesel_df.empty:
+        total = write_diesel_trade_to_iceberg(diesel_df, args.backfill)
+        print(f"  Total rows in shipping.diesel_trade: {total:,}")
 
     print("\n--- SHIPPING PIPELINE COMPLETE ---")
 

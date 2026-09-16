@@ -45,6 +45,7 @@ UNIVERSE = [
     # --- commodity futures (continuous front month) ---
     ("CL=F",      "WTI Crude Oil",           "commodity"),
     ("BZ=F",      "Brent Crude Oil",         "commodity"),
+    ("HO=F",      "NY Harbor ULSD (Diesel)", "commodity"),
     ("NG=F",      "Natural Gas",             "commodity"),
     ("GC=F",      "Gold",                    "commodity"),
     ("SI=F",      "Silver",                  "commodity"),
