@@ -137,6 +137,7 @@ KEYS: dict[str, list[str]] = {
     "tiingo_prices":          ["symbol", "date"],
     "sector_etfs":            ["symbol", "date"],
     "schwab_quotes":          ["symbol"],            # snapshot table
+    "company_profile":        ["symbol"],            # snapshot table
     "futures":                ["symbol", "date"],
     # Backtester AgProvider (external repo) — one OHLCV bar per symbol per day
     "agriculture":            ["symbol", "date"],

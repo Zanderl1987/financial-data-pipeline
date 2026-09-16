@@ -318,6 +318,8 @@ CATALOG: dict[str, str] = {
     "finnhub_price_targets":   _glob("finnhub/price_targets/**/*.parquet"),
     "finnhub_upgrades":        _glob("finnhub/upgrades/**/*.parquet"),
     "finnhub_news":            _glob("finnhub/news/**/*.parquet"),
+    # ── Company profile / description (yfinance, broad S&P 500 universe) ────
+    "company_profile":         _glob("company_profile/**/*.parquet"),
     # ── Yahoo Finance deep market history (indices, futures, FX, rates) ──────
     "market_history":          _glob("yfinance/**/market_history_*.parquet"),
     # ── Yahoo Finance Russell 3000 universe (split-adjusted equity OHLCV) ────

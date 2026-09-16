@@ -29,6 +29,7 @@ PIPELINE_MODULES = [
     "fundamentals_pipeline",
     "finnhub_pipeline",
     "finnhub_events_pipeline",
+    "company_profile_pipeline",
     "dividend_pipeline",
     "sector_etf_pipeline",
     "schwab_quotes_pipeline",

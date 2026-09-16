@@ -242,6 +242,7 @@ SCHEMAS: dict[str, dict] = {
     "finnhub_price_targets":   {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
     "finnhub_upgrades":        {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
     "finnhub_news":            {"required": ["symbol", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
+    "company_profile":         {"required": ["symbol", "company_name", "fetched_at"], "critical_nn": ["symbol"], "date_col": None},
     # ── BLS labor market ─────────────────────────────────────────────────────
     "bls_cpi": {
         "required":    ["series_id", "date", "value"],

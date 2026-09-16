@@ -709,6 +709,14 @@ PIPELINES: list[PipelineSpec] = [
         timeout=600,
     ),
     PipelineSpec(
+        name="company_profile",
+        file="company_profile_pipeline.py",
+        desc="Company business description, sector/industry, HQ, website (yfinance, keyless, broad S&P 500 universe)",
+        stage=1,
+        tables=["company_profile"],
+        timeout=900,
+    ),
+    PipelineSpec(
         name="tradingview",
         file="tradingview_pipeline.py",
         desc="TradingView aggregate technical-rating snapshot for top US stocks + ETFs (keyless)",

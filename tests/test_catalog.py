@@ -81,6 +81,7 @@ EXPECTED_TABLES = [
     "dividends",
     # Finnhub fundamentals
     "finnhub_profile",
+    "company_profile",
     "finnhub_quotes",
     "finnhub_metrics",
     "finnhub_recommendations",
