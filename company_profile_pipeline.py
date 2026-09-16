@@ -40,10 +40,22 @@ MAX_RETRIES = 3
 BACKOFF_SECONDS = 15
 
 
+def _yf_symbol(symbol: str) -> str:
+    """Normalize a share-class ticker to Yahoo's hyphenated convention.
+
+    symbol_universe.get_broad_universe() sources raw IVV holding_ticker
+    values, which use a space for multi-class tickers (e.g. "BRK B",
+    "BF B"). Yahoo's quoteSummary endpoint 404s on that form and expects
+    a hyphen ("BRK-B", "BF-B") instead.
+    """
+    return symbol.replace(" ", "-")
+
+
 def fetch_profile(symbol: str) -> dict | None:
+    yf_symbol = _yf_symbol(symbol)
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            info = yf.Ticker(symbol).info
+            info = yf.Ticker(yf_symbol).info
             if not info or not info.get("longName"):
                 return None
             return {
@@ -64,7 +76,7 @@ def fetch_profile(symbol: str) -> dict | None:
             }
         except Exception as e:
             if attempt == MAX_RETRIES:
-                print(f"  {symbol}: ERROR — {e}")
+                print(f"  {symbol} ({yf_symbol}): ERROR — {e}")
                 return None
             time.sleep(BACKOFF_SECONDS)
     return None
