@@ -495,6 +495,15 @@ def load_backadjust_offsets() -> pd.DataFrame:
     need = {"symbol", "start_date", "end_date", "offset"}
     if off.empty or not need.issubset(off.columns):
         return pd.DataFrame()
+    # Each backadjust.py run writes a new dated file. A symbol recomputed in a
+    # later run must use ONLY that run's steps: stacking both generations gives
+    # overlapping ranges, and the range join in _backadjust_sql then emits a
+    # price row once per matching step. Found 2026-09-29 as 2,505 duplicated
+    # (symbol, date) keys in curated prices (AACB, OPTBF).
+    if "fetched_at" in off.columns:
+        newest = off.groupby("symbol")["fetched_at"].transform("max")
+        off = off[off["fetched_at"] == newest]
+    off = off.drop_duplicates()
     off = off.sort_values(["symbol", "start_date"]).reset_index(drop=True)
     first = off.groupby("symbol")["start_date"].transform("min")
     last = off.groupby("symbol")["end_date"].transform("max")

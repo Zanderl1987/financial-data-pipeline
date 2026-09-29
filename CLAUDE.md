@@ -80,6 +80,11 @@ just "exit 1". Individual pipeline `*.py` files have NOT been retrofitted to use
 level first; adopt it in a pipeline directly if you want persisted logs from a manual
 (non-`run_all.py`) run. Tests: `tests/test_logging.py`.
 
+**Scheduled-job failures:** check `SCHEDULED_TASK_FAIL.txt` at the repo root first. The
+hourly `ClaudeAuto-TaskWatchdog` writes it from each task's last result code, so it also
+catches runs that were killed before their own `*_FAIL.txt` could be written. See
+docs/AUTOMATION.md.
+
 ## Iceberg tables (`constituents/`, `shipping/`) — local, regenerable state
 
 `storage/iceberg/` holds a few tables (fund_holdings, etf_holdings, securities,
@@ -148,6 +153,15 @@ Tooling: `iceberg_pilot.py` (catalog loader + `latest_metadata()` +
 `replace_from_parquet()` full-replace sync) and `migrate_pilot.py` — run the
 latter after `curated.py` to refresh the mirrors (manual by design):
 `C:\ProgramData\anaconda3\python.exe migrate_pilot.py` (or `--only prices,...`).
+All 10 tables take ~6 min, nearly all of it `prices`.
+
+**A stale mirror is skipped, not served** (since 2026-09-29). `query._mirror_is_current()`
+uses the mirror only if its metadata file is at least as new as the curated parquet;
+otherwise the view reads curated. Before that, the mirror always won, and on 2026-09-29
+all ten pilot tables were found weeks stale through `query.py` (prices at 2026-08-28,
+macro/fundamentals frozen since early August) while curated was current. So any
+analytics or backtest run between early August and 2026-09-29 read the old data.
+Test: `test_stale_iceberg_mirror_loses_to_newer_curated`.
 
 ## Adding a new pipeline — wiring checklist
 

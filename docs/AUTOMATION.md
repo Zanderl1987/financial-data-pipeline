@@ -184,27 +184,47 @@ failure, so it will not trigger `DAILY_ACCUMULATOR_FAIL.txt` on its own.
 
 ## SchwabUniverseIncrementalPrices (Windows Scheduled Task)
 
-- **What:** runs `%TEMP%\opencode\schwab_universe_incr.bat` every day at 10:00 PM
-  (added 2026-08-11). Keeps the full-universe `prices` table current — the
-  27,759-symbol `schwab_universe_backfill.py` full-history pull is a one-shot backfill,
-  NOT incremental, so without this task the universe's daily bars freeze at the last
-  backfill date while only the DJI-30 (`prices` pipeline) stays fresh.
-- **Chain:** `schwab_universe_backfill.py --incremental --days 14 --chunk-size 250
-  --skip-empty-from schwab_universe_backfill_progress.json` (trailing 14-day window, ~4h15m
-  for 27,755 symbols at 0.55s/request, well under the 120 req/min cap; resumes per-batch via
-  a date-stamped progress file `schwab_universe_incremental_YYYY-MM-DD.json`) -> `curated.py
-  --table prices` (dedup merges new bars on the `["symbol","date"]` key) -> `upload_huggingface.py`
-  (re-push the curated snapshot). Logs to `%TEMP%\opencode\schwab_universe_incr.{out,err}.log`.
-- **Why 10 PM:** finishes ~2:15 AM, before `ClaudeAuto-DailyPipelines` (3:00 AM) and the 9:00 AM
-  accumulator, so no two jobs contend for Schwab's 120 req/min cap.
-- **Gotchas learned 2026-08-11:** (1) `schtasks` stores `%TEMP%` literally — must pass the
-  full expanded path in `/tr`. (2) The shell tool kills child process trees when a command
-  times out, so the task must run fully detached under Task Scheduler. (3) `--incremental`
-  overrides `--progress-file` with the date-stamped default, so a manual test slice's symbols
-  land in the same per-day progress file the real run reads (harmless — resume just skips them).
-- **Requires a valid Schwab token** (7-day refresh expiry, reauth via
-  `scripts\schwab_reauth.py`); if it expires mid-week the run fails with the
-  "refresh token has expired" banner until re-authenticated.
+- **What:** runs `scripts\universe_prices.ps1` daily at **8:00 PM**. Keeps the full-universe
+  `prices` table current. The 27,759-symbol `schwab_universe_backfill.py` full-history pull is
+  a one-shot backfill, so without this job the universe's daily bars freeze while only the
+  watchlist (`prices` pipeline) stays fresh.
+- **Chain:** `schwab_auth.py` token preflight (stops cleanly instead of letting schwabdev
+  thrash on an expired token) -> `schwab_universe_backfill.py --incremental --days N
+  --chunk-size 250 --skip-empty-from schwab_universe_backfill_progress.json` (~4-5h at
+  0.55s/request; one request per symbol whatever the window) -> `curated.py --table prices`
+  -> `upload_huggingface.py` with default flags, the same call `run_all.py`'s
+  `sync_huggingface()` makes (the dataset is public, and the default leaves it public).
+- **Window N self-heals missed nights:** N = days since the last *completed* run
+  (`storage\quality_reports\universe_prices_last_ok.txt`) + 7 overlap, minimum 14. It is
+  measured from the last completed run, not the newest file, because a killed run still
+  writes today-dated batches. Re-running the same UTC day resumes via the date-stamped
+  progress file `schwab_universe_incremental_YYYY-MM-DD.json`.
+- **Output:** report `storage\quality_reports\universe_prices_<date>.txt`, one line per run in
+  `universe_prices_summary_log.txt`, and flag `UNIVERSE_PRICES_FAIL.txt` on a failed
+  preflight, a crash, >500 network-failed symbols, a failed curate, or an upload that didn't
+  print its `Done!` line (`upload_huggingface.py` exits 0 even when it refuses to publish).
+- **Why 8 PM:** finishes ~1 AM, before `ClaudeAuto-DailyPipelines` (3:00 AM), which also uses
+  the Schwab token DB and recompacts `prices`.
+- **History:** registered 2026-08-11 pointing at `%TEMP%\opencode\schwab_universe_incr.bat`.
+  That `.bat` was later cleaned out of `%TEMP%`, and the job had never written a single
+  `prices_incr_batch*` file. So universe coverage stopped at 2026-07-23 and nothing reported
+  it. Rebuilt into the repo 2026-09-29; the first run catches up the whole gap (~74 days).
+  Never keep a scheduled job's script in `%TEMP%`.
+
+## ClaudeAuto-TaskWatchdog (Windows Scheduled Task)
+
+Hourly: `scripts\task_watchdog.ps1` reads every `ClaudeAuto-*` / `SchwabUniverse*` task's
+`LastTaskResult` and writes **`SCHEDULED_TASK_FAIL.txt`** (repo root) listing each job whose
+last run failed or whose next run is 3h+ overdue. The file is deleted once every job is
+clean. Changes are logged to `storage\quality_reports\task_watchdog_log.txt`.
+
+**Why it exists:** the other wrappers write their FAIL flag only *after* python returns. If
+the wrapper process itself is killed, no flag and no summary-log row are written. That
+happened 2026-09-28: after a wake from Modern Standby at 15:11:33, four catch-up tasks died
+~20s later with `0xC000013A` (DailyPipelines died the same way at 03:48), and none of them
+left a trace. The task's own last result is the one record that survives, so this checks
+that from outside. A job stays listed until its next run succeeds. Codes are decoded in the
+flag file (`0xC000013A` killed, `0x800710E0` refused to start, etc.).
 
 ## Battery gating — read this before diagnosing a task that "didn't run"
 

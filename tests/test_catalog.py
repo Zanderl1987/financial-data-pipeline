@@ -504,6 +504,38 @@ class TestPilotIcebergViews:
         n = q.sql("SELECT COUNT(*) AS n FROM prices").iloc[0]["n"]
         assert n == 2
 
+    def test_stale_iceberg_mirror_loses_to_newer_curated(self, monkeypatch, tmp_path):
+        # 2026-09-29: the mirror is refreshed only by hand (migrate_pilot.py),
+        # so it sat weeks behind curated and query.py served the old rows.
+        import os
+        import time
+        import pandas as pd
+        import iceberg_pilot
+
+        monkeypatch.setattr(iceberg_pilot, "ICEBERG_WAREHOUSE", tmp_path)
+        monkeypatch.setattr(iceberg_pilot, "PILOT_CATALOG_DB", tmp_path / "pilot_catalog.db")
+        old = pd.DataFrame({"symbol": ["AAPL"], "date": ["2024-01-02"], "close": [100.0]})
+        old_path = tmp_path / "old.parquet"
+        old.to_parquet(old_path, index=False)
+        iceberg_pilot.replace_from_parquet("pilot.prices", str(old_path))
+
+        curated_root = tmp_path / "curated"
+        (curated_root / "prices").mkdir(parents=True)
+        new = pd.DataFrame({"symbol": ["AAPL", "AAPL"], "date": ["2024-01-02", "2024-01-03"],
+                            "close": [100.0, 101.0]})
+        curated = curated_root / "prices" / "prices.parquet"
+        new.to_parquet(curated, index=False)
+        later = time.time() + 60
+        os.utime(curated, (later, later))
+        monkeypatch.setattr(q, "_CURATED_ROOT", str(curated_root))
+
+        q.reload()
+        sql = q._con().execute(
+            "SELECT sql FROM duckdb_views() WHERE view_name='prices'"
+        ).fetchone()[0]
+        assert "iceberg_scan" not in sql
+        assert q.sql("SELECT COUNT(*) AS n FROM prices").iloc[0]["n"] == 2
+
     def test_curated_fallback_when_no_iceberg(self, monkeypatch, tmp_path):
         monkeypatch.setattr(q, "_pilot_iceberg_metadata", lambda t: None)
         # point curated root at an empty temp dir so the fallback is the raw glob

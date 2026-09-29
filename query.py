@@ -70,7 +70,8 @@ def _curated_file(table: str) -> str:
 
 # Pilot tables mirrored into the local Iceberg warehouse by migrate_pilot.py.
 # query.py reads these via real `iceberg_scan` calls (preferred over the curated
-# parquet snapshot when the Iceberg table exists). See iceberg_pilot.py.
+# parquet snapshot when the Iceberg table exists and is at least as new as it --
+# see _mirror_is_current). See iceberg_pilot.py.
 PILOT_ICEBERG_TABLES = {
     "prices", "macro", "fundamentals_annual", "fundamentals_quarterly",
     "fao_prices", "fao_production", "plastics_production",
@@ -83,6 +84,26 @@ def _pilot_iceberg_metadata(table: str) -> str | None:
     import iceberg_pilot
 
     return iceberg_pilot.latest_metadata(f"{iceberg_pilot.PILOT_NAMESPACE}.{table}")
+
+
+def _mirror_is_current(table: str, metadata: str) -> bool:
+    """True unless the curated snapshot was rewritten after the Iceberg mirror.
+
+    The mirror is only refreshed by running migrate_pilot.py, while curated.py
+    rewrites the parquet after every pipeline run. Preferring the mirror
+    unconditionally meant query.py served whatever was last migrated: found
+    2026-09-29 with all ten pilot tables weeks stale (prices at 2026-08-28,
+    macro and fundamentals frozen since early August) while their curated
+    snapshots were current.
+    """
+    curated = _curated_file(table).replace("/", os.sep)
+    if not os.path.exists(curated):
+        return True
+    md_path = metadata.removeprefix("file:///").removeprefix("file://")
+    try:
+        return os.path.getmtime(md_path) >= os.path.getmtime(curated)
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -681,7 +702,8 @@ def _register_views(con: duckdb.DuckDBPyConnection) -> None:
             # Iceberg is an additional curated-style snapshot, so it only takes
             # precedence when USE_CURATED is True (curated.py's _raw_reads forces
             # raw globs — pilot tables must NOT read back from their own mirror).
-            if USE_CURATED and metadata:
+            # A mirror older than the curated snapshot is stale: skip it.
+            if USE_CURATED and metadata and _mirror_is_current(name, metadata):
                 con.execute(f"""
                     CREATE OR REPLACE VIEW {name} AS
                     SELECT * FROM iceberg_scan('{metadata}')

@@ -294,6 +294,34 @@ class TestBackadjust:
         assert off.loc[off["offset"] == 10.0, "start_date"].iloc[0] == "0000-01-01"
         assert off.loc[off["offset"] == 5.0, "end_date"].iloc[0] == "9999-12-31"
 
+    def test_recomputed_symbol_uses_only_newest_run(self, monkeypatch, tmp_path):
+        # 2026-09-29: OPTBF's 08-30 steps and its 09-12 recompute were stacked,
+        # and AACB's single step appeared in two files. Overlapping ranges made
+        # the range join emit each price row twice (2,505 duplicated keys).
+        old_run = pd.DataFrame({
+            "symbol": ["OPT", "OPT", "KEEP"],
+            "start_date": ["2000-01-01", "2010-01-01", "2000-01-01"],
+            "end_date": ["2009-12-31", "2020-12-31", "2020-12-31"],
+            "offset": [0.9, 0.2, 3.0],
+            "fetched_at": ["2026-08-30T05:15"] * 3,
+        })
+        new_run = pd.DataFrame({
+            "symbol": ["OPT", "DUP"],
+            "start_date": ["2000-01-01", "2000-01-01"],
+            "end_date": ["2020-12-31", "2020-12-31"],
+            "offset": [0.0, -0.02],
+            "fetched_at": ["2026-09-12T04:30", "2026-09-11T22:38"],
+        })
+        old_run.to_parquet(tmp_path / "price_backadjust_20260830.parquet", index=False)
+        new_run.to_parquet(tmp_path / "price_backadjust_20260912.parquet", index=False)
+        new_run[new_run.symbol == "DUP"].to_parquet(
+            tmp_path / "price_backadjust_20260911.parquet", index=False)
+        monkeypatch.setattr(curated, "_BACKADJUST_GLOB", str(tmp_path / "*.parquet"))
+
+        off = curated.load_backadjust_offsets()
+        assert off.groupby("symbol").size().to_dict() == {"DUP": 1, "KEEP": 1, "OPT": 1}
+        assert off.loc[off.symbol == "OPT", "offset"].iloc[0] == 0.0
+
     def test_missing_table_is_a_no_op(self, monkeypatch, tmp_path):
         monkeypatch.setattr(curated, "_BACKADJUST_GLOB", str(tmp_path / "none*.parquet"))
         assert curated.load_backadjust_offsets().empty
