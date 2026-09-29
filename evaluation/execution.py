@@ -288,21 +288,27 @@ def daily_cost(costs: CostModel,
     short weights), the borrow cost is computed per-symbol and summed, replacing
     the flat `borrow_fee_bps` path. This allows hard-to-borrow names to carry
     their true cost instead of a portfolio-average flat rate.
+
+    The matrix is a set of snapshots (IBKR's feed is daily, starting
+    2026-09-29), not a value for every backtest date. Each snapshot holds until
+    the next one; dates before the first snapshot, and symbols the matrix
+    doesn't list, fall back to the flat `borrow_fee_bps`. An exact-date `.loc`
+    lookup used to raise KeyError here for any backtest whose dates weren't all
+    in the matrix -- i.e. every backtest, once the table had its first row.
     """
     costs_series = turnover * (
         (costs.commission_bps + costs.spread_bps / 2.0) / 1e4
     )
     # Per-symbol borrow fees (opt-in)
-    if borrow_fee_matrix is not None and isinstance(short_exposure, pd.DataFrame):
-        # Align matrices
-        common_dates = costs_series.index.intersection(short_exposure.index)
-        common_syms = short_exposure.columns.intersection(borrow_fee_matrix.columns)
-        if len(common_dates) > 0 and len(common_syms) > 0:
-            se = short_exposure.loc[common_dates, common_syms]
-            bf = borrow_fee_matrix.loc[common_dates, common_syms]
-            # bps / (1e4 * ann) converts annualized bps to daily fraction
-            borrow_cost = (se * (bf / (1e4 * ann))).sum(axis=1)
-            costs_series = costs_series.reindex(common_dates).fillna(0.0) + borrow_cost
+    if (borrow_fee_matrix is not None and not borrow_fee_matrix.empty
+            and isinstance(short_exposure, pd.DataFrame)):
+        se = short_exposure.reindex(costs_series.index).fillna(0.0)
+        bf = (borrow_fee_matrix.sort_index()
+              .reindex(columns=se.columns)
+              .reindex(se.index, method="ffill")
+              .fillna(costs.borrow_fee_bps))
+        # bps / (1e4 * ann) converts annualized bps to daily fraction
+        costs_series = costs_series + (se * (bf / (1e4 * ann))).sum(axis=1)
     elif costs.borrow_fee_bps > 0 and short_exposure is not None:
         # Legacy flat rate: short_exposure is a Series (total short per day)
         if isinstance(short_exposure, pd.DataFrame):

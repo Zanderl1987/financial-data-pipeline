@@ -65,11 +65,11 @@ $skip = @(
     # known-dead sources
     "nasdaq_data_link", "usda", "trade", "congressional_trades",
     # failing every night as of 2026-09-29:
-    #   ibkr_borrow_fee  FTP connect times out, WinError 10060 (since ~09-06)
     #   schwab_portfolio needs the Schwab Trader API, which isn't enabled
-    # (lda_lobbying was here briefly: it re-paged the whole year, ~2h, into a
-    # 30-min timeout. Fixed the same day to fetch only newly posted filings.)
-    "ibkr_borrow_fee", "schwab_portfolio",
+    # (lda_lobbying and ibkr_borrow_fee were here briefly, both fixed the same
+    # day: lda re-paged the whole year into a 30-min timeout; IBKR's ftp3 host
+    # had stopped answering, and ftp2 works.)
+    "schwab_portfolio",
     # already in ClaudeAuto-DailyAccumulators
     "tradingview", "short_interest", "finnhub_events"
 ) -join ","

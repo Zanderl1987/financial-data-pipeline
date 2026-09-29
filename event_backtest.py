@@ -242,12 +242,16 @@ def load_dollar_volume_matrix(symbols, start=None, end=None,
     return pd.DataFrame(out).sort_index()
 
 
+PCT_TO_BPS = 100.0  # ibkr_borrow_fee.fee_rate is annual percent
+
+
 def load_borrow_fee(symbol, start=None, end=None) -> pd.Series:
     """Load per-symbol borrow fee rate (annualized bps) from the IBKR feed.
 
-    Returns a Series indexed by date with values in bps (fee_rate column from
-    ibkr_borrow_fee table). The IBKR feed is snapshot-only (daily accumulator),
-    so history only exists from the day the pipeline started running.
+    Returns a Series indexed by date with values in bps. The table's fee_rate
+    is IBKR's FEERATE, annual PERCENT (AAPL 0.25 = 25 bps), so it is scaled by
+    PCT_TO_BPS here. The IBKR feed is snapshot-only (daily accumulator), so
+    history only exists from the day the pipeline started running.
     """
     try:
         df = q.load("ibkr_borrow_fee", symbol=symbol, start=start, end=end,
@@ -259,7 +263,7 @@ def load_borrow_fee(symbol, start=None, end=None) -> pd.Series:
     df["date"] = pd.to_datetime(df["date"])
     df = df.set_index("date").sort_index()
     # fee_rate may be None for some rows; drop those
-    s = df["fee_rate"].dropna()
+    s = df["fee_rate"].dropna() * PCT_TO_BPS
     s.name = symbol
     return s
 
@@ -299,7 +303,7 @@ def load_borrow_fee_matrix(symbols, start=None, end=None) -> pd.DataFrame:
     wide = df.pivot_table(index="date", columns="symbol", values="fee_rate",
                           aggfunc="last").sort_index()
     wide.columns.name = None
-    return wide
+    return wide * PCT_TO_BPS  # fee_rate is annual percent; see load_borrow_fee
 
 
 # ------------------------------------------------------------ event studies
@@ -686,13 +690,15 @@ def scenario(
         net = gross - (event_cost * 2.0)  # entry + exit friction
         # Per-symbol borrow fee for short trades (opt-in)
         if sign < 0 and exit_rel > 0:  # short side
-            bf_bps = 0.0
+            # Latest snapshot on/before entry (day0), as in
+            # evaluation.execution.daily_cost; else the flat rate. Exact-date
+            # matching charged nothing on any day without a snapshot.
+            bf_bps = borrow_fee_bps
             if bf_matrix is not None and e["symbol"] in bf_matrix.columns:
-                # Look up rate at entry date (day0)
-                if e["day0"] in bf_matrix.index:
-                    bf_bps = bf_matrix.loc[e["day0"], e["symbol"]]
-            elif borrow_fee_bps > 0:
-                bf_bps = borrow_fee_bps
+                snap = bf_matrix[e["symbol"]].dropna().sort_index()
+                snap = snap[snap.index <= e["day0"]]
+                if not snap.empty:
+                    bf_bps = snap.iloc[-1]
             if bf_bps > 0:
                 net -= bf_bps / 1e4 * (exit_rel / TRADING_DAYS)
 

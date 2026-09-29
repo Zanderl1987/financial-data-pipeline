@@ -93,6 +93,39 @@ class TestDailyCost:
                                        self.turnover * 0.0)
 
 
+class TestDailyCostBorrowFeeMatrix:
+    """Per-symbol fees come as sparse snapshots, not one row per backtest date."""
+
+    def setup_method(self):
+        self.dates = pd.bdate_range("2026-09-24", periods=6)  # 09-24 .. 10-01
+        self.turnover = pd.Series(0.0, index=self.dates)
+        self.short = pd.DataFrame({"AAA": 1.0, "BBB": 0.5}, index=self.dates)
+
+    def _daily(self, bps):
+        return bps / (1e4 * 252)
+
+    def test_snapshot_dates_missing_from_backtest_do_not_raise(self):
+        # a single snapshot after the whole backtest: used to KeyError
+        bf = pd.DataFrame({"AAA": [25.0]}, index=pd.to_datetime(["2027-01-04"]))
+        out = ex.daily_cost(ex.CostModel(), self.turnover, self.short, borrow_fee_matrix=bf)
+        pd.testing.assert_series_equal(out, self.turnover)  # all before first snapshot
+
+    def test_snapshot_carries_forward_and_flat_rate_fills_gaps(self):
+        bf = pd.DataFrame({"AAA": [2900.0]}, index=pd.to_datetime(["2026-09-29"]))
+        c = ex.CostModel(borrow_fee_bps=25.0)
+        out = ex.daily_cost(c, self.turnover, self.short, borrow_fee_matrix=bf)
+        before = 1.0 * self._daily(25.0) + 0.5 * self._daily(25.0)   # flat for both
+        after = 1.0 * self._daily(2900.0) + 0.5 * self._daily(25.0)  # BBB unlisted
+        assert out.loc["2026-09-28"] == pytest.approx(before)
+        assert out.loc["2026-09-29"] == pytest.approx(after)
+        assert out.loc["2026-10-01"] == pytest.approx(after)  # held forward
+
+    def test_empty_matrix_falls_back_to_flat_rate(self):
+        c = ex.CostModel(borrow_fee_bps=50.0)
+        out = ex.daily_cost(c, self.turnover, self.short, borrow_fee_matrix=pd.DataFrame())
+        assert out.iloc[0] == pytest.approx(1.5 * self._daily(50.0))
+
+
 class TestLegacyKwargShim:
     def test_none_model_carries_plain_costs(self):
         c = ex.costs_from_legacy_kwargs(cost_bps=10, spread_bps=20, borrow_fee_bps=5)

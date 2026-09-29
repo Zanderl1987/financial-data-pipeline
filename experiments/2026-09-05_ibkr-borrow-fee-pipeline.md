@@ -60,6 +60,14 @@ load_borrow_fee_matrix(symbols, start=None, end=None) -> pd.DataFrame  # date x 
 - Legacy flat-rate path unchanged
 
 ## Connectivity Status
+> **Correction (2026-09-29):** the diagnosis below was wrong. Outbound FTP works from
+> this machine (ftp.gnu.org and test.rebex.net connect on port 21). `ftp3.interactivebrokers.com`
+> itself stopped answering, on port 443 too, while `ftp2.interactivebrokers.com` serves the
+> same `usa.txt`. The pipeline now tries ftp2 first. Two more problems surfaced on the first
+> live pull: the parser choked on the file's `#BOF` line, and `FEERATE` is annual *percent*
+> (AAPL 0.25), not bps, so `load_borrow_fee`/`load_borrow_fee_matrix` now scale by 100.
+> First data: 19,914 securities on 2026-09-29.
+
 **IBKR FTP (port 21) blocked from this network** — confirmed from both the
 research sandbox and the actual dev machine (DNS resolves, general internet
 works, only port 21 to `ftp3.interactivebrokers.com` times out). This is a
