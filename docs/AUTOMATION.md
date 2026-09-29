@@ -54,12 +54,19 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
 > successfully run, and after the rename it pointed at a file that no longer exists.
 
 - **What:** runs `scripts\daily_pipelines.ps1` every day at 3:00 AM (catches up after boot if
-  the machine was off): `run_all.py --skip <16 names>`, all three dependency stages, output
+  the machine was off): `run_all.py --skip <19 names>`, all three dependency stages, output
   archived to `storage\quality_reports\daily_pipelines_YYYY-MM-DD.txt`, one summary line per
-  day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`. Of 90 specs, 16
-  are skipped and 3 more (`comtrade`, `reddit`, `ais`) skip for missing env, so **71 actually
-  run** — 62 stage 1, 9 stage 2, 3 stage 3. Budget 2.5-3h (a full 86-pipeline run measures
-  ~173 min); `ExecutionTimeLimit` is 6h.
+  day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`.
+  `ExecutionTimeLimit` is **8h** (was 6h until 2026-09-29).
+- **Runtime outgrew the old limit (found 2026-09-29).** The original budget was 2.5-3h for 71
+  pipelines. By late September about 104 ran, taking 4.5-6.7h of pipeline time alone, so the
+  6h limit killed the wrapper on most nights. `run_all.py` survived and finished (09-29's run
+  ended ~09:17 with 99 PASS / 5 FAIL), but the wrapper died before writing its summary line or
+  `DAILY_PIPELINES_FAIL.txt`: the summary log has only 2 entries between 09-12 and 09-29. The
+  watchdog reports this as `0x41306 terminated`. Heaviest pipelines: `fund_holdings` 45-100
+  min, `yahoo_options` ~33, `etf_holdings` 20-30, `stockanalysis` ~24. An overrun also pushes
+  stage 2's Schwab calls past 09:00 into `ClaudeAuto-DailyAccumulators`. If runtime creeps
+  toward 8h again, trim or split the job rather than raising the limit.
 - **Why it exists:** added 2026-08-11. Until then the only scheduled *fetching* was
   `ClaudeAuto-DailyAccumulators` — seven pipelines. Everything else refreshed only when a
   human happened to run `run_all.py`, and a `fetched_at` sweep found 11 of 182 curated tables
@@ -87,7 +94,11 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   `eia`/`eia_expansion`/`eia_petng_prices`/`eia_hourly_grid`, `gas_prices`. Known-dead per
   CLAUDE.md — `nasdaq_data_link`, `usda`, `trade`, `congressional_trades` (they fail every run
   and would keep the job permanently red, masking real failures). Already daily —
-  `tradingview`, `short_interest`, `finnhub_events`.
+  `tradingview`, `short_interest`, `finnhub_events`. Failing every night, skipped 2026-09-29
+  (about 35 min saved per run): `lda_lobbying` (hangs silently to its 30-min timeout, every
+  run since at least 09-01), `ibkr_borrow_fee` (IBKR FTP connect times out, WinError 10060,
+  since ~09-06), `schwab_portfolio` (needs the Schwab Trader API, not enabled). Take them off
+  the list once they are fixed, or they stay stale.
 - **Stage 2 needs a live Schwab token.** The refresh token expires every 7 days and renewing it
   requires a human at a browser (`scripts\schwab_reauth.py`), so this job **will** go red for
   the Schwab specs whenever it lapses. That is the intended signal — a silent skip would hide
@@ -261,7 +272,7 @@ A newly registered task will silently reacquire the default unless you pass
 
 ```powershell
 Get-ScheduledTask ClaudeAuto-DailyPipelines | Get-ScheduledTaskInfo         # last/next run
-Start-ScheduledTask ClaudeAuto-DailyPipelines                               # run now (2.5-3h)
+Start-ScheduledTask ClaudeAuto-DailyPipelines                               # run now (5-6h)
 Unregister-ScheduledTask ClaudeAuto-DailyPipelines -Confirm:$false          # remove
 
 Get-ScheduledTask ClaudeAuto-PipelineQuality | Get-ScheduledTaskInfo        # last/next run

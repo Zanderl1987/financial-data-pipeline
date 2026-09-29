@@ -27,12 +27,14 @@
 # far more slowly. tests/test_catalog.py asserts every name below still matches a
 # real PipelineSpec, because --skip ignores typos silently.
 #
-# Runtime: a full 86-pipeline run measures ~173 min. Of 90 specs, 16 are skipped
-# below and 3 more (comtrade, reddit, ais) skip for missing env, so 71 actually
-# run -- 62 stage 1, 9 stage 2, 3 stage 3. Budget 2.5-3 h. Scheduled 03:00, which clears
-# SchwabUniverseIncrementalPrices (22:00, finishes ~02:15) beforehand and
-# DailyAccumulators (09:00) after, so nothing else is hitting Schwab's rate limit
-# while stage 2 runs.
+# Runtime: this used to be ~173 min for 71 pipelines. By late September 2026 it was
+# ~104 pipelines taking 4.5-6.7 h of pipeline time alone, so the task's old 6 h
+# ExecutionTimeLimit killed this wrapper on most nights before it wrote the
+# summary line or flag (run_all.py itself survived and finished). The limit is now
+# 8 h. Heaviest: fund_holdings 45-100 min, yahoo_options ~33, etf_holdings 20-30,
+# stockanalysis ~24. If runs creep toward 8 h again, trim or split, don't just
+# raise the limit: an overrun pushes stage 2's Schwab calls into
+# DailyAccumulators (09:00), which this 03:00 slot exists to avoid.
 #
 # STAGE 2 NEEDS A LIVE SCHWAB TOKEN. The refresh token expires every 7 days and
 # renewing it requires a human at a browser (scripts\schwab_reauth.py), so this
@@ -62,6 +64,11 @@ $skip = @(
     "eia", "eia_expansion", "eia_petng_prices", "eia_hourly_grid", "gas_prices",
     # known-dead sources
     "nasdaq_data_link", "usda", "trade", "congressional_trades",
+    # failing every night as of 2026-09-29, ~35 min wasted per run:
+    #   lda_lobbying     hangs silently to its 30-min timeout (since <= 09-01)
+    #   ibkr_borrow_fee  FTP connect times out, WinError 10060 (since ~09-06)
+    #   schwab_portfolio needs the Schwab Trader API, which isn't enabled
+    "lda_lobbying", "ibkr_borrow_fee", "schwab_portfolio",
     # already in ClaudeAuto-DailyAccumulators
     "tradingview", "short_interest", "finnhub_events"
 ) -join ","
