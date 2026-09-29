@@ -130,6 +130,9 @@ EXPECTED_TABLES = [
     "eia_natgas_storage",
     "eia_crude_production",
     "eia_hourly_grid",
+    # EPA fuel / emissions
+    "epa_ghg_energy",
+    "epa_rfs_rin",
     "index_members",
     "sp500_membership",
     "securities",

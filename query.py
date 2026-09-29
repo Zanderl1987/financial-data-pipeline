@@ -195,6 +195,9 @@ CATALOG: dict[str, str] = {
     "eia_crude_trade":         _glob("eia/crude_trade/**/*.parquet"),
     "eia_petroleum_demand":    _glob("eia/petroleum_demand/**/*.parquet"),
     "eia_hourly_grid":         _glob("eia/hourly_grid/**/*.parquet"),
+    # ── EPA fuel / emissions (keyless) ────────────────────────────────────────
+    "epa_ghg_energy":          _glob("epa/ghg_energy/**/*.parquet"),
+    "epa_rfs_rin":             _glob("epa/rfs_rin/**/*.parquet"),
     # ── Index constituents (Iceberg) ──────────────────────────────────────────
     "index_members":           _iceberg_glob("constituents/index_members/**/*.parquet"),
     "securities":              _iceberg_glob("constituents/securities/**/*.parquet"),

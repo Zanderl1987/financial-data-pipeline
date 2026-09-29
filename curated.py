@@ -299,6 +299,8 @@ KEYS: dict[str, list[str]] = {
     "eia_natural_gas_production":   ['date', 'series_code'],
     "eia_lng_flows":                ['date', 'region_code'],
     "eia_hourly_grid":              ['region_code', 'metric_type', 'timestamp_utc'],
+    "epa_ghg_energy":                 ['date', 'gas', 'source'],
+    "epa_rfs_rin":                    ['date', 'fuel_code'],
     "defillama_protocols":            ['protocol_id', 'fetched_at'],
     "defillama_fees":                 ['protocol_id', 'fetched_at'],
     "defillama_stablecoins":          ['stablecoin_id', 'fetched_at'],

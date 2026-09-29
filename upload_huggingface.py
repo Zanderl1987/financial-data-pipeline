@@ -46,7 +46,7 @@ A comprehensive financial dataset covering **{n_tables} tables** and **{n_rows:,
 | Category | Tables | Key Sources |
 |---|---|---|
 | Market Prices | {n_market} | Tiingo, Schwab, Finnhub, CBOE |
-| Macro & Economic | {n_macro} | FRED, BLS, BEA, Treasury, EIA |
+| Macro & Economic | {n_macro} | FRED, BLS, BEA, Treasury, EIA, EPA |
 | Fundamentals | {n_fund} | SEC EDGAR, Finnhub, SimFin, Alpha Vantage |
 | Alternative Data | {n_alt} | Congressional trades, insider transactions, patents, OpenFDA |
 | Crypto & Forex | {n_crypto} | CoinGecko, Tiingo |
@@ -197,7 +197,7 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False, forc
 
     market_prefixes = ("tiingo_", "schwab_", "finnhub_quotes", "finnhub_profile", "finnhub_metrics",
                         "prices", "options_", "synthetic_", "sector_etfs", "market_")
-    macro_prefixes = ("fred_", "bls_", "bea_", "treasury_", "eia_", "fed_", "ecb_",
+    macro_prefixes = ("fred_", "bls_", "bea_", "treasury_", "eia_", "epa_", "fed_", "ecb_",
                        "cboe_", "fdic_", "fear_", "oecd_", "wb_", "imf_", "fao_",
                        "noaa_", "world_", "usda_", "usgs_", "shiller_", "ff_")
     fund_prefixes = ("fundamentals_", "simfin_", "sec_edgar_", "sec_filings",

@@ -468,6 +468,15 @@ PIPELINES: list[PipelineSpec] = [
                 "gem_cement_summary", "gem_oilgas_summary", "gem_lng_summary"],
         timeout=1800,
     ),
+    PipelineSpec(
+        name="epa_fuel",
+        file="epa_fuel_pipeline.py",
+        desc="EPA fuel data (keyless) — GHG inventory energy-sector emissions by gas/source, RFS RIN generation by month/fuel",
+        stage=1,
+        tables=["epa_ghg_energy", "epa_rfs_rin"],
+        backfill_args=["--backfill"],
+        timeout=600,
+    ),
     # ── Stage 1 — Quant / valuation / volatility / banking ─────────────────────
     PipelineSpec(
         name="fama_french",

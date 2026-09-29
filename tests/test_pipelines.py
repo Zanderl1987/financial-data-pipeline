@@ -119,6 +119,7 @@ PIPELINE_MODULES = [
     "usgs_helium_mcs_pipeline",
     "usgs_ds140_pipeline",
     "gem_trackers_pipeline",
+    "epa_fuel_pipeline",
 ]
 
 

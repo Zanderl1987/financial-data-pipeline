@@ -1339,6 +1339,17 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ['region_code', 'metric_type', 'value'],
         "date_col":    "timestamp_utc",
     },
+    "epa_ghg_energy": {
+        "required":    ['date', 'gas', 'source', 'level', 'value', 'unit', 'fetched_at'],
+        "critical_nn": ['date', 'gas', 'source', 'level', 'value'],
+        "date_col":    "date",
+    },
+    "epa_rfs_rin": {
+        "required":    ['date', 'fuel_code', 'fuel_name', 'rin_year', 'prod_month',
+                        'rin_quantity', 'batch_volume', 'fetched_at'],
+        "critical_nn": ['date', 'fuel_code', 'rin_year', 'prod_month'],
+        "date_col":    "date",
+    },
     "index_members": {
         "required":    ['index_code', 'ticker', 'snapshot_date', 'fetched_at'],
         "critical_nn": ['index_code', 'ticker'],
