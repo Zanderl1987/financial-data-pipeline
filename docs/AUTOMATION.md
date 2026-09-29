@@ -54,7 +54,7 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
 > successfully run, and after the rename it pointed at a file that no longer exists.
 
 - **What:** runs `scripts\daily_pipelines.ps1` every day at 3:00 AM (catches up after boot if
-  the machine was off): `run_all.py --skip <19 names>`, all three dependency stages, output
+  the machine was off): `run_all.py --skip <18 names>`, all three dependency stages, output
   archived to `storage\quality_reports\daily_pipelines_YYYY-MM-DD.txt`, one summary line per
   day appended to `storage\quality_reports\daily_pipelines_summary_log.txt`.
   `ExecutionTimeLimit` is **8h** (was 6h until 2026-09-29).
@@ -94,11 +94,13 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   `eia`/`eia_expansion`/`eia_petng_prices`/`eia_hourly_grid`, `gas_prices`. Known-dead per
   CLAUDE.md — `nasdaq_data_link`, `usda`, `trade`, `congressional_trades` (they fail every run
   and would keep the job permanently red, masking real failures). Already daily —
-  `tradingview`, `short_interest`, `finnhub_events`. Failing every night, skipped 2026-09-29
-  (about 35 min saved per run): `lda_lobbying` (hangs silently to its 30-min timeout, every
-  run since at least 09-01), `ibkr_borrow_fee` (IBKR FTP connect times out, WinError 10060,
-  since ~09-06), `schwab_portfolio` (needs the Schwab Trader API, not enabled). Take them off
-  the list once they are fixed, or they stay stale.
+  `tradingview`, `short_interest`, `finnhub_events`. Failing every night, skipped 2026-09-29:
+  `ibkr_borrow_fee` (IBKR FTP connect times out, WinError 10060, since ~09-06),
+  `schwab_portfolio` (needs the Schwab Trader API, not enabled). Take them off the list once
+  they are fixed, or they stay stale. `lda_lobbying` was skipped too for a few hours the same
+  day: it re-paged the whole year (~2h at 25 filings/page) into a 30-min timeout, failing
+  every night since at least 09-01 with no output (stdout was block-buffered). It now fetches
+  only filings posted since the newest stored one, a few minutes a day.
 - **Stage 2 needs a live Schwab token.** The refresh token expires every 7 days and renewing it
   requires a human at a browser (`scripts\schwab_reauth.py`), so this job **will** go red for
   the Schwab specs whenever it lapses. That is the intended signal — a silent skip would hide

@@ -11,15 +11,27 @@ Source notes (probed live 2026-08-26):
   - GET https://lda.senate.gov/api/v1/filings/?filing_year={YYYY}&page={N}
     Keyless JSON; page_size silently capped at 25 rows/page (~2.2k pages for
     a recent year). Follows `next` URLs (they point at the lda.gov mirror).
-  - ~30-56k filings/year. Incremental (current year) takes ~10 min; full
-    backfill is slow by design — default backfill start is 2019.
+  - ~57k filings by late September, ~109k for a full year (2025). At ~1.7s
+    per page plus REQUEST_GAP, a whole year is 2-4 hours of paging.
+  - `filing_dt_posted_after=YYYY-MM-DD` filters server-side (verified
+    2026-09-29: an unknown param returns all ~2M filings, this returns only
+    the recent ones).
   - Be polite: REQUEST_GAP sleep between pages; retry/backoff on transport
     errors.
 
+Incremental mode fetches only filings posted since the newest `dt_posted`
+already stored (minus OVERLAP_DAYS; curated dedups on filing_uuid). Until
+2026-09-29 it re-fetched the whole current year every run, which outgrew
+run_all's 30-min timeout by August and failed every night, killed silently
+because stdout was block-buffered into run_all's pipe. With no stored data it
+falls back to the whole current year. Gap: a filing with a null dt_posted
+(some amendments) never matches the date filter, so only --backfill picks
+those up.
+
 CLI:
-  python lda_lobbying_pipeline.py                    # current year
-  python lda_lobbying_pipeline.py --backfill         # 2019 -> current year
-  python lda_lobbying_pipeline.py --start-year 2000  # deeper history
+  python lda_lobbying_pipeline.py                    # posted since last stored filing
+  python lda_lobbying_pipeline.py --backfill         # 2019 -> current year, whole years
+  python lda_lobbying_pipeline.py --start-year 2000  # deeper history, whole years
 
 Outputs:
   storage/raw/lda_lobbying/year=YYYY/month=MM/lda_lobbying_filings_{mode}_{date}.parquet
@@ -27,7 +39,9 @@ Outputs:
 
 import argparse
 import datetime
+import glob
 import os
+import sys
 import time
 
 import pandas as pd
@@ -45,6 +59,7 @@ PAGE_SIZE = 100          # server caps response rows at 25 regardless
 MAX_PAGES_PER_YEAR = 5000  # hard safety stop
 DEFAULT_BACKFILL_START_YEAR = 2019
 ISSUES_TEXT_MAX = 1500
+OVERLAP_DAYS = 2           # re-fetch a little before the newest stored filing
 
 
 def _get_json(url: str) -> dict:
@@ -100,12 +115,13 @@ def _flatten(filing: dict) -> dict | None:
         return None
 
 
-def fetch_year(year: int) -> pd.DataFrame:
-    """Pull every filing row for one year via paginated GET."""
-    url = f"{API_URL}?filing_year={year}&page_size={PAGE_SIZE}"
+def _fetch_pages(url: str, label: str) -> pd.DataFrame:
+    """Follow `next` links from url, flattening every filing."""
     rows: list[dict] = []
     for page in range(1, MAX_PAGES_PER_YEAR + 1):
         body = _get_json(url)
+        if page == 1:
+            print(f"    {label}: {body.get('count', '?')} filings")
         results = body.get("results", [])
         for filing in results:
             flat = _flatten(filing)
@@ -116,11 +132,33 @@ def fetch_year(year: int) -> pd.DataFrame:
             break
         time.sleep(REQUEST_GAP)
         if page % 100 == 0:
-            print(f"    {year}: page {page}, {len(rows):,} rows so far")
-    df = pd.DataFrame(rows)
+            print(f"    {label}: page {page}, {len(rows):,} rows so far")
+    return pd.DataFrame(rows)
+
+
+def fetch_year(year: int) -> pd.DataFrame:
+    """Pull every filing row for one year via paginated GET."""
+    df = _fetch_pages(f"{API_URL}?filing_year={year}&page_size={PAGE_SIZE}", str(year))
     if not df.empty:
         df["filing_year"] = df["filing_year"].fillna(year).astype(int)
     return df
+
+
+def fetch_posted_since(since: datetime.date) -> pd.DataFrame:
+    """Pull filings posted on/after `since`, whatever their filing year."""
+    url = f"{API_URL}?filing_dt_posted_after={since.isoformat()}&page_size={PAGE_SIZE}"
+    return _fetch_pages(url, f"posted since {since}")
+
+
+def latest_posted(base_dir: str = BASE_DIR) -> datetime.date | None:
+    """Newest dt_posted date across stored raw files, or None if nothing stored."""
+    newest = None
+    for path in glob.glob(os.path.join(base_dir, "**", "*.parquet"), recursive=True):
+        col = pd.read_parquet(path, columns=["dt_posted"])["dt_posted"]
+        ts = pd.to_datetime(col, errors="coerce", utc=True).max()
+        if pd.notna(ts) and (newest is None or ts > newest):
+            newest = ts
+    return None if newest is None else newest.date()
 
 
 def main() -> None:
@@ -129,10 +167,32 @@ def main() -> None:
                         help=f"Full history from {DEFAULT_BACKFILL_START_YEAR}")
     parser.add_argument("--start-year", type=int, default=None)
     args = parser.parse_args()
+    # run_all.py reads us through a pipe, where stdout is block-buffered: a
+    # timeout kill would otherwise lose every progress line
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
 
     now = datetime.datetime.utcnow()
     today_str = now.strftime("%Y%m%d")
     fetched_at = now.isoformat()
+
+    stored = None if (args.backfill or args.start_year) else latest_posted()
+    if stored is not None:
+        since = stored - datetime.timedelta(days=OVERLAP_DAYS)
+        print(f"LDA Lobbying Pipeline  mode=incremental  posted since {since} "
+              f"(newest stored {stored})")
+        # no try/except: a failed fetch should exit non-zero and show as FAIL
+        df = fetch_posted_since(since)
+        if df.empty:
+            print("  no new filings")
+        else:
+            df["fetched_at"] = fetched_at
+            out_name = f"lda_lobbying_filings_incremental_{today_str}_since{since:%Y%m%d}.parquet"
+            path = write_partitioned(df, BASE_DIR, out_name)
+            print(f"  {len(df):,} rows -> {path}")
+        print(f"Total {len(df):,} rows")
+        print("--- LDA LOBBYING PIPELINE COMPLETE ---")
+        return
 
     end_year = now.year
     start_year = args.start_year or (DEFAULT_BACKFILL_START_YEAR if args.backfill else end_year)
