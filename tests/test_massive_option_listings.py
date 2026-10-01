@@ -134,3 +134,60 @@ def test_both_expired_queries_are_unioned_and_filtered_to_live(monkeypatch):
     df = mol.fetch_contracts(client, "A", "2026-10-01")
     assert sorted(df["expiration_date"]) == ["2026-10-02", "2026-10-16"]
     assert [p.get("expired") for _, p in s.calls] == ["false", "true"]
+
+
+def _fake_fetch(lists):
+    """lists: {date: [contract tickers]} -> fetch(client, symbol, as_of)."""
+    def fetch(client, symbol, as_of):
+        rows = [_c(t, float(t[-8:]) / 1000, "2027-01-15") for t in lists[as_of]]
+        return mol.standard_frame(rows, symbol)
+    return fetch
+
+
+DAYS = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-08"]
+LISTS = {
+    "2026-09-01": ["O:A270115C00100000"],
+    "2026-09-02": ["O:A270115C00100000", "O:A270115C00110000"],
+    "2026-09-03": [],                                   # API hiccup
+    "2026-09-04": ["O:A270115C00110000"],
+    "2026-09-08": ["O:A270115C00110000", "O:A270115C00120000"],
+}
+
+
+def _read(out_root, kind):
+    import glob
+    files = glob.glob(f"{out_root}/raw/massive/{kind}/**/*.parquet", recursive=True)
+    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+
+
+def test_missing_day_is_skipped_not_diffed(tmp_path):
+    mol.advance_symbol(None, "A", DAYS, str(tmp_path), flush_every=2, fetch=_fake_fetch(LISTS))
+    ch = _read(tmp_path, "option_listing_changes")
+    assert "2026-09-03" not in set(ch["date"])
+    summ = _read(tmp_path, "option_chain_summary").set_index("date")
+    assert summ.loc["2026-09-03", "status"] == "missing"
+    removed_0904 = ch[(ch["date"] == "2026-09-04") & (ch["change"] == "removed")]
+    assert removed_0904["contract_ticker"].tolist() == ["O:A270115C00100000"]
+
+
+def test_resume_after_crash_matches_uninterrupted_run(tmp_path):
+    full, crash = tmp_path / "full", tmp_path / "crash"
+    mol.advance_symbol(None, "A", DAYS, str(full), flush_every=2, fetch=_fake_fetch(LISTS))
+
+    calls = {"n": 0}
+    def dying(client, symbol, as_of):
+        calls["n"] += 1
+        if calls["n"] == 4:
+            raise RuntimeError("boom")
+        return _fake_fetch(LISTS)(client, symbol, as_of)
+    import pytest
+    with pytest.raises(RuntimeError):
+        mol.advance_symbol(None, "A", DAYS, str(crash), flush_every=2, fetch=dying)
+    mol.advance_symbol(None, "A", DAYS, str(crash), flush_every=2, fetch=_fake_fetch(LISTS))
+
+    key = ["date", "contract_ticker", "change"]
+    a = _read(full, "option_listing_changes").drop_duplicates(key).sort_values(key)[key]
+    b = _read(crash, "option_listing_changes").drop_duplicates(key).sort_values(key)[key]
+    assert a.reset_index(drop=True).equals(b.reset_index(drop=True))
+    assert mol.advance_symbol(None, "A", DAYS, str(crash), flush_every=2,
+                              fetch=_fake_fetch(LISTS)) == 0

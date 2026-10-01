@@ -20,11 +20,19 @@ Usage:
   python massive_option_listings_pipeline.py --symbols AAPL --start 2026-08-01 --end 2026-08-31 --out-root C:/tmp/trial
 """
 
+import argparse
+import datetime
+import json
+import os
 import re
+import sys
 import time
 
 import pandas as pd
 import requests
+from dotenv import load_dotenv
+
+from storage_utils import write_partitioned
 
 CHANGE_COLS = ["symbol", "date", "contract_ticker", "strike", "expiration_date",
                "put_call", "shares_per_contract", "change"]
@@ -144,3 +152,116 @@ def fetch_contracts(client: MassiveClient, symbol: str, as_of: str) -> pd.DataFr
             results += body.get("results", [])
             url, params = body.get("next_url"), {}
     return live_on(standard_frame(results, symbol), as_of)
+
+
+FLUSH_EVERY = 20                 # trading days per output chunk / checkpoint
+HISTORY_DAYS = 725               # free tier keeps 2 years; stay inside it
+UNIVERSE_FILE = os.path.join("experiments", "strike_intro_universe.csv")
+
+
+def _paths(out_root: str):
+    raw = os.path.join(out_root, "raw", "massive")
+    return (os.path.join(raw, "option_listing_changes"),
+            os.path.join(raw, "option_chain_summary"),
+            os.path.join(out_root, "state", "massive_listings"))
+
+
+def _load_state(state_dir: str, symbol: str):
+    meta = os.path.join(state_dir, f"{symbol}.json")
+    if not os.path.exists(meta):
+        return None, None
+    with open(meta, encoding="utf-8") as f:
+        last = json.load(f)["last_date"]
+    live = pd.read_parquet(os.path.join(state_dir, f"{symbol}.parquet"))
+    return last, live
+
+
+def _save_state(state_dir: str, symbol: str, last: str, live: pd.DataFrame):
+    os.makedirs(state_dir, exist_ok=True)
+    live.to_parquet(os.path.join(state_dir, f"{symbol}.parquet"), index=False)
+    with open(os.path.join(state_dir, f"{symbol}.json"), "w", encoding="utf-8") as f:
+        json.dump({"last_date": last}, f)
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+
+
+def advance_symbol(client, symbol, days, out_root, flush_every=FLUSH_EVERY,
+                   fetch=fetch_contracts) -> int:
+    """Process the trading days after this symbol's checkpoint; return how many."""
+    changes_dir, summary_dir, state_dir = _paths(out_root)
+    last, live = _load_state(state_dir, symbol)
+    todo = [d for d in days if last is None or d > last]
+    changes, summaries = [], []
+    done = 0
+
+    def flush(upto):
+        if summaries:
+            tag = f"{symbol}_{summaries[0]['date']}_{upto}"
+            now = _now()
+            if changes:
+                write_partitioned(pd.concat(changes, ignore_index=True).assign(fetched_at=now),
+                                  changes_dir, f"option_listing_changes_{tag}.parquet")
+            write_partitioned(pd.DataFrame(summaries).assign(fetched_at=now),
+                              summary_dir, f"option_chain_summary_{tag}.parquet")
+        # State AFTER outputs: a crash in between re-processes the chunk, and
+        # curated's key absorbs the duplicate rows.
+        _save_state(state_dir, symbol, upto, live)
+        changes.clear()
+        summaries.clear()
+
+    for d in todo:
+        curr = fetch(client, symbol, d)
+        if curr.empty and live is not None and not live.empty:
+            summaries.append(summarize(curr, symbol, d, "missing"))
+        else:
+            ch = diff_contracts(live, curr, symbol, d)
+            if not ch.empty:
+                changes.append(ch)
+            summaries.append(summarize(curr, symbol, d, "ok"))
+            live = curr
+        done += 1
+        if done % flush_every == 0:
+            flush(d)
+    if summaries:
+        flush(todo[-1])
+    return done
+
+
+def trading_days(start: str, end: str) -> list[str]:
+    """SPY trading dates from the price store (the market calendar)."""
+    import query as q
+    df = q.sql(f"""SELECT DISTINCT CAST(date AS VARCHAR) AS d FROM prices
+                   WHERE symbol = 'SPY' AND date BETWEEN '{start}' AND '{end}'
+                   ORDER BY d""")
+    return [d[:10] for d in df["d"]]
+
+
+def main():
+    load_dotenv()
+    p = argparse.ArgumentParser(description="Massive option listings (as_of) history")
+    p.add_argument("--symbols", nargs="+")
+    p.add_argument("--universe-file", default=UNIVERSE_FILE)
+    p.add_argument("--start")
+    p.add_argument("--end")
+    p.add_argument("--out-root", default="storage")
+    args = p.parse_args()
+
+    key = os.environ.get("MASSIVE_API_KEY")
+    if not key:
+        sys.exit("MASSIVE_API_KEY not set in .env")
+    today = datetime.date.today()
+    start = args.start or (today - datetime.timedelta(days=HISTORY_DAYS)).isoformat()
+    end = args.end or today.isoformat()
+    symbols = args.symbols or pd.read_csv(args.universe_file)["symbol"].tolist()
+    days = trading_days(start, end)
+    client = MassiveClient(key)
+    print(f"{len(symbols)} symbols x {len(days)} trading days ({start}..{end})", flush=True)
+    for i, sym in enumerate(symbols, 1):
+        n = advance_symbol(client, sym, days, args.out_root)
+        print(f"[{i}/{len(symbols)}] {sym}: {n} new days", flush=True)
+
+
+if __name__ == "__main__":
+    main()
