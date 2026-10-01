@@ -10,6 +10,20 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-01-strike-intro-study-design.md`
 
+## Gate result (Task 1, 2026-10-01): PASS (A)
+
+`as_of` alone returns every contract live on that date, including ones that have since
+expired; `expired=true` (with `expiration_date.gte=as_of`) adds nothing.
+`EXPIRED_QUERIES = (None,)`, `BASE_URL = https://api.massive.com`.
+
+| AAPL as_of | default | expired=true | expirations | first..last expiry |
+|---|---|---|---|---|
+| 2025-04-09 | 2,456 | 0 | 20 | 2025-04-11..2027-12-17 |
+| 2026-04-04 | 3,080 | 0 | 25 | 2026-04-06..2028-12-15 |
+| 2026-10-01 | 3,538 | (not run) | 25 | 2026-10-02..2029-01-19 |
+
+Today's 3,538 equals Schwab's full-chain AAPL count measured the same day.
+
 ## Global Constraints
 
 - Python: always `C:\ProgramData\anaconda3\python.exe`; run from repo root.
