@@ -224,6 +224,17 @@ SCHEMAS: dict[str, dict] = {
         # market-time conversion in schwab_options_pipeline.py misbehaving).
         "date_col":    "snapshot_date",
     },
+    "option_listing_changes": {
+        "required":    ["symbol", "date", "contract_ticker", "strike", "expiration_date",
+                        "put_call", "change"],
+        "critical_nn": ["symbol", "date", "contract_ticker", "change"],
+        "date_col":    "date",
+    },
+    "option_chain_summary": {
+        "required":    ["symbol", "date", "status", "n_contracts"],
+        "critical_nn": ["symbol", "date", "status"],
+        "date_col":    "date",
+    },
     "news_sentiment": {
         "required":    ["symbol", "sentiment", "score"],
         "critical_nn": ["symbol", "sentiment", "score"],

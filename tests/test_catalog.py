@@ -24,6 +24,9 @@ import query as q
 EXPECTED_TABLES = [
     # Prices
     "prices",
+    # Strike-introduction study (Massive as_of listing history)
+    "option_listing_changes",
+    "option_chain_summary",
     # Options
     "options_metrics",
     "options_chain",

@@ -160,6 +160,8 @@ CATALOG: dict[str, str] = {
     # ── Schwab real-time ────────────────────────────────────────────────────
     "schwab_quotes":           _glob("schwab/quotes/**/*.parquet"),
     "schwab_options":          _glob("schwab/options/**/*.parquet"),
+    "option_listing_changes":  _glob("massive/option_listing_changes/**/option_listing_changes_*.parquet"),
+    "option_chain_summary":    _glob("massive/option_chain_summary/**/option_chain_summary_*.parquet"),
     # ── Tiingo prices + news ─────────────────────────────────────────────────
     "tiingo_prices":           _glob("tiingo/prices/**/*.parquet"),
     "tiingo_news":             _glob("tiingo/news/**/*.parquet"),

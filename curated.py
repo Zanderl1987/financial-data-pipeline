@@ -404,6 +404,11 @@ KEYS: dict[str, list[str]] = {
     # schwab_options above): this is already far past the ~23M/year
     # threshold that forced that table's transition.
     "cfpb_complaints":                 ['complaint_id'],
+    # Strike-introduction study (spec 2026-10-01): lossless daily listing diffs
+    # from Massive as_of. A chunk re-processed after a crash rewrites the same
+    # rows; the key collapses them.
+    "option_listing_changes":          ['symbol', 'date', 'contract_ticker', 'change'],
+    "option_chain_summary":            ['symbol', 'date'],
 }
 # NOTE: tables that share a storage directory (treasury_tic_*, google_trends_*,
 # reddit_*) are split by filename-prefix globs in query.CATALOG, so each raw

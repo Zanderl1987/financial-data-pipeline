@@ -62,6 +62,8 @@ $skip = @(
     # metered keys
     "alpha_vantage", "alpha_vantage_fundamentals", "bls_expansion", "bls_oes_qcew",
     "eia", "eia_expansion", "eia_petng_prices", "eia_hourly_grid", "gas_prices",
+    # one-time backfill at 5 req/min, run detached (strike-intro study)
+    "massive_option_listings",
     # known-dead sources
     "nasdaq_data_link", "usda", "congressional_trades",
     # failing every night as of 2026-09-29:

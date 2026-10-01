@@ -34,6 +34,7 @@ PIPELINE_MODULES = [
     "sector_etf_pipeline",
     "schwab_quotes_pipeline",
     "schwab_options_pipeline",
+    "massive_option_listings_pipeline",
     "news_sentiment_pipeline",
     "short_interest_pipeline",
     "coingecko_pipeline",

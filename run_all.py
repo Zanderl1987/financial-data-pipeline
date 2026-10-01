@@ -1108,6 +1108,16 @@ PIPELINES: list[PipelineSpec] = [
         backfill_args=["--backfill"],
         timeout=300,
     ),
+    PipelineSpec(
+        name="massive_option_listings",
+        file="massive_option_listings_pipeline.py",
+        desc="Massive as_of option listing history (strike-introduction study backfill)",
+        stage=1,
+        tables=["option_listing_changes", "option_chain_summary"],
+        requires_env=["MASSIVE_API_KEY"],
+        timeout=600,   # the one-time ~3-week backfill runs detached; checkpointed,
+                       # so a timeout here only pauses it
+    ),
     # ── Stage 2 — Schwab-authenticated ─────────────────────────────────────────
     PipelineSpec(
         name="openfigi",
