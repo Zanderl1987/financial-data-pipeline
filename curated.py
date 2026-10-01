@@ -92,6 +92,11 @@ def _backfill_snapshot_date(table: str, df: pd.DataFrame) -> pd.DataFrame:
     """
     if table not in _SNAPSHOT_DATE_FROM_FETCHED_AT or "fetched_at" not in df.columns:
         return df
+    if "contract_symbol" not in df.columns:
+        # Same late-column problem for the 2026-10-01 key addition: NULL keeps
+        # the key complete, and pandas treats NULLs as equal, matching DuckDB.
+        df = df.copy()
+        df["contract_symbol"] = None
     if "snapshot_date" in df.columns and df["snapshot_date"].notna().all():
         return df
 
@@ -383,8 +388,15 @@ KEYS: dict[str, list[str]] = {
     # accident, not a guarantee, and the fallback path is also unsupported by
     # _compact_large_table(), which this table will need: ~93k rows/day is
     # ~23M/year. Keyed now, while it is small enough that the transition is free.
+    #
+    # contract_symbol joined the key 2026-10-01: adjusted (non-standard)
+    # contracts share symbol/expiration/strike/put_call with the regular one
+    # (FDX vs FDX1 after a spinoff), and ~6k such pairs per rebuild were being
+    # collapsed to an arbitrary survivor. Older raw files lack the column; it
+    # reads back NULL, so those rows dedup exactly as they did before.
     "schwab_options":                  ['symbol', 'expiration_date', 'strike',
-                                        'put_call', 'snapshot_date'],
+                                        'put_call', 'snapshot_date',
+                                        'contract_symbol'],
     # Every run re-downloads CFPB's full current snapshot (~17M rows), so
     # complaint_id alone is the natural key -- _sort_recency keeps the
     # newest fetched_at version of a complaint if its status/response fields
@@ -412,7 +424,10 @@ def _curated_path(table: str) -> str:
 # materializing + drop_duplicates-ing the whole thing in memory every run --
 # minutes of dead time on every `curated.py` invocation, not just the rare
 # full-backfill case `prices` was added for.
-_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints"}
+# `schwab_options` added 2026-10-01, the day the pipeline widened from 40
+# strikes / 4 weeks to full chains: ~580k rows/day (measured on a 40-symbol
+# sample), so the pandas path would be holding 100M+ rows within the year.
+_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options"}
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
 # SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
@@ -701,11 +716,30 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     partition_cols = ", ".join(key)
     raw_scan = f"read_parquet('{glob_path}', union_by_name=True, hive_partitioning=True)"
+    if table in _SNAPSHOT_DATE_FROM_FETCHED_AT:
+        # SQL twin of _backfill_snapshot_date(): pre-column raw files read back
+        # as NULL snapshot_date under union_by_name, and a NULL in the PARTITION
+        # BY key would collapse every one of those days into a single snapshot.
+        raw_scan = f"""(
+            SELECT * REPLACE (COALESCE(
+                snapshot_date,
+                strftime(TRY_CAST(fetched_at AS TIMESTAMP), '%Y-%m-%d')
+            ) AS snapshot_date)
+            FROM {raw_scan}
+        )"""
     sanity = _sanity_sql_predicate(table)
     where_sanity = f"WHERE {sanity}" if sanity else ""
 
     con = duckdb.connect()
     try:
+        # A key column added after data accumulated (schwab_options'
+        # contract_symbol) is absent from every raw file until the first run
+        # that writes it -- PARTITION BY would be a binder error. Read it as NULL.
+        present = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {raw_scan}").fetchall()}
+        missing = [c for c in key if c not in present]
+        if missing:
+            nulls = ", ".join(f"NULL::VARCHAR AS {c}" for c in missing)
+            raw_scan = f"(SELECT *, {nulls} FROM {raw_scan})"
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         deduped = f"""
             SELECT * EXCLUDE (_rn) FROM (

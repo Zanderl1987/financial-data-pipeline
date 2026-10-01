@@ -1150,7 +1150,10 @@ PIPELINES: list[PipelineSpec] = [
         stage=2,
         tables=["schwab_options"],
         requires_env=["SCHWAB_API_KEY", "SCHWAB_APP_SECRET"],
-        timeout=1800,   # ~507-symbol S&P 500 universe measured ~24min live 2026-08-02
+        # ~507-symbol S&P 500 universe measured ~24min live 2026-08-02 (40 strikes,
+        # 4 weeks). Full chains since 2026-10-01: a 40-symbol sample projected
+        # ~12min + ~2min for the bisected SPY/QQQ -- headroom kept for slow days.
+        timeout=3600,
     ),
     PipelineSpec(
         name="options_chain",

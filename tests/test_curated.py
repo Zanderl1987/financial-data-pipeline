@@ -101,8 +101,46 @@ class TestSchwabOptionsSnapshotDate:
         assert sorted(out["snapshot_date"]) == ["2026-08-05", "2026-08-06"]
 
     def test_key_is_used_not_the_full_row_fallback(self):
-        df = self._chain(["2026-08-05"])
+        df = self._chain(["2026-08-05"]).assign(contract_symbol="AAPL  260918C00200000")
         assert curated._dedup_subset("schwab_options", df) == curated.KEYS["schwab_options"]
+
+    def test_adjusted_contract_at_same_strike_is_kept(self):
+        # FDX and FDX1 (post-spinoff adjusted contract) share symbol/expiration/
+        # strike/put_call in the same snapshot; only contract_symbol tells them
+        # apart. Before 2026-10-01 one of the pair was dropped arbitrarily.
+        df = self._chain(["2026-10-01", "2026-10-01"])
+        df["contract_symbol"] = ["FDX   261016C00195000", "FDX1  261016C00195000"]
+        assert len(curated.dedup("schwab_options", df)) == 2
+
+    def test_rows_without_contract_symbol_dedup_as_before(self):
+        # Raw files written before the column existed: the key stays complete
+        # (column backfilled as NULL), so this is a keyed dedup, not full-row.
+        df = self._chain(["2026-08-05", "2026-08-05"])
+        df.loc[1, "bid"] = 1.25
+        df.loc[1, "fetched_at"] = "2026-08-05T13:04:00"
+        out = curated.dedup("schwab_options", df)
+        assert len(out) == 1
+        assert out.iloc[0]["bid"] == 1.25
+
+    def test_large_table_path_mixes_old_and_new_raw_files(self, tmp_path, monkeypatch):
+        # The DuckDB path (schwab_options joined _LARGE_TABLES 2026-10-01) must
+        # backfill snapshot_date for pre-08-11 files, read contract_symbol as NULL
+        # for pre-10-01 files, and keep adjusted contracts apart in new ones.
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        old = self._chain(["2026-08-05"]).drop(columns=["snapshot_date"])
+        old.to_parquet(raw / "schwab_options_incremental_20260805.parquet")
+        new = self._chain(["2026-10-01", "2026-10-01"])
+        new["contract_symbol"] = ["FDX   261016C00195000", "FDX1  261016C00195000"]
+        new.to_parquet(raw / "schwab_options_incremental_20261001.parquet")
+        monkeypatch.setitem(q.CATALOG, "schwab_options",
+                            str(raw / "*.parquet").replace("\\", "/"))
+        monkeypatch.setattr(curated, "CURATED_ROOT", str(tmp_path / "curated"))
+
+        out_path, raw_rows, curated_rows = curated._compact_large_table("schwab_options")
+        out = pd.read_parquet(out_path)
+        assert (raw_rows, curated_rows) == (3, 3)
+        assert sorted(out["snapshot_date"]) == ["2026-08-05", "2026-10-01", "2026-10-01"]
 
 
 class TestFullRowFallback:
