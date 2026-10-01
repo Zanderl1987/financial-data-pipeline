@@ -103,7 +103,7 @@ def live():
         have = prog[prog["days_done"] > 0]["symbol"].tolist()
         if not have:
             st.info("No symbol has a checkpoint yet - the first one lands after "
-                    "20 trading days of that symbol are fetched (~1 hour).")
+                    "20 trading days of that symbol are fetched (about 15-25 minutes after launch).")
             return
         sym = st.selectbox("Symbol", have, index=0, key="sym")
         s = summ[(summ["symbol"] == sym) & (summ["status"] == "ok")].sort_values("date")
