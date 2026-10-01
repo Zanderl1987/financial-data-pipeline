@@ -74,3 +74,63 @@ def test_replay_reconstructs_live_set():
                     mol.diff_contracts(d2, d3, "A", "2026-10-05")])
     assert mol.replay_live_set(ch, "2026-10-02") == {"O:A261016C00100000", "O:A261016C00110000"}
     assert mol.replay_live_set(ch, "2026-10-05") == {"O:A261016C00110000"}
+
+
+class _Resp:
+    def __init__(self, status, body=None):
+        self.status_code, self._body, self.text = status, body, str(body)[:100]
+
+    def json(self):
+        return self._body
+
+
+class FakeSession:
+    def __init__(self, responses):
+        self.responses, self.calls = list(responses), []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, dict(params or {})))
+        return self.responses.pop(0)
+
+
+def _client(responses):
+    s = FakeSession(responses)
+    return mol.MassiveClient("KEY", session=s, interval=0, sleep=lambda x: None), s
+
+
+def test_every_page_is_authenticated_and_all_pages_are_read(monkeypatch):
+    monkeypatch.setattr(mol, "EXPIRED_QUERIES", (None,))
+    p1 = {"results": [_c("O:A261016C00100000", 100.0, "2026-10-16")],
+          "next_url": "https://api.massive.com/v3/reference/options/contracts?cursor=abc"}
+    p2 = {"results": [_c("O:A261016C00110000", 110.0, "2026-10-16")]}
+    client, s = _client([_Resp(200, p1), _Resp(200, p2)])
+    df = mol.fetch_contracts(client, "A", "2026-10-01")
+    assert len(df) == 2
+    assert all(params.get("apiKey") == "KEY" for _, params in s.calls)
+    assert s.calls[1][0].endswith("cursor=abc")
+
+
+def test_429_backs_off_then_succeeds(monkeypatch):
+    monkeypatch.setattr(mol, "EXPIRED_QUERIES", (None,))
+    client, s = _client([_Resp(429, {}), _Resp(200, {"results": []})])
+    assert mol.fetch_contracts(client, "A", "2026-10-01").empty
+    assert len(s.calls) == 2
+
+
+def test_persistent_failure_raises(monkeypatch):
+    monkeypatch.setattr(mol, "EXPIRED_QUERIES", (None,))
+    client, _ = _client([_Resp(500, {})] * mol.MAX_RETRIES)
+    import pytest
+    with pytest.raises(RuntimeError):
+        mol.fetch_contracts(client, "A", "2026-10-01")
+
+
+def test_both_expired_queries_are_unioned_and_filtered_to_live(monkeypatch):
+    monkeypatch.setattr(mol, "EXPIRED_QUERIES", ("false", "true"))
+    live = {"results": [_c("O:A261016C00100000", 100.0, "2026-10-16")]}
+    gone = {"results": [_c("O:A261002C00100000", 100.0, "2026-10-02"),
+                        _c("O:A260918C00100000", 100.0, "2026-09-18")]}
+    client, s = _client([_Resp(200, live), _Resp(200, gone)])
+    df = mol.fetch_contracts(client, "A", "2026-10-01")
+    assert sorted(df["expiration_date"]) == ["2026-10-02", "2026-10-16"]
+    assert [p.get("expired") for _, p in s.calls] == ["false", "true"]

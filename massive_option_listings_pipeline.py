@@ -21,8 +21,10 @@ Usage:
 """
 
 import re
+import time
 
 import pandas as pd
+import requests
 
 CHANGE_COLS = ["symbol", "date", "contract_ticker", "strike", "expiration_date",
                "put_call", "shares_per_contract", "change"]
@@ -89,3 +91,56 @@ def replay_live_set(changes: pd.DataFrame, date: str) -> set[str]:
         live |= set(day.loc[day["change"].isin(["initial", "added"]), "contract_ticker"])
         live -= set(day.loc[day["change"] == "removed", "contract_ticker"])
     return live
+
+
+BASE_URL = "https://api.massive.com"          # confirmed by the Task 1 gate
+CONTRACTS_PATH = "/v3/reference/options/contracts"
+REQUEST_INTERVAL = 12.5                        # free tier: 5 requests/minute
+PAGE_LIMIT = 1000
+MAX_RETRIES = 5
+BACKOFF_SECONDS = 60
+# Set from the Task 1 gate result: (None,) if as_of alone returns contracts
+# live on that date; ("false", "true") if since-expired ones need expired=true.
+EXPIRED_QUERIES = (None,)
+
+
+class MassiveClient:
+    def __init__(self, api_key, session=None, interval=REQUEST_INTERVAL, sleep=time.sleep):
+        self.api_key, self.interval, self.sleep = api_key, interval, sleep
+        self.session = session or requests.Session()
+        self._last = 0.0
+
+    def get(self, url: str, params: dict) -> dict:
+        params = {**params, "apiKey": self.api_key}   # next_url omits the key
+        for attempt in range(1, MAX_RETRIES + 1):
+            wait = self.interval - (time.monotonic() - self._last)
+            if wait > 0:
+                self.sleep(wait)
+            self._last = time.monotonic()
+            try:
+                r = self.session.get(url, params=params, timeout=60)
+            except requests.RequestException as e:
+                print(f"  request error (attempt {attempt}): {type(e).__name__}", flush=True)
+                self.sleep(BACKOFF_SECONDS)
+                continue
+            if r.status_code == 200:
+                return r.json()
+            print(f"  HTTP {r.status_code} (attempt {attempt})", flush=True)
+            self.sleep(BACKOFF_SECONDS * attempt if r.status_code == 429 else BACKOFF_SECONDS)
+        # url only, never params: they carry the API key
+        raise RuntimeError(f"Massive request failed {MAX_RETRIES}x: {url.split('?')[0]}")
+
+
+def fetch_contracts(client: MassiveClient, symbol: str, as_of: str) -> pd.DataFrame:
+    """Standard contracts live on `as_of`, across all pages and EXPIRED_QUERIES."""
+    results = []
+    for expired in EXPIRED_QUERIES:
+        params = {"underlying_ticker": symbol, "as_of": as_of, "limit": PAGE_LIMIT}
+        if expired is not None:
+            params["expired"] = expired
+        url = BASE_URL + CONTRACTS_PATH
+        while url:
+            body = client.get(url, params)
+            results += body.get("results", [])
+            url, params = body.get("next_url"), {}
+    return live_on(standard_frame(results, symbol), as_of)
