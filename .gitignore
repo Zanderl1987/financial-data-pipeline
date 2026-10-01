@@ -63,3 +63,6 @@ storage/tv_scripts/
 
 # pytest coverage artifacts
 .coverage
+
+# Massive listings backfill checkpoints (local, regenerable)
+storage/state/
