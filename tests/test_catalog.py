@@ -122,9 +122,6 @@ EXPECTED_TABLES = [
     # USDA NASS
     "usda_crops",
     "usda_fertilizers",
-    # US Census trade
-    "us_imports_hs",
-    "us_exports_hs",
     # EIA energy
     "eia_petroleum_stocks",
     "eia_natgas_storage",

@@ -218,7 +218,7 @@ python validate.py --all            # include tables with no data yet
 - Backfill from 2000; incremental = last 5 years
 - CATALOG: `usda_crops`, `usda_fertilizers`; Stage 1 in `run_all.py`
 
-**`trade_pipeline.py`** (US Census Bureau International Trade API — requires `CENSUS_API_KEY`):
+**`trade_pipeline.py`** (US Census Bureau International Trade API — requires `CENSUS_API_KEY`) — **retired 2026-10-01**, never collected data; superseded by ShippingDataPipeline's `us_trade_products` / `us_trade_partners`:
 - 5 agricultural HTS chapters: cereals (10), oilseeds (12), fats/oils (15), feed residues (23), fertilizers (31)
 - World totals only (`CTY_CODE=0000`) — imports and exports separately
 - Backfill = annual YTD totals (December) from 2010; incremental = last 24 months monthly

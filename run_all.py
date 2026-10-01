@@ -289,16 +289,6 @@ PIPELINES: list[PipelineSpec] = [
         timeout=300,
     ),
     PipelineSpec(
-        name="trade",
-        file="trade_pipeline.py",
-        desc="US Census imports and exports by HTS chapter (8 chapters: ag, lumber, steel)",
-        stage=1,
-        tables=["us_imports_hs", "us_exports_hs"],
-        requires_env=["CENSUS_API_KEY"],
-        backfill_args=["--backfill"],
-        timeout=600,
-    ),
-    PipelineSpec(
         name="eia",
         file="eia_pipeline.py",
         desc="EIA weekly petroleum inventories/refinery activity/crude trade, natural gas storage, monthly crude production",

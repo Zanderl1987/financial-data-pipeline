@@ -111,7 +111,6 @@ PIPELINE_MODULES = [
     "retail_sentiment_pipeline",
     "insider_sentiment_pipeline",
     "indeed_hiringlab_pipeline",
-    "trade_pipeline",
     "usda_pipeline",
     "fao_pipeline",
     "plastics_pipeline",

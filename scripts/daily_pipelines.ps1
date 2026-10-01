@@ -63,7 +63,7 @@ $skip = @(
     "alpha_vantage", "alpha_vantage_fundamentals", "bls_expansion", "bls_oes_qcew",
     "eia", "eia_expansion", "eia_petng_prices", "eia_hourly_grid", "gas_prices",
     # known-dead sources
-    "nasdaq_data_link", "usda", "trade", "congressional_trades",
+    "nasdaq_data_link", "usda", "congressional_trades",
     # failing every night as of 2026-09-29:
     #   schwab_portfolio needs the Schwab Trader API, which isn't enabled
     # (lda_lobbying and ibkr_borrow_fee were here briefly, both fixed the same

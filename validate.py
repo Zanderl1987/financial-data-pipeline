@@ -402,19 +402,6 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "date", "value"],
         "date_col":    "date",
     },
-    # ── US Census international trade (HS chapters) ───────────────────────────
-    "us_imports_hs": {
-        "required":    ["hs2_code", "hs2_desc", "date", "value_mo_usd", "fetched_at"],
-        "critical_nn": ["hs2_code", "date"],
-        "date_col":    "date",
-        "value_ranges": {"value_mo_usd": (0, 1e13)},
-    },
-    "us_exports_hs": {
-        "required":    ["hs2_code", "hs2_desc", "date", "value_mo_usd", "fetched_at"],
-        "critical_nn": ["hs2_code", "date"],
-        "date_col":    "date",
-        "value_ranges": {"value_mo_usd": (0, 1e13)},
-    },
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
     "crypto_market": {
         "required":    ["coin_id", "symbol", "name", "price_usd", "fetched_at"],
