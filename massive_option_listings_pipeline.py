@@ -78,14 +78,24 @@ def diff_contracts(prev, curr: pd.DataFrame, symbol: str, date: str) -> pd.DataF
     return out[CHANGE_COLS].reset_index(drop=True)
 
 
-def summarize(curr: pd.DataFrame, symbol: str, date: str, status: str) -> dict:
+def summarize(curr: pd.DataFrame, symbol: str, date: str, status: str,
+              changes: pd.DataFrame | None = None, prev_count: int = 0) -> dict:
+    """One summary row per symbol-day. n_added/n_removed/replaced_frac expose
+    whole-chain re-tickering (stock splits) so the analysis can exclude it."""
     empty = curr.empty
+    n_added = n_removed = 0
+    if changes is not None and not changes.empty:
+        n_added = int((changes["change"] == "added").sum())
+        n_removed = int((changes["change"] == "removed").sum())
     return {
         "symbol": symbol, "date": date, "status": status,
         "n_contracts":   int(len(curr)),
         "n_expirations": int(curr["expiration_date"].nunique()),
         "min_strike":    None if empty else float(curr["strike"].min()),
         "max_strike":    None if empty else float(curr["strike"].max()),
+        "n_added":       n_added,
+        "n_removed":     n_removed,
+        "replaced_frac": round(n_removed / prev_count, 4) if prev_count else None,
     }
 
 
@@ -155,6 +165,9 @@ def fetch_contracts(client: MassiveClient, symbol: str, as_of: str) -> pd.DataFr
 
 
 FLUSH_EVERY = 20                 # trading days per output chunk / checkpoint
+# A non-empty day with fewer than this share of yesterday's contracts is treated
+# as a truncated response ('suspect'), not as mass delisting.
+SUSPECT_FRACTION = 0.5
 HISTORY_DAYS = 725               # free tier keeps 2 years; stay inside it
 UNIVERSE_FILE = os.path.join("experiments", "strike_intro_universe.csv")
 
@@ -166,21 +179,43 @@ def _paths(out_root: str):
             os.path.join(out_root, "state", "massive_listings"))
 
 
+def _atomic_write(path: str, text: str):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
 def _load_state(state_dir: str, symbol: str):
     meta = os.path.join(state_dir, f"{symbol}.json")
     if not os.path.exists(meta):
         return None, None
     with open(meta, encoding="utf-8") as f:
-        last = json.load(f)["last_date"]
-    live = pd.read_parquet(os.path.join(state_dir, f"{symbol}.parquet"))
-    return last, live
+        ptr = json.load(f)
+    live = (pd.read_parquet(os.path.join(state_dir, ptr["live_file"]))
+            if ptr.get("live_file") else None)
+    return ptr["last_date"], live
 
 
-def _save_state(state_dir: str, symbol: str, last: str, live: pd.DataFrame):
+def _save_state(state_dir: str, symbol: str, last: str, live):
+    """Commit (last_date, live set) together. The live set goes to a file named
+    for its date; the JSON pointer is swapped in last with os.replace, so a kill
+    at any point leaves the previous checkpoint whole."""
     os.makedirs(state_dir, exist_ok=True)
-    live.to_parquet(os.path.join(state_dir, f"{symbol}.parquet"), index=False)
-    with open(os.path.join(state_dir, f"{symbol}.json"), "w", encoding="utf-8") as f:
-        json.dump({"last_date": last}, f)
+    meta = os.path.join(state_dir, f"{symbol}.json")
+    old = None
+    if os.path.exists(meta):
+        with open(meta, encoding="utf-8") as f:
+            old = json.load(f).get("live_file")
+    live_file = None
+    if live is not None:
+        live_file = f"{symbol}__{last}.parquet"
+        tmp = os.path.join(state_dir, live_file + ".tmp")
+        live.to_parquet(tmp, index=False)
+        os.replace(tmp, os.path.join(state_dir, live_file))
+    _atomic_write(meta, json.dumps({"last_date": last, "live_file": live_file}))
+    if old and old != live_file and os.path.exists(os.path.join(state_dir, old)):
+        os.remove(os.path.join(state_dir, old))
 
 
 def _now() -> str:
@@ -213,13 +248,18 @@ def advance_symbol(client, symbol, days, out_root, flush_every=FLUSH_EVERY,
 
     for d in todo:
         curr = fetch(client, symbol, d)
-        if curr.empty and live is not None and not live.empty:
+        prev_n = 0 if live is None else len(live)
+        if curr.empty:
+            # Before any data this is a date the provider can't serve; after it,
+            # an API hiccup. Either way: record it, don't diff it.
             summaries.append(summarize(curr, symbol, d, "missing"))
+        elif prev_n and len(curr) < SUSPECT_FRACTION * prev_n:
+            summaries.append(summarize(curr, symbol, d, "suspect", prev_count=prev_n))
         else:
             ch = diff_contracts(live, curr, symbol, d)
             if not ch.empty:
                 changes.append(ch)
-            summaries.append(summarize(curr, symbol, d, "ok"))
+            summaries.append(summarize(curr, symbol, d, "ok", ch, prev_n))
             live = curr
         done += 1
         if done % flush_every == 0:
@@ -238,6 +278,58 @@ def trading_days(start: str, end: str) -> list[str]:
     return [d[:10] for d in df["d"]]
 
 
+def acquire_lock(state_dir: str) -> bool:
+    """One backfill process per state dir: a second one would double the
+    request rate and overwrite the first one's checkpoints. (psutil, not
+    os.kill(pid, 0): on Windows that call terminates the process.)"""
+    import psutil
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, ".lock")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                pid = int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            pid = 0
+        if pid and psutil.pid_exists(pid):
+            return False
+    _atomic_write(path, str(os.getpid()))
+    return True
+
+
+def release_lock(state_dir: str):
+    path = os.path.join(state_dir, ".lock")
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def load_or_create_manifest(state_dir: str, start: str, end: str, symbols: list[str]) -> dict:
+    """The run's window is fixed at first launch; restarts reuse it so every
+    symbol covers the same dates and the dashboard's totals stay put."""
+    path = os.path.join(state_dir, "run.json")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    os.makedirs(state_dir, exist_ok=True)
+    manifest = {"start": start, "end": end, "symbols": symbols, "launched_at": _now()}
+    _atomic_write(path, json.dumps(manifest))
+    return manifest
+
+
+def run_symbols(client, symbols, days, out_root, advance=None) -> list[str]:
+    """Advance every symbol; a failure is logged and skipped, not fatal."""
+    advance = advance or advance_symbol
+    failed = []
+    for i, sym in enumerate(symbols, 1):
+        try:
+            n = advance(client, sym, days, out_root)
+            print(f"[{i}/{len(symbols)}] {sym}: {n} new days", flush=True)
+        except Exception as e:  # noqa: BLE001 -- keep the other symbols going
+            failed.append(sym)
+            print(f"[{i}/{len(symbols)}] {sym}: FAILED {type(e).__name__}: {e}", flush=True)
+    return failed
+
+
 def main():
     load_dotenv()
     p = argparse.ArgumentParser(description="Massive option listings (as_of) history")
@@ -251,16 +343,30 @@ def main():
     key = os.environ.get("MASSIVE_API_KEY")
     if not key:
         sys.exit("MASSIVE_API_KEY not set in .env")
-    today = datetime.date.today()
-    start = args.start or (today - datetime.timedelta(days=HISTORY_DAYS)).isoformat()
-    end = args.end or today.isoformat()
-    symbols = args.symbols or pd.read_csv(args.universe_file)["symbol"].tolist()
-    days = trading_days(start, end)
-    client = MassiveClient(key)
-    print(f"{len(symbols)} symbols x {len(days)} trading days ({start}..{end})", flush=True)
-    for i, sym in enumerate(symbols, 1):
-        n = advance_symbol(client, sym, days, args.out_root)
-        print(f"[{i}/{len(symbols)}] {sym}: {n} new days", flush=True)
+    state_dir = _paths(args.out_root)[2]
+    if not acquire_lock(state_dir):
+        print(f"another backfill holds {state_dir}/.lock -- not starting a second one", flush=True)
+        sys.exit(3)       # the wrapper's retry loop stops on 3
+    try:
+        today = datetime.date.today()
+        symbols = args.symbols or pd.read_csv(args.universe_file)["symbol"].tolist()
+        if args.start or args.end:
+            start = args.start or (today - datetime.timedelta(days=HISTORY_DAYS)).isoformat()
+            end = args.end or today.isoformat()
+        else:
+            m = load_or_create_manifest(
+                state_dir, (today - datetime.timedelta(days=HISTORY_DAYS)).isoformat(),
+                today.isoformat(), symbols)
+            start, end = m["start"], m["end"]
+        days = trading_days(start, end)
+        client = MassiveClient(key)
+        print(f"{len(symbols)} symbols x {len(days)} trading days ({start}..{end})", flush=True)
+        failed = run_symbols(client, symbols, days, args.out_root)
+    finally:
+        release_lock(state_dir)
+    if failed:
+        print(f"FAILED symbols ({len(failed)}): {' '.join(failed)}", flush=True)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

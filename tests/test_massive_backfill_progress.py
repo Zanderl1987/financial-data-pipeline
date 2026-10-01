@@ -69,3 +69,30 @@ def test_dashboard_renders_progress_and_charts(tmp_path, monkeypatch):
     labels = [m.label for m in app.metric]
     assert "Symbols complete" in labels
     assert app.selectbox[0].options == ["AAPL"]
+
+
+def test_window_comes_from_the_run_manifest(tmp_path):
+    # M1/M2: totals and ETA use the job's fixed window and real launch time.
+    assert mbp.load_window(str(tmp_path)) is None
+    d = tmp_path / "state" / "massive_listings"
+    d.mkdir(parents=True)
+    (d / "run.json").write_text(json.dumps({"start": "2024-10-06", "end": "2026-10-01",
+                                            "launched_at": "2026-10-01T22:25:00"}),
+                                encoding="utf-8")
+    w = mbp.load_window(str(tmp_path))
+    assert (w["start"], w["end"]) == ("2024-10-06", "2026-10-01")
+    assert w["launched_at"] == pd.Timestamp("2026-10-01T22:25:00")
+
+
+def test_half_written_files_are_skipped_not_fatal(tmp_path):
+    # M3: the dashboard reads while the job writes.
+    summ = tmp_path / "raw" / "massive" / "option_chain_summary" / "year=2026" / "month=10"
+    summ.mkdir(parents=True)
+    pd.DataFrame({"symbol": ["A"], "date": ["2026-09-01"], "status": ["ok"]}).to_parquet(
+        summ / "option_chain_summary_A_ok.parquet")
+    (summ / "option_chain_summary_B_partial.parquet").write_bytes(b"PAR1 truncated")
+    assert len(mbp.load_summaries(str(tmp_path))) == 1
+    _state(tmp_path, "A", "2026-09-02")
+    (tmp_path / "state" / "massive_listings" / "B.json").write_text("{\"last_da", encoding="utf-8")
+    p = mbp.load_progress(str(tmp_path), ["A", "B"], DAYS).set_index("symbol")
+    assert p.loc["B", "status"] == "queued"

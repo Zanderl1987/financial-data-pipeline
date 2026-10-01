@@ -191,3 +191,99 @@ def test_resume_after_crash_matches_uninterrupted_run(tmp_path):
     assert a.reset_index(drop=True).equals(b.reset_index(drop=True))
     assert mol.advance_symbol(None, "A", DAYS, str(crash), flush_every=2,
                               fetch=_fake_fetch(LISTS)) == 0
+
+
+# ---- Final-review fixes (2026-10-01) -------------------------------------
+
+def test_empty_days_before_any_data_are_missing_and_first_data_is_initial(tmp_path):
+    # C1: dates beyond the provider's history window may come back empty. They
+    # must not become an empty baseline that turns the whole chain into "added".
+    lists = {"2026-09-01": [], "2026-09-02": [],
+             "2026-09-03": ["O:A270115C00100000", "O:A270115C00110000"]}
+    mol.advance_symbol(None, "A", list(lists), str(tmp_path), fetch=_fake_fetch(lists))
+    ch = _read(tmp_path, "option_listing_changes")
+    assert set(ch["change"]) == {"initial"}
+    summ = _read(tmp_path, "option_chain_summary").set_index("date")
+    assert summ.loc["2026-09-01", "status"] == "missing"
+    assert summ.loc["2026-09-03", "status"] == "ok"
+
+
+def test_one_failing_symbol_does_not_stop_the_rest(tmp_path):
+    # C1/I4: a symbol that errors is logged and skipped; the run reports it.
+    def advance(client, sym, days, out_root):
+        if sym == "BAD":
+            raise RuntimeError("Massive request failed 5x")
+        return len(days)
+    failed = mol.run_symbols(None, ["A", "BAD", "C"], ["2026-09-01"], str(tmp_path),
+                             advance=advance)
+    assert failed == ["BAD"]
+
+
+def test_checkpoint_is_consistent_if_killed_between_writes(tmp_path, monkeypatch):
+    # I1: the date and the contract list must commit together. Simulate a kill
+    # right after the new contract list is written but before the pointer moves.
+    state = str(tmp_path / "state")
+    d1 = mol.standard_frame([_c("O:A270115C00100000", 100.0, "2027-01-15")], "A")
+    d2 = mol.standard_frame([_c("O:A270115C00110000", 110.0, "2027-01-15")], "A")
+    mol._save_state(state, "A", "2026-09-01", d1)
+    real_replace = os.replace
+    def kill_on_pointer(src, dst):
+        if dst.endswith("A.json"):
+            raise KeyboardInterrupt("killed")
+        return real_replace(src, dst)
+    monkeypatch.setattr(mol.os, "replace", kill_on_pointer)
+    import pytest
+    with pytest.raises(KeyboardInterrupt):
+        mol._save_state(state, "A", "2026-09-02", d2)
+    monkeypatch.setattr(mol.os, "replace", real_replace)
+    last, live = mol._load_state(state, "A")
+    assert last == "2026-09-01"
+    assert live["contract_ticker"].tolist() == ["O:A270115C00100000"]
+
+
+def test_sudden_collapse_is_suspect_not_diffed(tmp_path):
+    # I2: a truncated response (well under half of yesterday) must not be read
+    # as mass delisting followed by mass relisting.
+    many = [f"O:A270115C00{100 + i:03d}000" for i in range(10)]
+    lists = {"2026-09-01": many, "2026-09-02": many[:3], "2026-09-03": many}
+    mol.advance_symbol(None, "A", list(lists), str(tmp_path), fetch=_fake_fetch(lists))
+    ch = _read(tmp_path, "option_listing_changes")
+    assert set(ch["change"]) == {"initial"}
+    summ = _read(tmp_path, "option_chain_summary").set_index("date")
+    assert summ.loc["2026-09-02", "status"] == "suspect"
+
+
+def test_summary_records_churn_for_split_days(tmp_path):
+    # I3: a stock split re-tickers the whole chain; the summary must expose it.
+    before = ["O:A270115C00100000", "O:A270115C00110000"]
+    after = ["O:A270115C00010000", "O:A270115C00011000"]
+    lists = {"2026-09-01": before, "2026-09-02": after}
+    mol.advance_symbol(None, "A", list(lists), str(tmp_path), fetch=_fake_fetch(lists))
+    summ = _read(tmp_path, "option_chain_summary").set_index("date")
+    assert (summ.loc["2026-09-02", "n_added"], summ.loc["2026-09-02", "n_removed"]) == (2, 2)
+    assert summ.loc["2026-09-02", "replaced_frac"] == 1.0
+
+
+def test_second_concurrent_run_is_refused(tmp_path):
+    # I5: two processes on the same checkpoints double the request rate and
+    # overwrite each other's state.
+    state = str(tmp_path)
+    assert mol.acquire_lock(state) is True
+    assert mol.acquire_lock(state) is False          # same live pid holds it
+    mol.release_lock(state)
+    assert mol.acquire_lock(state) is True
+
+
+def test_stale_lock_from_dead_process_is_taken_over(tmp_path):
+    with open(os.path.join(tmp_path, ".lock"), "w", encoding="utf-8") as f:
+        f.write("999999999")
+    assert mol.acquire_lock(str(tmp_path)) is True
+
+
+def test_run_window_is_fixed_by_manifest_across_restarts(tmp_path):
+    # M1: a restart days later must keep the original window, not slide it.
+    state = str(tmp_path)
+    m1 = mol.load_or_create_manifest(state, "2024-10-06", "2026-10-01", ["A", "B"])
+    m2 = mol.load_or_create_manifest(state, "2024-10-20", "2026-10-15", ["A", "B"])
+    assert (m2["start"], m2["end"]) == ("2024-10-06", "2026-10-01")
+    assert m2["launched_at"] == m1["launched_at"]

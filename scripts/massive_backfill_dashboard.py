@@ -37,11 +37,11 @@ st.caption("Massive as_of contract history, 2 years x 100 names. Refreshes every
 
 
 @st.cache_data(ttl=3600)
-def _days() -> list[str]:
+def _days(start: str, end: str) -> list[str]:
     import query as q
-    start = (pd.Timestamp.today() - pd.Timedelta(days=HISTORY_DAYS)).date().isoformat()
     df = q.sql(f"""SELECT DISTINCT CAST(date AS VARCHAR) AS d FROM prices
-                   WHERE symbol = 'SPY' AND date >= '{start}' ORDER BY d""")
+                   WHERE symbol = 'SPY' AND date BETWEEN '{start}' AND '{end}'
+                   ORDER BY d""")
     return [d[:10] for d in df["d"]]
 
 
@@ -66,11 +66,16 @@ def _layout(fig, title, ytitle, height=320):
 @st.fragment(run_every="30s")
 def live():
     symbols = pd.read_csv(UNIVERSE)["symbol"].tolist()
-    days = _days()
+    window = mbp.load_window(OUT_ROOT)
+    if window is None:   # not launched yet: show the window it will use
+        start = (pd.Timestamp.today() - pd.Timedelta(days=HISTORY_DAYS)).date().isoformat()
+        window = {"start": start, "end": pd.Timestamp.today().date().isoformat(),
+                  "launched_at": None}
+    days = _days(window["start"], window["end"])
     prog = mbp.load_progress(OUT_ROOT, symbols, days)
     summ = mbp.load_summaries(OUT_ROOT)
 
-    started = pd.to_datetime(summ["fetched_at"]).min() if not summ.empty else None
+    started = window["launched_at"]
     eta = mbp.estimate_eta(prog, started, pd.Timestamp.now("UTC").tz_localize(None)) \
         if started is not None else {"hours_left": None, "remaining_days": None}
     done_days, total_days = int(prog["days_done"].sum()), int(prog["days_total"].sum())

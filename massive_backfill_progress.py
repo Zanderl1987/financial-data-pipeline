@@ -29,8 +29,11 @@ def load_progress(out_root: str, symbols: list[str], days: list[str]) -> pd.Data
         meta = os.path.join(state_dir, f"{sym}.json")
         last = None
         if os.path.exists(meta):
-            with open(meta, encoding="utf-8") as f:
-                last = json.load(f)["last_date"]
+            try:
+                with open(meta, encoding="utf-8") as f:
+                    last = json.load(f)["last_date"]
+            except (OSError, ValueError, KeyError):
+                last = None          # caught mid-write; next refresh reads it
         done = sum(d <= last for d in days) if last else 0
         status = "queued" if done == 0 else ("done" if done >= len(days) else "in progress")
         rows.append({"symbol": sym, "last_date": last, "days_done": done,
@@ -51,11 +54,30 @@ def estimate_eta(progress: pd.DataFrame, started: pd.Timestamp, now: pd.Timestam
             "days_per_hour": round(rate, 2)}
 
 
+def _read_files(files: list[str]) -> pd.DataFrame:
+    frames = []
+    for f in files:
+        try:
+            frames.append(pd.read_parquet(f))
+        except Exception:  # noqa: BLE001 -- a file the job is still writing
+            continue
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def _read_all(directory: str) -> pd.DataFrame:
-    files = glob.glob(os.path.join(directory, "**", "*.parquet"), recursive=True)
-    if not files:
-        return pd.DataFrame()
-    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    return _read_files(glob.glob(os.path.join(directory, "**", "*.parquet"), recursive=True))
+
+
+def load_window(out_root: str) -> dict | None:
+    """The job's fixed run window and launch time, from its run manifest."""
+    path = os.path.join(_root_dirs(out_root)[2], "run.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            m = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return {"start": m["start"], "end": m["end"],
+            "launched_at": pd.Timestamp(m["launched_at"])}
 
 
 def load_summaries(out_root: str) -> pd.DataFrame:
@@ -64,8 +86,6 @@ def load_summaries(out_root: str) -> pd.DataFrame:
 
 def load_changes(out_root: str, symbol: str) -> pd.DataFrame:
     changes_dir = _root_dirs(out_root)[0]
-    files = glob.glob(os.path.join(changes_dir, "**", f"option_listing_changes_{symbol}_*.parquet"),
-                      recursive=True)
-    if not files:
-        return pd.DataFrame()
-    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    return _read_files(glob.glob(
+        os.path.join(changes_dir, "**", f"option_listing_changes_{symbol}_*.parquet"),
+        recursive=True))
