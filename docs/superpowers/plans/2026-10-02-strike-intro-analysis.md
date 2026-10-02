@@ -1296,10 +1296,13 @@ def _world(effect: float, seed=0, n_sym=12, n_days=420):
                 r[e + 4:e + 25] += d * effect / 21          # drift after entry (e+3)
         close[sym] = 50 * np.cumprod(1 + r)
         dates = [d.strftime("%Y-%m-%d") for d in idx]
-        for k in range(0, 200, 10):
+        for k in range(100, 300, 10):
             ch.append((sym, dates[0], f"{sym}c{k}", float(k), "2027-01-15", "initial"))
         for e, d in hit_days:
-            ch.append((sym, dates[e + 1], f"{sym}x{e}", 500.0 if d > 0 else -1.0, "2027-01-15", "added"))
+            # strikes keep extending the range over time (e grows with time), so
+            # every planted listing is a genuine new extreme
+            strike = 1000.0 + e if d > 0 else 90.0 - e / 10
+            ch.append((sym, dates[e + 1], f"{sym}x{e}", strike, "2027-01-15", "added"))
         summ += [{"symbol": sym, "date": dd, "status": "ok", "replaced_frac": 0.0} for dd in dates]
     changes = pd.DataFrame(ch, columns=["symbol", "date", "contract_ticker", "strike",
                                         "expiration_date", "change"])
@@ -1420,7 +1423,11 @@ def _vol_outcomes(e, close, bench="SPY"):
 
 def _test_rows(e, trig, progress, n_perm, n_boot):
     rows = []
-    strata = e["symbol"] + "|" + pd.to_datetime(e["entry_date"]).dt.strftime("%Y-%m")
+    # Permutation strata = calendar month of entry (controls market-wide timing).
+    # Symbol-month (the original spec) left most strata with one event, so the
+    # test could barely shuffle: on a synthetic +7pt effect it gave p=0.10 while
+    # Welch/MW/bootstrap all gave p<0.001. Month strata: p=0.0005.
+    strata = pd.to_datetime(e["entry_date"]).dt.strftime("%Y-%m")
     weeks = pd.to_datetime(e["entry_date"]).dt.strftime("%G-%V")
     subgroups = {"all": np.ones(len(e), bool), "up": (e["direction"] > 0).values,
                  "down": (e["direction"] < 0).values,

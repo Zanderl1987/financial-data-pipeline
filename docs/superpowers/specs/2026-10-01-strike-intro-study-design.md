@@ -139,7 +139,8 @@ days. All other tests are secondary and BH-adjusted together.
 Per group × horizon × trigger:
 - n, mean, median, continuation rate, 95% CI.
 - HIT − MISS: difference, Welch t-test p, permutation p (labels shuffled within
-  symbol-month strata, ≥ 10,000 draws), week-block bootstrap CI and p, Mann-Whitney p,
+  calendar-month-of-entry strata, ≥ 10,000 draws; amended 2026-10-02 — symbol-month
+  strata were mostly single events and left the test almost no power), week-block bootstrap CI and p, Mann-Whitney p,
   Cohen's d.
 - Benjamini-Hochberg adjusted p across all secondary tests.
 - Regression: signed return_h ~ HIT + EXCESS + move σ + earnings + 60d σ + headroom +
