@@ -1653,7 +1653,7 @@ def test_page_renders_stages_coefficients_and_null(tmp_path, monkeypatch):
     app = AppTest.from_file(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "scripts", "strike_intro_study_dashboard.py"), default_timeout=60).run()
     assert not app.exception, app.exception
-    assert any("excess_model" in str(t.value) for t in app.markdown + app.caption)
+    assert any("excess_model" in str(t.value) for t in [*app.markdown, *app.caption])
 ```
 
 - [ ] **Step 2: Run to verify failure**
