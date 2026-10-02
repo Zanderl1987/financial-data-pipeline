@@ -276,7 +276,7 @@ def test_day_trigger_finds_the_jump_with_direction_and_excludes_event_day_from_s
 
 def test_run_trigger_cooldown_gives_one_event_for_one_run():
     c = _close(jump=0.0)
-    r = c["A"].pct_change().fillna(0).to_numpy()
+    r = c["A"].pct_change().fillna(0).to_numpy().copy()
     r[80:85] += 0.03                                  # five +3% excess days
     c["A"] = 50 * np.cumprod(1 + r)
     e = ev.find_events(c, "run")
