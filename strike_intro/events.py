@@ -67,21 +67,63 @@ def attach_intros(events, intros, close_index, window=(1, 2), entry_offset=3) ->
     return pd.DataFrame(out)
 
 
-def forward_returns(events, close, horizons, bench="SPY") -> pd.DataFrame:
+def _betas(events, close, bench, window=250, gap=5):
+    """Market-model beta per event from daily returns over the `window` days
+    ending `gap` days before the event (spec: 250 days ending at e-5)."""
+    ret = close.pct_change()
+    out = []
+    for _, e in events.iterrows():
+        j = close.index.get_loc(e["event_date"]) - gap
+        if j - window < 1:
+            out.append(np.nan)
+            continue
+        y = ret[e["symbol"]].iloc[j - window:j]
+        x = ret[bench].iloc[j - window:j]
+        ok = y.notna() & x.notna()
+        out.append(float(np.cov(y[ok], x[ok])[0, 1] / np.var(x[ok], ddof=1))
+                   if ok.sum() > 60 else np.nan)
+    return out
+
+
+def forward_returns(events, close, horizons, bench="SPY", market_model=False) -> pd.DataFrame:
+    """Signed excess returns `ret_<h>` (stock minus SPY); with market_model=True
+    also `ar_<h>` (stock minus beta * SPY), the spec's robustness variant."""
     out = events.copy()
     idx = close.index
+    betas = _betas(events, close, bench) if market_model else None
     for h in horizons:
-        vals = []
-        for _, e in events.iterrows():
+        vals, avals = [], []
+        for k, (_, e) in enumerate(events.iterrows()):
             i = idx.get_loc(e["entry_date"])
             if i + h >= len(idx):
                 vals.append(np.nan)
+                avals.append(np.nan)
                 continue
             a = close[e["symbol"]].iloc[i + h] / close[e["symbol"]].iloc[i] - 1
             b = close[bench].iloc[i + h] / close[bench].iloc[i] - 1
             vals.append(e["direction"] * (a - b))
+            if market_model:
+                avals.append(e["direction"] * (a - betas[k] * b))
         out[f"ret_{h}"] = vals
+        if market_model:
+            out[f"ar_{h}"] = avals
     return out
+
+
+def non_overlap(events, close_index, gap=21) -> pd.DataFrame:
+    """First event per symbol per `gap` trading days (spec robustness check):
+    removes the near-duplicate events whose forward windows overlap."""
+    pos = {d: i for i, d in enumerate(close_index)}
+    keep = []
+    for _, g in events.sort_values("event_date").groupby("symbol", sort=False):
+        last = None
+        for i, e in g.iterrows():
+            p = pos[e["event_date"]]
+            if last is None or p - last >= gap:
+                keep.append(i)
+                last = p
+    return events.loc[sorted(keep, key=lambda i: (events.loc[i, "symbol"],
+                                                  events.loc[i, "event_date"]))]
 
 
 def car_paths(events, close, pre=5, post=126, bench="SPY") -> pd.DataFrame:

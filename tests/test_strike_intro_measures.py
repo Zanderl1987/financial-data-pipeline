@@ -70,3 +70,28 @@ def test_near_expiration_extremes_after_the_day():
                      ("A", "2026-09-02", "c100", 100.0, "2026-10-16", "removed")])
     out = measures.daily_intros(ch, _summ(["2026-09-01", "2026-09-02"])).set_index("date")
     assert (out.loc["2026-09-02", "near_min"], out.loc["2026-09-02", "near_max"]) == (110.0, 120.0)
+
+
+def test_split_rescales_earlier_strikes_into_post_split_units():
+    # Review #1: closes are split-adjusted, so strikes must be too, or headroom
+    # before a split is off by the split ratio (NFLX 10:1 2025-11-17).
+    pre = [("A", "2026-09-01", f"p{k}", float(k), "2026-12-18", "initial") for k in range(100, 310, 10)]
+    rm = [("A", "2026-09-02", f"p{k}", float(k), "2026-12-18", "removed") for k in range(100, 310, 10)]
+    post = [("A", "2026-09-02", f"q{k}", k / 10, "2026-12-18", "added") for k in range(100, 310, 10)]
+    ch = _ch(pre + rm + post + [("A", "2026-09-03", "q320", 32.0, "2026-12-18", "added")])
+    s = _summ(["2026-09-01", "2026-09-02", "2026-09-03"], replaced=[0.0, 1.0, 0.0])
+    out = measures.daily_intros(ch, s).set_index("date")
+    assert np.isclose(out.loc["2026-09-01", "near_max"], 30.0)      # 300 / 10
+    assert np.isclose(out.loc["2026-09-02", "near_max"], 30.0)
+    assert out.loc["2026-09-03", "above"] == 1
+    assert np.isclose(out.loc["2026-09-02", "split_ratio"], 10.0)
+
+
+def test_day_after_a_missing_day_is_invalid():
+    # Its diff spans two days, so it may hold the missing day's listings too.
+    ch = _ch(BASE + [("A", "2026-09-03", "c120", 120.0, "2026-10-16", "added")])
+    s = _summ(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
+              status=["ok", "missing", "ok", "ok"])
+    out = measures.daily_intros(ch, s).set_index("date")
+    assert out.loc["2026-09-03", "valid"] == False
+    assert out.loc["2026-09-04", "valid"] == True

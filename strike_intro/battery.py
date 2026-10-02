@@ -91,3 +91,38 @@ def clustered_ols(df, y, xcols, cluster_cols=("entry_date", "symbol")) -> pd.Dat
     res = sm.OLS(d[y].astype(float), X).fit(cov_type="cluster", cov_kwds={"groups": groups})
     return pd.DataFrame({"term": res.params.index, "coef": res.params.values,
                          "se": res.bse.values, "p": res.pvalues.values})
+
+
+def trading_stats(trades, daily, hold=21, cost_bp=10) -> dict:
+    """Illustrative strategy from overlapping positions: each trade holds
+    `hold` days after its entry close, equal-weighted across open positions;
+    cost_bp is charged on entry and exit. `daily` = date x symbol daily excess
+    returns; trades carry symbol, entry_date, direction."""
+    idx = daily.index
+    cost = cost_bp / 1e4
+    contrib = pd.DataFrame(0.0, index=idx, columns=range(len(trades)))
+    active = pd.DataFrame(False, index=idx, columns=range(len(trades)))
+    trade_ret = []
+    for k, (_, t) in enumerate(trades.iterrows()):
+        i = idx.get_loc(t["entry_date"])
+        days = idx[i + 1:i + 1 + hold]
+        if len(days) == 0:
+            trade_ret.append(np.nan)
+            continue
+        r = t["direction"] * daily.loc[days, t["symbol"]].fillna(0.0)
+        r.iloc[0] -= cost
+        r.iloc[-1] -= cost
+        contrib.loc[days, k] = r.values
+        active.loc[days, k] = True
+        trade_ret.append(float(r.sum()))
+    n_open = active.sum(axis=1)
+    port = (contrib.sum(axis=1) / n_open.replace(0, np.nan)).dropna()
+    equity = (1 + port).cumprod() - 1
+    tr = pd.Series(trade_ret).dropna()
+    wins, losses = tr[tr > 0].sum(), -tr[tr < 0].sum()
+    dd = ((1 + equity) / (1 + equity).cummax() - 1).min() if len(equity) else np.nan
+    sd = port.std()
+    return {"n_trades": int(len(tr)), "win_rate": float((tr > 0).mean()) if len(tr) else np.nan,
+            "profit_factor": float(wins / losses) if losses > 0 else np.nan,
+            "sharpe": float(port.mean() / sd * np.sqrt(252)) if sd and sd > 0 else np.nan,
+            "max_drawdown": float(dd), "equity": equity}

@@ -77,3 +77,26 @@ def test_earnings_flag_within_one_trading_day():
     events = pd.DataFrame({"symbol": ["A", "A"], "event_date": [IDX[10], IDX[50]]})
     earn = pd.DataFrame({"symbol": ["A"], "date": [IDX[11]]})
     assert list(ev.earnings_flag(events, earn, IDX)) == [True, False]
+
+
+def test_non_overlap_keeps_first_event_per_symbol_per_gap():
+    # Review #2 / spec: "first event per symbol per 21 trading days".
+    e = pd.DataFrame({"symbol": ["A", "A", "A", "B"],
+                      "event_date": [IDX[10], IDX[20], IDX[40], IDX[12]]})
+    out = ev.non_overlap(e, IDX, gap=21)
+    assert list(zip(out["symbol"], out["event_date"])) == [("A", IDX[10]), ("A", IDX[40]), ("B", IDX[12])]
+
+
+def test_market_model_returns_remove_beta():
+    # Spec robustness: market-model abnormal returns, beta from 250 days ending e-5.
+    rng = np.random.default_rng(7)
+    n = 400
+    idx = pd.bdate_range("2025-01-01", periods=n)
+    spy_r = rng.normal(0, 0.01, n)
+    a_r = 2.0 * spy_r + rng.normal(0, 0.002, n)        # beta 2, no alpha
+    c = pd.DataFrame({"SPY": 100 * np.cumprod(1 + spy_r), "A": 50 * np.cumprod(1 + a_r)}, index=idx)
+    e = pd.DataFrame({"symbol": ["A"], "event_date": [idx[300]], "direction": [1],
+                      "entry_date": [idx[303]]})
+    out = ev.forward_returns(e, c, [21], market_model=True)
+    assert abs(out.iloc[0]["ar_21"]) < 0.02
+    assert abs(out.iloc[0]["ret_21"]) > abs(out.iloc[0]["ar_21"])   # raw excess keeps beta

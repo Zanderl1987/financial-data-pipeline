@@ -51,12 +51,24 @@ def _last_trading_on_or_before(d: str) -> str:
     return t.strftime("%Y-%m-%d")
 
 
+def intros_by_symbol(symbols, fetch) -> pd.DataFrame:
+    """Build the introduction panel one symbol at a time; fetch(sym) returns
+    that symbol's (changes, summary). Liquid names carry millions of change
+    rows, so loading every symbol at once would not fit in memory."""
+    parts = []
+    for sym in symbols:
+        ch, summ = fetch(sym)
+        if len(summ):
+            parts.append(measures.daily_intros(ch, summ))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
 def _events_for(trigger, close, intros, earnings, window, offset):
     e = ev.find_events(close, trigger)
     e = ev.attach_intros(e, intros, close.index, window=window, entry_offset=offset)
     if e.empty:
         return e
-    e = ev.forward_returns(e, close, HORIZONS)
+    e = ev.forward_returns(e, close, HORIZONS, market_model=True)
     e["trigger"] = trigger
     e["earnings"] = (ev.earnings_flag(e, earnings, close.index).values
                      if len(earnings) else False)
@@ -89,7 +101,8 @@ def _test_rows(e, trig, progress, n_perm, n_boot):
                  "earnings": e["earnings"].astype(bool).values,
                  "non-earnings": ~e["earnings"].astype(bool).values}
     measures_ = [("ret", h, f"ret_{h}") for h in HORIZONS] + \
-                [("absret", 21, "absret_21"), ("rv_ratio", 21, "rv_ratio")]
+                [("ar", 21, "ar_21"), ("ar", 63, "ar_63"),
+                 ("absret", 21, "absret_21"), ("rv_ratio", 21, "rv_ratio")]
     for sg, m in subgroups.items():
         for meas, h, col in measures_:
             if sg != "all" and meas != "ret":
@@ -113,23 +126,64 @@ def _test_rows(e, trig, progress, n_perm, n_boot):
             rows.append({"test_id": f"{trig}|excess>0|{col}", "trigger": trig,
                          "measure": "excess_split", "horizon": h, "subgroup": "all",
                          "primary": False, **r})
+        # top vs bottom EXCESS tercile: direction (ret) and size (absret, vol check)
+        x = e["excess"]
+        if x.notna().sum() >= 30:
+            lo, hi = x.quantile([1 / 3, 2 / 3])
+            top, bot = (x > hi).values, (x <= lo).values
+            for col, h in (("ret_21", 21), ("ret_63", 63), ("absret_21", 21), ("rv_ratio", 21)):
+                r = battery.compare_groups(e.loc[top, col], e.loc[bot, col], strata[top],
+                                           strata[bot], weeks[top], weeks[bot], n_perm=n_perm,
+                                           n_boot=n_boot, progress=progress,
+                                           label=f"{trig}|excess_tercile|{col}")
+                rows.append({"test_id": f"{trig}|excess_tercile|{col}", "trigger": trig,
+                             "measure": "excess_tercile", "horizon": h, "subgroup": "all",
+                             "primary": False, **r})
     return rows
 
 
-def _equity(e, close, cost_bp=10):
-    d = e[(e["trigger"] == "day") & e["hit"]].dropna(subset=["ret_21"]).sort_values("entry_date")
+def _nonoverlap_rows(e, close, trig, n_perm, n_boot):
+    """Spec robustness: first event per symbol per 21 trading days, h >= 21."""
+    no = ev.non_overlap(e, close.index, gap=21)
+    strata = pd.to_datetime(no["entry_date"]).dt.strftime("%Y-%m")
+    weeks = pd.to_datetime(no["entry_date"]).dt.strftime("%G-%V")
+    rows = []
+    for h in (21, 63, 126):
+        col = f"ret_{h}"
+        hit, miss = no["hit"].values, ~no["hit"].values
+        r = battery.compare_groups(no.loc[hit, col], no.loc[miss, col], strata[hit],
+                                   strata[miss], weeks[hit], weeks[miss], n_perm=n_perm,
+                                   n_boot=n_boot)
+        rows.append({"test_id": f"nonoverlap:{trig}|{col}|all", "trigger": trig,
+                     "measure": "ret_nonoverlap", "horizon": h, "subgroup": "all",
+                     "primary": False, **r})
+    return rows
+
+
+def _earnings_coverage(earnings, symbols, close_index) -> float:
+    """Share of expected quarterly reports (one per ~63 trading days) present."""
+    expected = max(1, len(close_index) // 63)
+    if not len(earnings):
+        return 0.0
+    e = earnings[pd.to_datetime(earnings["date"]).between(close_index.min(), close_index.max())]
+    counts = e.groupby("symbol")["date"].nunique()
+    return float(np.mean([min(1.0, counts.get(s, 0) / expected) for s in symbols]))
+
+
+def _trading(e, close, bench="SPY"):
+    d = e[(e["trigger"] == "day") & e["hit"]].sort_values("entry_date")
     if d.empty:
-        return pd.Series(dtype=float)
-    pnl = d.groupby("entry_date")["ret_21"].mean() - 2 * cost_bp / 1e4
-    return pnl.cumsum()
+        return {"n_trades": 0, "equity": pd.Series(dtype=float)}
+    return battery.trading_stats(d, ev.excess_returns(close, bench), hold=21, cost_bp=10)
 
 
 def run_study(changes, summary, close, earnings, run_dir, progress=None,
-              n_perm=10000, n_boot=2000) -> dict:
+              n_perm=10000, n_boot=2000, intros=None, universe_size=None) -> dict:
     os.makedirs(run_dir, exist_ok=True)
     progress = progress or RunProgress(run_dir)
     progress.stage("measures", 0, 1, "per-expiration introductions")
-    intros = measures.daily_intros(changes, summary)
+    if intros is None:
+        intros = measures.daily_intros(changes, summary)
     progress.stage("measures", 1, 1, f"{intros['symbol'].nunique()} symbols")
     syms = [s for s in intros["symbol"].unique() if s in close.columns]
     if len(syms) < MIN_SYMBOLS:
@@ -155,7 +209,9 @@ def run_study(changes, summary, close, earnings, run_dir, progress=None,
             continue
         e["excess"] = xm.event_excess(e, panel, close.index).values
         all_events.append(_vol_outcomes(e, close))
-    events = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
+    if not all_events:
+        raise ValueError("no move events with a valid listing window -- nothing to test")
+    events = pd.concat(all_events, ignore_index=True)
     sens = _events_for("day", close, intros, earnings, (1, 1), 2)
     if not sens.empty:
         sens = _vol_outcomes(sens, close)
@@ -163,6 +219,7 @@ def run_study(changes, summary, close, earnings, run_dir, progress=None,
     rows = []
     for trig in sorted(events["trigger"].unique()):
         rows += _test_rows(events[events["trigger"] == trig], trig, progress, n_perm, n_boot)
+        rows += _nonoverlap_rows(events[events["trigger"] == trig], close, trig, n_perm, n_boot)
     if not sens.empty:
         sens["excess"] = np.nan
         rows += [dict(r, test_id="sens:" + r["test_id"], primary=False) for r in
@@ -184,8 +241,22 @@ def run_study(changes, summary, close, earnings, run_dir, progress=None,
         prior.append(r["direction"] * (close[r["symbol"]].iloc[i - 1] / p0 - 1))
     d["prior21"] = prior
     d["abs_sigma"] = d["move_sigma"].abs()
+    ex = ev.excess_returns(close)
+    sig = ex.rolling(60, min_periods=60).std().shift(1)
+    near = intros.assign(date=intros["date"].astype(str).str[:10]).set_index(["symbol", "date"])
+    s60, head = [], []
+    for _, r in d.iterrows():
+        s60.append(sig.loc[r["event_date"], r["symbol"]])
+        key = (r["symbol"], r["event_date"].strftime("%Y-%m-%d"))
+        c = close.loc[r["event_date"], r["symbol"]]
+        if key in near.index:
+            hi, lo = near.loc[key, "near_max"], near.loc[key, "near_min"]
+            head.append((hi - c) / c if r["direction"] > 0 else (c - lo) / c)
+        else:
+            head.append(np.nan)
+    d["sigma60"], d["headroom"] = s60, head
     regression = battery.clustered_ols(d, "ret_21", ["hit_i", "excess", "abs_sigma", "earn_i",
-                                                     "prior21"])
+                                                     "prior21", "sigma60", "headroom"])
     prim = tests[tests["primary"]]
     sd21 = d["ret_21"].std()
     mde21 = (battery.mde(int(prim.iloc[0]["n_a"]), int(prim.iloc[0]["n_b"]), sd21)
@@ -197,15 +268,22 @@ def run_study(changes, summary, close, earnings, run_dir, progress=None,
                                                                      "level_1": "symbol"})
         .assign(date=lambda x: x["date"].dt.strftime("%Y-%m-%d")),
         on=["symbol", "date"], how="left")
-    meta = {"universe": len(syms), "complete": len(syms),
+    trading = _trading(events, close)
+    coverage = _earnings_coverage(earnings, syms, close.index)
+    meta = {"universe": universe_size or len(syms), "complete": len(syms),
             "date_range": f"{close.index.min():%Y-%m-%d}..{close.index.max():%Y-%m-%d}",
-            "mde_21": mde21, "n_events": int(len(events))}
+            "mde_21": mde21, "n_events": int(len(events)),
+            "earnings_coverage": coverage,
+            "earnings_subgroup_incomplete": coverage < 0.9,
+            "mde_note": "MDE assumes independent events; overlapping same-symbol events "
+                        "make the true MDE larger (see the non-overlap rows)."}
     events.to_parquet(os.path.join(run_dir, "events.parquet"), index=False)
     tests.to_parquet(os.path.join(run_dir, "tests.parquet"), index=False)
     regression.to_parquet(os.path.join(run_dir, "regression.parquet"), index=False)
     progress.stage("done", 1, 1, "")
     return {"events": events, "car": car, "tests": tests, "regression": regression,
-            "equity": _equity(events, close), "ranges": ranges, "meta": meta}
+            "equity": trading.pop("equity"), "trading": trading, "ranges": ranges,
+            "meta": meta}
 
 
 def _register(tests, run_id, symbols, date_range):
@@ -241,16 +319,21 @@ def main():
     run_dir = os.path.join(OUT_ROOT, "reports", "strike_intro", run_id)
     prog = RunProgress(run_dir)
     prog.put("symbols", syms)
-    lst = ",".join(f"'{s}'" for s in syms)
-    changes = q.sql(f"SELECT symbol, date, contract_ticker, strike, expiration_date, change "
-                    f"FROM option_listing_changes WHERE symbol IN ({lst})")
-    summary = q.sql(f"SELECT symbol, date, status, replaced_frac FROM option_chain_summary "
-                    f"WHERE symbol IN ({lst})")
+    def fetch(sym):
+        prog.stage("load", syms.index(sym) + 1, len(syms), sym)
+        ch = q.sql(f"SELECT symbol, CAST(date AS VARCHAR) AS date, contract_ticker, strike, "
+                   f"CAST(expiration_date AS VARCHAR) AS expiration_date, change "
+                   f"FROM option_listing_changes WHERE symbol = '{sym}'")
+        sm = q.sql(f"SELECT symbol, CAST(date AS VARCHAR) AS date, status, replaced_frac "
+                   f"FROM option_chain_summary WHERE symbol = '{sym}'")
+        return ch, sm
+    intros = intros_by_symbol(syms, fetch)
     start = (pd.Timestamp(window["start"]) - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
     close = load_close_matrix(syms + ["SPY"], start=start).sort_index()
     earnings = earnings_events(syms)[["symbol", "date"]] if syms else pd.DataFrame()
-    res = run_study(changes, summary, close, earnings, run_dir, prog, args.n_perm, args.n_boot)
-    res["meta"]["universe"] = 100
+    universe = len(pd.read_csv(os.path.join("experiments", "strike_intro_universe.csv")))
+    res = run_study(None, None, close, earnings, run_dir, prog, args.n_perm, args.n_boot,
+                    intros=intros, universe_size=universe)
     path = report.build_report(res, os.path.join(run_dir, "report.html"))
     if args.register:
         _register(res["tests"], run_id, syms, res["meta"]["date_range"])

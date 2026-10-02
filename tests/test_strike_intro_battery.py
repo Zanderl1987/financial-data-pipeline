@@ -54,3 +54,16 @@ def test_clustered_ols_drops_constant_column():
                        "symbol": np.tile(list("ABCDE"), 40)})
     out = bt.clustered_ols(df, "y", ["hit", "earn"])
     assert set(out["term"]) == {"const", "hit"}
+
+
+def test_trading_stats_from_overlapping_positions():
+    # Review: daily P&L from overlapping holds, not a cumsum of 21-day returns.
+    idx = pd.bdate_range("2026-01-01", periods=60)
+    daily = pd.DataFrame({"A": 0.001, "B": -0.0005}, index=idx)     # signed daily excess
+    trades = pd.DataFrame({"symbol": ["A", "B"], "entry_date": [idx[0], idx[5]],
+                           "direction": [1, 1]})
+    st = bt.trading_stats(trades, daily, hold=21, cost_bp=10)
+    assert st["n_trades"] == 2
+    assert 0.0 < st["win_rate"] < 1.0
+    assert st["equity"].index[0] == idx[1]
+    assert {"sharpe", "profit_factor", "max_drawdown"} <= set(st)

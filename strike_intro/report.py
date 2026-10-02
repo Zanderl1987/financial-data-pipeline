@@ -112,6 +112,7 @@ def _tercile_figure(ev):
 
 
 def _vol_figure(ev):
+    ev = ev[ev["trigger"] == "day"]      # an event can appear under both triggers
     fig = go.Figure()
     for name, col, sel in (("HIT", HIT, ev["hit"]), ("MISS", MISS, ~ev["hit"])):
         fig.add_trace(go.Box(y=ev.loc[sel, "absret_21"] * 100, name=f"{name} |21d move|",
@@ -196,17 +197,28 @@ def build_report(results: dict, path: str) -> str:
                f"bootstrap p = {prim['p_boot']:.3f}, Mann-Whitney p = {prim['p_mw']:.3f}; "
                f"Cohen's d = {prim['cohen_d']:.2f}. Minimum detectable effect at 80% power: "
                f"{meta.get('mde_21', float('nan'))*100:.2f} pts.</p>")
+    t = results.get("trading") or {}
+    trading_html = ("" if not t.get("n_trades") else
+                    f"<p class='note'>Trading view (illustrative, 2 years, overlapping holds "
+                    f"equal-weighted): {t['n_trades']} trades, win rate {t['win_rate']:.0%}, "
+                    f"profit factor {t['profit_factor']:.2f}, Sharpe {t['sharpe']:.2f}, "
+                    f"max drawdown {t['max_drawdown']:.1%}.</p>")
+    cov = meta.get("earnings_coverage")
+    cov_html = ("" if cov is None else
+                f" Earnings dates cover {cov:.0%} of expected reports"
+                f"{' - the earnings subgroup is INCOMPLETE' if cov < 0.9 else ''}.")
     body = f"""
 <h1>Option strike introductions after a move</h1>
 <p class="note">Universe {meta['universe']} names ({meta['complete']} with complete listing
 history), {_html.escape(str(meta['date_range']))}. Returns are excess vs SPY, signed so that
-positive = the move continued. Entry is the close 3 trading days after the move.</p>
+positive = the move continued. Entry is the close 3 trading days after the move.{cov_html}
+{_html.escape(str(meta.get('mde_note', '')))}</p>
 <div class="card"><h2>Primary test (pre-registered)</h2>{primary}</div>
 {parts[0]}{parts[1]}{parts[2]}{parts[3]}{parts[4]}{parts[5]}
 <h2>All tests</h2><p class="note">Click a column to sort. p_adj = Benjamini-Hochberg across
 all secondary tests.</p>{_table(tests)}
 <h2>Regression (two-way clustered by entry date and symbol)</h2>{_table(results['regression'], 'plain')}
-{parts[6]}"""
+{trading_html}{parts[6]}"""
     doc = (f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' "
            f"content='width=device-width,initial-scale=1'><title>Strike Introduction Study</title>"
            f"<script src='https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js'></script>"

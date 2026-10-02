@@ -91,3 +91,28 @@ def test_fewer_than_min_symbols_is_a_clear_error(tmp_path):
     with pytest.raises(ValueError, match="at least"):
         run.run_study(changes, summary, close, pd.DataFrame(columns=["symbol", "date"]),
                       str(tmp_path), n_perm=100, n_boot=50)
+
+
+def test_intros_are_built_one_symbol_at_a_time():
+    # Review #4: never load every symbol's listing changes at once.
+    calls = []
+    changes, summary, _ = _world(effect=0.0, n_sym=3, n_days=300)
+
+    def fetch(sym):
+        calls.append(sym)
+        return changes[changes["symbol"] == sym], summary[summary["symbol"] == sym]
+    out = run.intros_by_symbol(["S0", "S1", "S2"], fetch)
+    assert calls == ["S0", "S1", "S2"] and set(out["symbol"]) == {"S0", "S1", "S2"}
+
+
+def test_study_reports_robustness_rows_and_meta(tmp_path):
+    changes, summary, close = _world(effect=0.06)
+    res = run.run_study(changes, summary, close, pd.DataFrame(columns=["symbol", "date"]),
+                        str(tmp_path), n_perm=200, n_boot=100, universe_size=100)
+    ids = set(res["tests"]["test_id"])
+    assert "nonoverlap:day|ret_21|all" in ids
+    assert "day|ar_21|all" in ids
+    assert "day|excess_tercile|ret_21" in ids and "day|excess_tercile|absret_21" in ids
+    assert {"sigma60", "headroom"} <= set(res["regression"]["term"])
+    assert res["meta"]["universe"] == 100 and res["meta"]["complete"] == 12
+    assert "earnings_coverage" in res["meta"] and "trading" in res
