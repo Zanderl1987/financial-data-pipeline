@@ -1,6 +1,6 @@
 # Option Strike Introduction Study — Design
 
-Date: 2026-10-01 · Status: approved in conversation, pending written-spec review
+Date: 2026-10-01 (amended 2026-10-02: per-expiration range) · Status: approved
 
 ## Purpose
 
@@ -82,9 +82,21 @@ tilt — stated in the writeup.
 
 Standard contracts only (`shares_per_contract == 100`, no adjusted roots such as FDX1).
 
-- Range on day t−1: min/max strike over all live standard contracts.
-- `ABOVE_t` / `BELOW_t`: count of contracts added on day t with strike > prior max /
-  < prior min.
+- **Range (amended 2026-10-02): per expiration.** For each expiration live on day t−1,
+  its own min/max strike over live standard contracts.
+- `ABOVE_t` / `BELOW_t`: count of contracts added on day t to an *existing* expiration
+  with strike > that expiration's prior max / < its prior min. Contracts in a brand-new
+  expiration are calendar listings and are not counted (~40% of all additions on NVDA).
+- Secondary, for comparison with Lee (2025): the whole-chain range (min/max over all
+  live contracts). Reported, not used for HIT/MISS.
+- Why amended: on NVDA's first full history (2024-10..2026-10) the whole-chain range is
+  pinned by LEAPS and was exceeded on 16 days above and **0 days below**; the
+  per-expiration range on 122 / 118 days. The whole-chain definition cannot produce
+  enough post-move events, and its downside leg (the one Lee finds strongest) never fires.
+- **Data-quality exclusions** (from the increment-1 review): symbol-days with
+  `status` `missing` or `suspect` contribute no introductions, and an event whose
+  e+1..e+2 window touches one is dropped; days with `replaced_frac > 0.8` (stock splits:
+  the whole chain re-tickers) contribute no introductions.
 
 ### Events (two separate sets)
 
@@ -108,8 +120,8 @@ Standard contracts only (`shares_per_contract == 100`, no adjusted roots such as
 
 Poisson regression of directional introductions per stock-day t (all stock-days, both
 sides as separate rows) on covariates known at the close of t−1 (listings on t are
-made pre-open, in response to t−1): headroom = distance from the t−1 close to the t−1
-extreme strike on that side (%), the t−1 move in σ units signed toward that side, 60-day
+made pre-open, in response to t−1): headroom = distance from the t−1 close to the
+extreme strike on that side of the nearest existing expiration (%), the t−1 move in σ units signed toward that side, 60-day
 σ, earnings flag, trading days since monthly expiration, log price.
 Predictions are leave-one-symbol-out (each symbol's fit excludes it).
 `EXCESS = DIR_INTRO − expected DIR_INTRO over the same window`. Events split by EXCESS
