@@ -1028,6 +1028,12 @@ import plotly.io as pio
 
 HIT, MISS, THIRD = "#2a78d6", "#eb6834", "#1baf7a"
 HORIZONS = [1, 3, 5, 10, 21, 63, 126]
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    """Plotly's validator rejects 8-digit hex; translucent fills need rgba()."""
+    h = hex_color.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})"
 _CSS = """
 :root{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--rule:#e4e3df}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1a1a19;--ink:#fff;--ink2:#c3c2b7;--rule:#33332f}}
@@ -1079,7 +1085,7 @@ def _car_figure(ev, car):
             fig.add_trace(go.Scatter(x=x, y=hi * 100, line=dict(width=0), showlegend=False,
                                      hoverinfo="skip", visible=ci == 0))
             fig.add_trace(go.Scatter(x=x, y=lo * 100, fill="tonexty", line=dict(width=0),
-                                     fillcolor=col + "22", showlegend=False, hoverinfo="skip",
+                                     fillcolor=_rgba(col, 0.13), showlegend=False, hoverinfo="skip",
                                      visible=ci == 0))
             fig.add_trace(go.Scatter(x=x, y=mu * 100, name=f"{name} (n={len(rows)})",
                                      line=dict(color=col, width=2), visible=ci == 0))
@@ -1161,7 +1167,7 @@ def _ranges_figure(ranges):
                                  line=dict(color=HIT, width=1), visible=vis))
         fig.add_trace(go.Scatter(x=g["date"], y=g["near_min"], name="near-expiry min strike",
                                  line=dict(color=HIT, width=1), fill="tonexty",
-                                 fillcolor=HIT + "1a", visible=vis))
+                                 fillcolor=_rgba(HIT, 0.10), visible=vis))
         fig.add_trace(go.Scatter(x=g["date"], y=g["close"], name="close",
                                  line=dict(color=MISS, width=2), visible=vis))
         up = g[g["above"] > 0]
