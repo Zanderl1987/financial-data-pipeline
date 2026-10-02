@@ -83,3 +83,11 @@ def test_leakage_probe_earlier_entry_looks_better():
         e = ev.forward_returns(e, close, [21]).dropna(subset=["ret_21"])
         return e.loc[e["hit"], "ret_21"].mean() - e.loc[~e["hit"], "ret_21"].mean()
     assert hit_minus_miss(0) > hit_minus_miss(3) + 0.01
+
+
+def test_fewer_than_min_symbols_is_a_clear_error(tmp_path):
+    import pytest
+    changes, summary, close = _world(effect=0.0, n_sym=1, n_days=300)
+    with pytest.raises(ValueError, match="at least"):
+        run.run_study(changes, summary, close, pd.DataFrame(columns=["symbol", "date"]),
+                      str(tmp_path), n_perm=100, n_boot=50)

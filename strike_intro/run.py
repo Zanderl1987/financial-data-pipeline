@@ -20,6 +20,9 @@ from strike_intro.progress import RunProgress
 
 HORIZONS = ev.HORIZONS
 OUT_ROOT = "storage"
+# The excess model is fit leave-one-symbol-out, so it needs other symbols to
+# learn from; below this the study refuses to run rather than fit on nothing.
+MIN_SYMBOLS = 3
 
 
 def complete_symbols(out_root: str) -> list[str]:
@@ -129,6 +132,9 @@ def run_study(changes, summary, close, earnings, run_dir, progress=None,
     intros = measures.daily_intros(changes, summary)
     progress.stage("measures", 1, 1, f"{intros['symbol'].nunique()} symbols")
     syms = [s for s in intros["symbol"].unique() if s in close.columns]
+    if len(syms) < MIN_SYMBOLS:
+        raise ValueError(f"need at least {MIN_SYMBOLS} symbols with complete listing history "
+                         f"and prices, have {len(syms)}")
     close = close[["SPY"] + syms]
 
     earn_near = set()
