@@ -921,7 +921,10 @@ PIPELINES: list[PipelineSpec] = [
         desc="ETF holdings -- SecuritiesDB free ETF holdings (200+ US ETFs, no auth) (Iceberg table)",
         stage=1,
         tables=['etf_holdings'],
-        timeout=1800,
+        # Healthy runs took 25-30 min against the old 1800 s limit (the site is
+        # ~13 s/ETF). The pipeline stops itself at TIME_BUDGET_SECONDS (3300)
+        # and writes what it has, so this outer kill should never be reached.
+        timeout=3600,
     ),
     PipelineSpec(
         name="ssga_holdings",

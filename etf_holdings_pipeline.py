@@ -54,6 +54,17 @@ SNAPSHOT_DATE = date.today()
 FETCHED_AT = datetime.now(timezone.utc)
 
 REQUEST_DELAY = 0.1
+# Resilience (2026-10-03). securitiesdb.com is slow even when up (~13 s per ETF,
+# so a healthy run is 25-30 min) and was fully down 2026-10-02 (Cloudflare 522
+# after ~20 s per request): the run burned its whole timeout and was killed,
+# and since everything is written once at the end, the kill also discarded the
+# funds already fetched.
+MAX_CONSECUTIVE_UPSTREAM_ERRORS = 5     # this many 5xx/connection failures in a row = site down
+TIME_BUDGET_SECONDS = 3300              # stop fetching and write before run_all's 3600 s timeout
+
+
+class UpstreamError(Exception):
+    """The site itself failed (5xx or no connection) -- unlike a 404, which is one ETF."""
 
 DEFAULT_ETF_UNIVERSE = {
     # --- Broad Market US ---
@@ -293,9 +304,15 @@ def fetch_etf_holdings(ticker: str, fund_name: str) -> pd.DataFrame | None:
     except requests.exceptions.HTTPError as e:
         if r.status_code == 404:
             log.warning("[%s] Not found on SecuritiesDB (404)", ticker)
+        elif r.status_code >= 500:
+            log.error("[%s] HTTP %d: %s", ticker, r.status_code, e)
+            raise UpstreamError(f"{ticker}: HTTP {r.status_code}") from e
         else:
             log.error("[%s] HTTP %d: %s", ticker, r.status_code, e)
         return None
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        log.error("[%s] Request failed: %s", ticker, e)
+        raise UpstreamError(f"{ticker}: {type(e).__name__}") from e
     except Exception as e:
         log.error("[%s] Request failed: %s", ticker, e)
         return None
@@ -340,8 +357,18 @@ def fetch_etf_holdings(ticker: str, fund_name: str) -> pd.DataFrame | None:
     return result
 
 
-def fetch_all_etf_holdings(only_tickers: list[str] | None = None, limit: int | None = None) -> list[pd.DataFrame]:
-    """Fetch holdings for ETFs in DEFAULT_ETF_UNIVERSE."""
+def fetch_all_etf_holdings(only_tickers: list[str] | None = None, limit: int | None = None,
+                           budget_seconds: float | None = TIME_BUDGET_SECONDS,
+                           clock=time.monotonic) -> tuple[list[pd.DataFrame], str | None]:
+    """Fetch holdings for ETFs in DEFAULT_ETF_UNIVERSE.
+
+    Returns (frames, stop_reason): stop_reason is None for a complete pass,
+    "upstream_down" after MAX_CONSECUTIVE_UPSTREAM_ERRORS site failures in a
+    row, or "time_budget" when budget_seconds ran out. Either way the frames
+    fetched so far are returned, so the caller still writes them."""
+    started = clock()
+    consecutive = 0
+    stop_reason = None
     targets = only_tickers if only_tickers else list(DEFAULT_ETF_UNIVERSE.keys())
     if limit:
         targets = targets[:limit]
@@ -363,13 +390,28 @@ def fetch_all_etf_holdings(only_tickers: list[str] | None = None, limit: int | N
             skipped.append(ticker)
             continue
 
+        if budget_seconds is not None and clock() - started > budget_seconds:
+            log.warning("Time budget (%ds) reached at %d/%d -- stopping, keeping %d funds",
+                        budget_seconds, i - 1, len(targets), len(frames))
+            stop_reason = "time_budget"
+            break
+
         log.info("[%d/%d] %s (%s)...", i, len(targets), ticker, fund_name or "custom")
         try:
             df = fetch_etf_holdings(ticker, fund_name)
+            consecutive = 0
             if df is not None:
                 frames.append(df)
             else:
                 failed.append(ticker)
+        except UpstreamError as e:
+            failed.append(ticker)
+            consecutive += 1
+            if consecutive >= MAX_CONSECUTIVE_UPSTREAM_ERRORS:
+                log.error("securitiesdb.com unreachable: %d site errors in a row (last: %s) "
+                          "-- stopping, keeping %d funds", consecutive, e, len(frames))
+                stop_reason = "upstream_down"
+                break
         except Exception as e:
             log.error("[%s] FAILED: %s", ticker, e)
             failed.append(ticker)
@@ -381,7 +423,7 @@ def fetch_all_etf_holdings(only_tickers: list[str] | None = None, limit: int | N
     if skipped:
         log.info("Skipped (%d): %s", len(skipped), ", ".join(skipped))
 
-    return frames
+    return frames, stop_reason
 
 
 def write_to_iceberg(all_data: list[pd.DataFrame]) -> int:
@@ -504,7 +546,7 @@ def main(
     else:
         log.info("Using default universe: %d ETFs", len(DEFAULT_ETF_UNIVERSE))
 
-    frames = fetch_all_etf_holdings(only_tickers=etf_tickers, limit=limit)
+    frames, stop_reason = fetch_all_etf_holdings(only_tickers=etf_tickers, limit=limit)
 
     if frames:
         combined = pd.concat(frames, ignore_index=True)
@@ -516,9 +558,13 @@ def main(
         log.info("-" * 60)
     else:
         log.warning("No data fetched.")
-        return
+        # An all-failure run used to exit 0, so an outage could show as PASS.
+        sys.exit(2)
 
     write_to_iceberg(frames)
+    if stop_reason == "upstream_down":
+        log.error("Partial run: source went down mid-run; wrote %d funds.", len(frames))
+        sys.exit(2)
     log.info("Done.")
 
 
