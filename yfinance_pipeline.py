@@ -37,6 +37,7 @@ UNIVERSE = [
     # --- equity indices ---
     ("^GSPC",     "S&P 500",                 "equity_index"),
     ("^DJI",      "Dow Jones Industrial",    "equity_index"),
+    ("^DJT",      "Dow Jones Transportation", "equity_index"),
     ("^IXIC",     "Nasdaq Composite",        "equity_index"),
     ("^RUT",      "Russell 2000",            "equity_index"),
     ("^VIX",      "CBOE VIX",                "volatility"),
