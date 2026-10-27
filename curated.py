@@ -71,6 +71,26 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _drop_impossible_periods(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Drop facts whose period ends after the filing that reports them.
+
+    A filing cannot report a period that has not ended, so ``period_end >
+    filed`` is a filer's XBRL typo, not data: 2026-10-26 found 302 such rows in
+    fundamentals_quarterly and 72 in fundamentals_annual, including periods
+    ending 2201-06-30 and 2215-09-30 on 2015 10-Qs (a 2015 typed as 2201) and
+    near misses like a Q3 dated 2011-09-30 on a 10-Q filed 2011-09-12. The
+    value is bound to a period it does not describe, so a point-in-time join
+    would hand it to the wrong quarter. Raw keeps these rows; curated drops
+    them. Rows with no parseable ``filed`` are kept -- they cannot be judged.
+    """
+    if table not in _PERIOD_END_TABLES or not {"period_end", "filed"}.issubset(df.columns):
+        return df
+    period_end = pd.to_datetime(df["period_end"], errors="coerce", format="mixed")
+    filed = pd.to_datetime(df["filed"], errors="coerce", format="mixed")
+    impossible = period_end.notna() & filed.notna() & (period_end > filed)
+    return df[~impossible] if impossible.any() else df
+
+
 # Tables whose snapshot_date was introduced after data had already accumulated.
 # Raw parquet is append-only history and never gets rewritten, so those earlier
 # files stay on the old schema forever. Derive the column from fetched_at when
@@ -432,7 +452,11 @@ def _curated_path(table: str) -> str:
 # `schwab_options` added 2026-10-01, the day the pipeline widened from 40
 # strikes / 4 weeks to full chains: ~580k rows/day (measured on a 40-symbol
 # sample), so the pandas path would be holding 100M+ rows within the year.
-_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options"}
+# fundamentals_* added 2026-10-26: 62M / 29M raw rows. The pandas path for
+# fundamentals_quarterly committed 86 GB on a 32 GB machine and never finished,
+# so the period_end rules below have SQL twins in _compact_large_table().
+_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options",
+                 "fundamentals_annual", "fundamentals_quarterly"}
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
 # SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
@@ -732,8 +756,7 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
             ) AS snapshot_date)
             FROM {raw_scan}
         )"""
-    sanity = _sanity_sql_predicate(table)
-    where_sanity = f"WHERE {sanity}" if sanity else ""
+    predicates = [p for p in [_sanity_sql_predicate(table)] if p]
 
     con = duckdb.connect()
     try:
@@ -745,6 +768,19 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
         if missing:
             nulls = ", ".join(f"NULL::VARCHAR AS {c}" for c in missing)
             raw_scan = f"(SELECT *, {nulls} FROM {raw_scan})"
+        if table in _PERIOD_END_TABLES and "period_end" in present:
+            # SQL twin of _normalize_period_end(): date-only string before dedup.
+            raw_scan = f"""(
+                SELECT * REPLACE (
+                    strftime(TRY_CAST(period_end AS TIMESTAMP), '%Y-%m-%d') AS period_end)
+                FROM {raw_scan}
+            )"""
+            if "filed" in present:
+                # SQL twin of _drop_impossible_periods(). COALESCE keeps rows
+                # whose dates do not parse: NOT/<= on NULL would drop them.
+                predicates.append("COALESCE(TRY_CAST(period_end AS DATE) "
+                                  "<= TRY_CAST(filed AS DATE), TRUE)")
+        where_sanity = f"WHERE {' AND '.join(predicates)}" if predicates else ""
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         deduped = f"""
             SELECT * EXCLUDE (_rn) FROM (
@@ -819,6 +855,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _normalize_period_end(table, df)
+    df = _drop_impossible_periods(table, df)
     df = _backfill_snapshot_date(table, df)
     df = _drop_zero_bars(table, df)
     subset = _dedup_subset(table, df)

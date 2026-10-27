@@ -340,6 +340,19 @@ def extract_company(data, symbol=""):
 # DJI mode — per-company HTTP requests
 # ---------------------------------------------------------------------------
 
+def _to_dates(values):
+    """XBRL dates as timestamp[us], whatever pandas' default resolution is.
+
+    Files written before 2026-10-04 carry timestamp[us] and later ones
+    timestamp[ns] (the default resolution differs between pandas builds). One
+    glob over both broke every raw read of fundamentals_quarterly: a filer's
+    start_date of 0202-02-01 fits in us but not ns, so DuckDB could not unify
+    the column and curated.py stopped rebuilding the table. Pinning the unit
+    keeps every file on one type.
+    """
+    return pd.to_datetime(values, errors="coerce").astype("datetime64[us]")
+
+
 def fetch_company_facts(cik_padded):
     url = f"{EDGAR_BASE}/api/xbrl/companyfacts/CIK{cik_padded}.json"
     r = get_with_backoff(url)
@@ -360,8 +373,8 @@ def process_company_dji(symbol, cik_padded, n_quarters=8):
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
-        df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
+        df["period_end"] = _to_dates(df["period_end"])
+        df["start_date"] = _to_dates(df["start_date"])
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
         df["duration_days"] = (df["period_end"] - df["start_date"]).dt.days
         return df
@@ -473,8 +486,8 @@ def _flush_batch(rows, tmpdir, filename):
     if not rows:
         return
     df = pd.DataFrame(rows)
-    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
-    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
+    df["period_end"] = _to_dates(df["period_end"])
+    df["start_date"] = _to_dates(df["start_date"])
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["duration_days"] = (df["period_end"] - df["start_date"]).dt.days
     df.to_parquet(os.path.join(tmpdir, filename), index=False, compression="snappy")

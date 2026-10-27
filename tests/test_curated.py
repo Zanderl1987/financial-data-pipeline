@@ -255,6 +255,74 @@ class TestPeriodEndNormalization:
 
 # -- zero-bar filter (added 2026-08-29, SCOPE NARROWED 2026-08-30) ------------
 
+class TestImpossiblePeriods:
+    """A filing cannot report a period that has not ended. Found 2026-10-26:
+    2015 10-Qs reporting periods ending 2201-06-30 / 2215-09-30 (XBRL typos)."""
+
+    def _frame(self, period_end, filed):
+        n = len(period_end)
+        return pd.DataFrame({
+            "cik": [str(i) for i in range(n)], "metric": ["revenue"] * n,
+            "period_end": period_end, "filed": filed, "fiscal_period": ["Q2"] * n,
+            "form": ["10-Q"] * n, "unit": ["USD"] * n, "value": [1.0] * n,
+            "fetched_at": ["2026-08-06T00:00:00"] * n,
+        })
+
+    def test_drops_period_ending_after_filing(self):
+        df = self._frame(["2015-06-30", "2201-06-30", "2011-09-30"],
+                         ["2015-08-10", "2015-08-10", "2011-09-12"])
+        out = curated.dedup("fundamentals_quarterly", df)
+        assert out["period_end"].tolist() == ["2015-06-30"]
+
+    def test_period_ending_on_the_filing_date_is_kept(self):
+        df = self._frame(["2020-03-31 00:00:00"], ["2020-03-31"])
+        assert len(curated.dedup("fundamentals_annual", df)) == 1
+
+    def test_unparseable_or_missing_filed_is_kept(self):
+        df = self._frame(["2201-06-30", "2201-06-30"], [None, "not a date"])
+        assert len(curated.dedup("fundamentals_quarterly", df)) == 2
+
+    def test_frames_without_filed_are_untouched(self):
+        df = self._frame(["2201-06-30"], ["x"]).drop(columns="filed")
+        assert len(curated.dedup("fundamentals_quarterly", df)) == 1
+
+    def test_only_fundamentals_tables(self):
+        df = self._frame(["2201-06-30"], ["2015-08-10"])
+        assert len(curated._drop_impossible_periods("macro", df)) == 1
+
+    def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
+        # fundamentals_* compact through DuckDB (too big for pandas); the SQL
+        # twins of _normalize_period_end and _drop_impossible_periods must give
+        # the same rows as dedup().
+        assert "fundamentals_quarterly" in curated._LARGE_TABLES
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        old = pd.DataFrame({
+            "cik": ["1", "2", "3", "4"], "metric": ["revenue"] * 4,
+            "period_end": ["2015-06-30", "2201-06-30 00:00:00", "2201-06-30", "2020-03-31"],
+            "filed": ["2015-08-10", "2015-08-10", None, "2020-05-01"],
+            "fiscal_period": ["Q2"] * 4, "form": ["10-Q"] * 4, "unit": ["USD"] * 4,
+            "value": [1.0, 2.0, 3.0, 4.0], "fetched_at": ["2026-08-06T00:00:00"] * 4,
+        })
+        old.to_parquet(raw / "fundamentals_quarterly_20260806.parquet")
+        # a later fetch of cik 4 in timestamp form: must collapse onto the same key
+        new = old.iloc[[3]].assign(period_end=pd.Timestamp("2020-03-31"), value=4.5,
+                                   fetched_at="2026-10-26T00:00:00")
+        new.to_parquet(raw / "fundamentals_quarterly_20261026.parquet")
+        monkeypatch.setitem(q.CATALOG, "fundamentals_quarterly",
+                            str(raw / "*.parquet").replace("\\", "/"))
+        monkeypatch.setattr(curated, "CURATED_ROOT", str(tmp_path / "curated"))
+
+        out_path, raw_rows, curated_rows = curated._compact_large_table("fundamentals_quarterly")
+        sql_out = pd.read_parquet(out_path).sort_values("cik").reset_index(drop=True)
+        pandas_out = curated.dedup("fundamentals_quarterly", pd.concat(
+            [old, new.assign(period_end="2020-03-31")])).sort_values("cik").reset_index(drop=True)
+        assert (raw_rows, curated_rows) == (5, 3)
+        assert sql_out["cik"].tolist() == pandas_out["cik"].tolist() == ["1", "3", "4"]
+        assert sql_out["period_end"].tolist() == pandas_out["period_end"].tolist()
+        assert sql_out["value"].tolist() == pandas_out["value"].tolist() == [1.0, 3.0, 4.5]
+
+
 class TestZeroBars:
     """
     Originally this dropped every non-positive price. That was wrong: the
