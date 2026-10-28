@@ -163,10 +163,24 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
     return None, None
 
 
+def _impact_arrays(close: pd.Series, volume: "pd.Series | None",
+                   notional: float, cfg, n: int):
+    """(entry, exit) sqrt_law impact arrays for one symbol, or (None, None)
+    when the cost model has no ADV impact or there is no volume. A function of
+    the symbol's close/volume, the notional and the cost model only -- never of
+    the entry/exit flags -- so callers compute it once per symbol and pass it
+    to every _next_candidate call instead of once per trade."""
+    if (volume is not None and cfg.costs.impact_model == "sqrt_law"
+            and cfg.costs.impact_coeff > 0):
+        return _compute_adv_impact_arrays(close, volume, notional,
+                                          cfg.costs.impact_coeff, n)
+    return None, None
+
+
 def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     long_exit, short_exit, symbol: str, notional: float,
                     cfg, n: int, volume: "pd.Series | None" = None,
-                    allow_open: bool = False) -> "dict | None":
+                    allow_open: bool = False, impact=None) -> "dict | None":
     """
     First eligible candidate trade for one symbol, searching entry signals
     starting at `cursor` (an index into the signal array, not a date). The
@@ -188,6 +202,9 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
     cursors a caller resumes from: `exit_i + 1` if this candidate is taken,
     `sig_i + 1` if it is rejected (the fix this function exists to enable --
     see _simulate_single_pass).
+
+    `impact` is the symbol's precomputed _impact_arrays() pair; None computes
+    it here (identical result, but rolling-window work per call).
     """
     risk = cfg.risk
     rate = ev_execution.round_trip_rate(cfg.costs)
@@ -195,13 +212,9 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                    for f in ("stop_loss_pct", "take_profit_pct",
                              "vol_stop_mult", "max_holding_days"))
 
-    # Pre-compute ADV impact arrays if using sqrt_law model and volume available
-    adv_impact_entry = None
-    adv_impact_exit = None
-    if (volume is not None and cfg.costs.impact_model == "sqrt_law"
-            and cfg.costs.impact_coeff > 0):
-        adv_impact_entry, adv_impact_exit = _compute_adv_impact_arrays(
-            close, volume, notional, cfg.costs.impact_coeff, n)
+    if impact is None:
+        impact = _impact_arrays(close, volume, notional, cfg, n)
+    adv_impact_entry, adv_impact_exit = impact
 
     for sig_i, side in entry_positions:
         if sig_i < cursor:
@@ -318,11 +331,13 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
         [(i, "long") for i in np.flatnonzero(long_entry)] +
         [(i, "short") for i in np.flatnonzero(short_entry)]
     )
+    impact = _impact_arrays(close, volume, notional, cfg, n) if entry_positions         else (None, None)
     rows = []
     cursor = 0
     while True:
         cand = _next_candidate(entry_positions, cursor, close, long_exit,
-                               short_exit, symbol, notional, cfg, n, volume)
+                               short_exit, symbol, notional, cfg, n, volume,
+                               impact=impact)
         if cand is None:
             break
         rows.append(cand["row"])
@@ -497,10 +512,13 @@ def _push_next(heap: list, sym: str, state: dict, cursor: int,
     ties because at most one candidate per symbol is ever heap-resident at
     once, so the tuple comparison never needs to order the candidate dicts
     themselves. Pushes nothing when the symbol has no further candidate."""
+    if "impact" not in state:   # one per symbol per run: notional/cfg are fixed
+        state["impact"] = _impact_arrays(state["close"], state.get("volume"),
+                                         notional, cfg, state["n"])
     cand = _next_candidate(state["entry_positions"], cursor, state["close"],
                            state["long_exit"], state["short_exit"], sym,
                            notional, cfg, state["n"], state.get("volume"),
-                           allow_open=allow_open)
+                           allow_open=allow_open, impact=state["impact"])
     if cand is not None:
         heapq.heappush(heap, (cand["row"]["entry_date"], sym, cand))
 
