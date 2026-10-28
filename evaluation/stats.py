@@ -378,6 +378,167 @@ def permutation_trades(rule, cache: dict, n_perm: int = 200,
             "n_perm": int(n_done)}
 
 
+#: A circular-shift result whose null spends a median fraction of time in the
+#: market outside this band of the strategy's own is flagged, not trusted --
+#: holding exposure fixed is the whole point of the shift null (TV catalog
+#: amendment 2026-10-28). Floor drops and the one seam-straddling trade per
+#: symbol are the only things that should move it.
+SHIFT_EXPOSURE_BOUNDS = (0.8, 1.25)
+
+
+def _shift_flags(le, lx, se, sx, close, offset: int, entry_floor=None):
+    """Roll all four signal arrays TOGETHER by `offset` bars, then drop shifted
+    entries whose close is below `entry_floor`.
+
+    Rolling entries and exits as one block is what keeps the trade count, hold
+    lengths and time in market fixed. Relocating entries alone and keeping the
+    exits (permutation_trades) breaks that for any rule whose exit flags were
+    derived from its own entries -- stops, targets, max-bars walks -- because a
+    relocated entry then rides until the next exit the REAL path produced.
+    """
+    ple, plx, pse, psx = (np.roll(np.asarray(a, dtype=bool), offset)
+                          for a in (le, lx, se, sx))
+    if entry_floor is not None:
+        with np.errstate(invalid="ignore"):
+            ok = np.asarray(close, dtype=float) >= entry_floor   # NaN -> False
+        ple = ple & ok
+        pse = pse & ok
+    return ple, plx, pse, psx
+
+
+def _shift_null_totals(flags_chunk: list, perm_seed: int, notional: float,
+                       config, entry_floor) -> tuple:
+    """One circular-shift permutation over a symbol subset ->
+    (sum pnl, n_trades, n_wins, days held). Offsets come from a stream seeded
+    by the (permutation, symbol) pair, so any sharding gives the same null."""
+    from evaluation import trades as tr        # local import (no cycles)
+    pnl = 0.0
+    n_trades = 0
+    n_wins = 0
+    days = 0.0
+    for sym_idx, sym, index, close, volume, le, lx, se, sx in flags_chunk:
+        n = len(index)
+        if n < 2:
+            continue
+        rng = np.random.default_rng((int(perm_seed), int(sym_idx)))
+        offset = int(rng.integers(1, n))
+        ple, plx, pse, psx = _shift_flags(le, lx, se, sx, close, offset, entry_floor)
+        for row in tr.simulate_symbol(index, close, ple, plx, pse, psx, sym,
+                                      notional, config=config, volume=volume):
+            pnl += row["pnl_dollars"]
+            n_trades += 1
+            days += row["days_held"]
+            if row["pnl_dollars"] > 0:
+                n_wins += 1
+    return pnl, n_trades, n_wins, days
+
+
+def _shift_worker(task) -> dict:
+    """multiprocessing task, the circular-shift twin of _perm_worker."""
+    flags_chunk, perm_ranges, notional, config, entry_floor = task
+    return {perm_i: _shift_null_totals(flags_chunk, perm_seed, notional, config,
+                                       entry_floor)
+            for perm_i, perm_seed in perm_ranges}
+
+
+def circular_shift_trades(rule, cache: dict, n_perm: int = 200, seed: int = 0, *,
+                          config=None, entry_floor=None, workers: int = 0) -> dict:
+    """
+    Circular-shift null for a trade system: within each symbol, roll the
+    rule's long/short entry and exit flags together by one random offset in
+    [1, n-1] bars, re-simulate through the same engine, and compare net total
+    P&L (and win rate). One-sided empirical p-values with the +1 correction.
+
+    It asks whether the strategy's timing -- entries and exits together -- beat
+    its own holding pattern placed at random times. Trade count, hold lengths,
+    side mix and time in market are held fixed, up to two leaks that are
+    measured rather than assumed: shifted entries below `entry_floor` are
+    dropped (the strategy could not have entered there), and the one trade per
+    symbol that straddles the roll seam is lost. `null_exposure_ratio` is the
+    median over permutations of null days held / observed days held, and
+    `exposure_mismatch` is True when it falls outside SHIFT_EXPOSURE_BOUNDS.
+
+    `entry_floor` gates only the null: the observed rule is expected to carry
+    its own floor already (strategies.stage3.with_price_floor).
+
+    Capital/concurrency configs are refused -- the portfolio pass couples
+    symbols and admission order, and this null has no honest version of that.
+    """
+    from evaluation import trades as tr        # local import (no cycles)
+    from evaluation import execution as ev_execution
+    _cfg = ev_execution.resolve(config)
+    if (_cfg.limits.capital is not None or _cfg.limits.max_concurrent is not None
+            or _cfg.sizing.mode != "fixed_notional"):
+        raise ValueError("circular_shift_trades supports fixed-notional configs "
+                         "only (no capital, concurrency or sizing mode)")
+    obs = tr.simulate(rule, cache, config=config)
+    if obs.empty:
+        return {"pnl_p": None, "win_rate_p": None,
+                "perm_reason": "no realized trades"}
+    obs_pnl = float(obs["pnl_dollars"].sum())
+    obs_wr = float((obs["pnl_dollars"] > 0).mean())
+    obs_days = float(obs["days_held"].sum())
+
+    flags_list = []
+    for sym_idx, (sym, df) in enumerate(cache.items()):
+        if df.empty or "close" not in df.columns:
+            continue
+        close = df["close"].to_numpy(dtype=float)
+        volume = df.get("volume")
+        if volume is not None:
+            volume = volume.to_numpy(dtype=float)
+        le, lx, se, sx = tr.rule_flags(rule, df)
+        flags_list.append((sym_idx, sym, df.index, close, volume, le, lx, se, sx))
+
+    perm_seeds = np.random.default_rng(seed).integers(0, 2**31 - 1, size=n_perm)
+    if workers > 1 and len(flags_list) > 1:
+        n_w = min(workers, len(flags_list))
+        base, extra = divmod(len(flags_list), n_w)
+        chunks, i0 = [], 0
+        for w in range(n_w):
+            size = base + (1 if w < extra else 0)
+            chunks.append(flags_list[i0:i0 + size])
+            i0 += size
+        tasks = [(chunk, [(i, int(s)) for i, s in enumerate(perm_seeds)],
+                  rule.notional, config, entry_floor) for chunk in chunks]
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=n_w) as ex:
+            results = list(ex.map(_shift_worker, tasks))
+        totals = []
+        for perm_i in range(n_perm):
+            parts = [res[perm_i] for res in results if perm_i in res]
+            totals.append(tuple(sum(p[k] for p in parts) for k in range(4)))
+    else:
+        totals = [_shift_null_totals(flags_list, int(s), rule.notional, config,
+                                     entry_floor) for s in perm_seeds]
+
+    pnl_ge = wr_ge = n_done = 0
+    ratios = []
+    for pnl, nt, nw, days in totals:
+        if nt == 0:
+            continue
+        n_done += 1
+        if pnl >= obs_pnl:
+            pnl_ge += 1
+        if (nw / nt) >= obs_wr:
+            wr_ge += 1
+        if obs_days > 0:
+            ratios.append(days / obs_days)
+    if n_done < max(20, n_perm // 4):
+        return {"pnl_p": None, "win_rate_p": None,
+                "perm_reason": f"only {n_done} permutations produced trades"}
+    ratio = float(np.median(ratios)) if ratios else None
+    lo, hi = SHIFT_EXPOSURE_BOUNDS
+    return {"obs_pnl_dollars": round(obs_pnl, 2),
+            "obs_win_rate_pct": round(100 * obs_wr, 1),
+            "pnl_p": round((1 + pnl_ge) / (n_done + 1), 4),
+            "win_rate_p": round((1 + wr_ge) / (n_done + 1), 4),
+            "n_perm": int(n_done),
+            "obs_days_held": obs_days,
+            "null_exposure_ratio": None if ratio is None else round(ratio, 4),
+            "exposure_mismatch": ratio is None or not (lo <= ratio <= hi)}
+
+
 def bh_fdr(records, alpha: float = 0.10, p_key: str = "p") -> pd.DataFrame:
     """
     Benjamini-Hochberg step-up across a run's full statistics grid.

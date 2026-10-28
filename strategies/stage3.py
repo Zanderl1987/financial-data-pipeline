@@ -5,11 +5,17 @@ section 5. For each admitted, Stage-2-translated strategy (strategies.ports.load
 where a hand port exists -- translation_verified="unit_tested" -- else
 strategies.pine_bridge.load_pine_script_rule -- "unverified"), runs the TradeRule
 on the DEVELOPMENT split only and computes the primary endpoint pnl_p via
-evaluation.stats.permutation_trades, net of transaction costs.
+evaluation.stats.circular_shift_trades, net of transaction costs.
+
+Amendment 2026-10-28: pnl_p is now the circular-shift p-value (the amendment's
+`shift_pnl_p`), written under EVALUATION_NAME = tv_strategy_catalog_stage3_v2.
+The earlier permutation_trades null kept exit flags that most ports derive from
+their own entries, so it measured time in market rather than timing; every row
+under the old tv_strategy_catalog_stage3 name is void for verdicts.
 
 Costs are modeled by the ENGINE as of W1 Step B (2026-08-17): cost_config()
 below builds an evaluation.execution.ExecutionConfig that is passed to
-evaluation.trades.simulate() and evaluation.stats.permutation_trades() via their
+evaluation.trades.simulate() and evaluation.stats.circular_shift_trades() via their
 `config=` parameter, so every realized trade carries a constant round-trip
 deduction on its own notional -- and, importantly, the permutation NULL pays the
 same costs as the strategy.
@@ -66,6 +72,7 @@ N_PERM = 200
 SEED = 0
 PRIMARY_COST_BPS = 10.0
 SENSITIVITY_COST_BPS = (5.0, 20.0)
+EVALUATION_NAME = "tv_strategy_catalog_stage3_v2"   # amendment 2026-10-28
 
 
 # --------------------------------------------------------------- roster / admission
@@ -292,14 +299,15 @@ def run_strategy(slug: str, meta: dict, roster_note: str, cache: dict,
     primary_cfg = cost_config(PRIMARY_COST_BPS)
     trades_df = ev_trades.simulate(rule, cache, config=primary_cfg)
     summary = ev_trades.trade_summary(trades_df)
-    perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed,
-                                       config=primary_cfg, workers=workers)
+    perm = ev_stats.circular_shift_trades(rule, cache, n_perm=n_perm, seed=seed,
+                                          config=primary_cfg, entry_floor=PRICE_FLOOR,
+                                          workers=workers)
 
     perm_sens = {}
     for bps in SENSITIVITY_COST_BPS:
-        perm_sens[bps] = ev_stats.permutation_trades(
+        perm_sens[bps] = ev_stats.circular_shift_trades(
             rule, cache, n_perm=n_perm, seed=seed, config=cost_config(bps),
-            workers=workers)
+            entry_floor=PRICE_FLOOR, workers=workers)
 
     pnl_p = perm.get("pnl_p")
     pnl_p_5 = perm_sens[5.0].get("pnl_p")
@@ -334,6 +342,8 @@ def run_strategy(slug: str, meta: dict, roster_note: str, cache: dict,
         "pnl_p_5bps": pnl_p_5,
         "pnl_p_20bps": pnl_p_20,
         "cost_fragile": cost_fragile,
+        "null_exposure_ratio": perm.get("null_exposure_ratio"),
+        "exposure_mismatch": perm.get("exposure_mismatch"),
         "bh_q": None,             # Stage 4: computed campaign-wide at close
         "fdr_pass": None,
         "holdout_pnl_p": None,    # Stage 5: one-shot, not touched here
@@ -357,6 +367,8 @@ def registry_rows_for(row: dict, run_id: str, universe_hash: str, date_range: st
         "max_dd": row["max_dd"], "median_hold": row["median_hold"],
         "total_pnl_net": row["total_pnl_net"], "pnl_p": row["pnl_p"],
         "pnl_p_5bps": row["pnl_p_5bps"], "pnl_p_20bps": row["pnl_p_20bps"],
+        "null_exposure_ratio": row.get("null_exposure_ratio"),
+        "exposure_mismatch": row.get("exposure_mismatch"),
     }
     recs = []
     for statistic, value in stats.items():
@@ -364,7 +376,7 @@ def registry_rows_for(row: dict, run_id: str, universe_hash: str, date_range: st
             continue
         recs.append({
             "run_id": run_id, "input_name": f"pine_{row['strategy_id']}",
-            "input_type": "trade_rule", "evaluation": "tv_strategy_catalog_stage3",
+            "input_type": "trade_rule", "evaluation": EVALUATION_NAME,
             "horizon": -1, "statistic": statistic, "value": value,
             "n": row["n_trades"], "universe_hash": universe_hash,
             "date_range": date_range, "created_at": created_at,

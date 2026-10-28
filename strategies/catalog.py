@@ -14,8 +14,14 @@ wired into query.py. This module follows that same precedent rather than
 touching shared pilot infrastructure other pipelines depend on for a storage
 detail outside the campaign's locked statistical protocol.
 
+Amendment 2026-10-28 voided every endpoint result written before it: the
+catalog reads ONLY the *_v2 evaluation names below. The old
+tv_strategy_catalog_stage3/_stage4/_stage5 rows stay in the append-only
+registry, and the old Stage 5 rows still count as opened holdouts
+(stage5.HOLDOUT_EVALUATION_NAMES), but no verdict is derived from them.
+
 Catalog rows are rebuilt from evaluation/eval_registry/results.parquet's
-"tv_strategy_catalog_stage3" rows (already written incrementally by
+"tv_strategy_catalog_stage3_v2" rows (already written incrementally by
 strategies/stage3.py) joined with cheap, non-recomputed metadata (.meta.json,
 strategies.screen.screen_source(), the ports registry) -- so building/refreshing
 the catalog never re-runs the expensive permutation test.
@@ -24,10 +30,9 @@ Stage 5 holdout results (the durable one-shot record written by
 strategies.stage5.run_holdout_for / stage5.run_all) are also read back from the
 registry here so a fresh rebuild keeps the holdout columns instead of dropping
 them -- the one-shot guard (stage5.already_run) guarantees there is at most one
-valid holdout value per strategy. Stage 4 (bh_q/fdr_pass) is left as None: the
-campaign is not truly closed (stage4.run_close refuses: 781 admitted vs only 18
-with a Stage 3 pnl_p), and the referee's m=18 provisional recompute is a
-documented, deliberately-persist-free artifact.
+valid holdout value per strategy. Stage 4 (bh_q/fdr_pass) is read from the
+_stage4_v2 rows that stage4.run_close writes at campaign close, and stays None
+until then.
 """
 
 from __future__ import annotations
@@ -49,7 +54,9 @@ from strategies.stage3 import TV_SCRIPTS_DIR, admitted_slugs
 
 CATALOG_DIR = os.path.join("storage", "tv_strategy_catalog")
 CATALOG_FILENAME = "tv_strategy_catalog.parquet"
-EVALUATION_NAME = "tv_strategy_catalog_stage3"
+EVALUATION_NAME = "tv_strategy_catalog_stage3_v2"    # == stage3.EVALUATION_NAME
+STAGE4_EVALUATION_NAME = "tv_strategy_catalog_stage4_v2"   # == stage4.EVALUATION_NAME
+STAGE5_EVALUATION_NAME = "tv_strategy_catalog_stage5_v2"   # == stage5.EVALUATION_NAME
 
 HOLDOUT_SUCCESS_P = 0.05   # pre-declared Stage 5 success bar (section 5); also
                            # the "promising" bar at Stage 6 (catalog labeling).
@@ -62,14 +69,15 @@ SCHEMA_COLUMNS = [
     "n_trades", "win_rate", "profit_factor", "sharpe", "max_dd",
     "turnover", "median_hold",
     "total_pnl_net", "pnl_p", "pnl_p_5bps", "pnl_p_20bps", "cost_fragile",
+    "null_exposure_ratio", "exposure_mismatch",
     "bh_q", "fdr_pass",
-    "holdout_pnl_p", "holdout_run_ts",
+    "holdout_pnl_p", "holdout_total_pnl_net", "holdout_run_ts",
     "verdict",
     "provisional", "stage", "run_id", "git_commit", "fetched_at",
 ]
 
 
-def label_verdict(stage: str, holdout_pnl_p) -> str:
+def label_verdict(stage: str, holdout_pnl_p, holdout_total_pnl_net=None) -> str:
     """Stage 6 catalog verdict, per preregistration section 5 -- "only Stage 5
     survivors may be described as promising; everything else is a recorded
     null result". Wording here is deliberately "undetermined", not "null
@@ -81,12 +89,20 @@ def label_verdict(stage: str, holdout_pnl_p) -> str:
     campaign formally closes at 30-50 strategies. "Undetermined" is the
     honest label for anything not yet proven either way.
 
+    Amendment 2026-10-28 adds a profit gate: promising also needs holdout net
+    P&L > 0. Beating a null while losing money is not a result to advertise
+    (two of the three pre-amendment "promising" strategies lost money).
+
     This is a DERIVED label, not new evidence: build_catalog_rows() recomputes
     it from the stage + holdout fields on every rebuild, so a re-pivot never
     silently drops a survivor's verdict."""
     if stage != "stage5" or holdout_pnl_p is None or pd.isna(holdout_pnl_p):
         return "undetermined"
-    return "promising" if float(holdout_pnl_p) < HOLDOUT_SUCCESS_P else "undetermined"
+    if holdout_total_pnl_net is None or pd.isna(holdout_total_pnl_net):
+        return "undetermined"
+    if float(holdout_pnl_p) < HOLDOUT_SUCCESS_P and float(holdout_total_pnl_net) > 0:
+        return "promising"
+    return "undetermined"
 
 
 def _git_commit() -> str:
@@ -117,12 +133,26 @@ def _stage3_wide() -> pd.DataFrame:
     return wide.reset_index()
 
 
+def _stage4_wide() -> pd.DataFrame:
+    """bh_q/fdr_pass per strategy from the (once-per-campaign) Stage 4 v2
+    close, or the empty frame before the campaign has closed."""
+    reg = ev_registry.load()
+    sub = reg[reg["evaluation"] == STAGE4_EVALUATION_NAME].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=["strategy_id"])
+    sub["strategy_id"] = sub["input_name"].str.replace("^pine_", "", regex=True)
+    sub = sub.sort_values("created_at").drop_duplicates(
+        subset=["strategy_id", "statistic"], keep="last")
+    return sub.pivot(index="strategy_id", columns="statistic",
+                     values="value").reset_index()
+
+
 def _stage5_wide() -> pd.DataFrame:
     """Pivot eval_registry's long rows for the one-shot Stage 5 holdout
     evaluation back to one row per strategy_id. Falls back to the empty frame
     when nothing has been holdout-tested yet."""
     reg = ev_registry.load()
-    sub = reg[reg["evaluation"] == "tv_strategy_catalog_stage5"].copy()
+    sub = reg[reg["evaluation"] == STAGE5_EVALUATION_NAME].copy()
     if sub.empty:
         return pd.DataFrame(columns=["strategy_id"])
     sub["strategy_id"] = sub["input_name"].str.replace("^pine_", "", regex=True)
@@ -140,6 +170,9 @@ def build_catalog_rows() -> pd.DataFrame:
     joined with provenance/screen metadata. Strategies not yet Stage-3-tested
     still appear, with stage="stage2" and the numeric columns null."""
     stage3 = _stage3_wide()
+    stage4 = _stage4_wide()
+    stage4_by_slug = (
+        stage4.set_index("strategy_id").to_dict("index") if not stage4.empty else {})
     stage5 = _stage5_wide()
     stage5_by_slug = (
         stage5.set_index("strategy_id").to_dict("index") if not stage5.empty else {})
@@ -171,11 +204,17 @@ def build_catalog_rows() -> pd.DataFrame:
         cost_fragile = (None if None in (pnl_p_5, pnl_p_20)
                         else bool((pnl_p_5 < 0.05) != (pnl_p_20 < 0.05)))
 
+        mismatch = get("exposure_mismatch")
+        s4 = stage4_by_slug.get(slug, {})
+        has_stage4 = "bh_q" in s4 and not pd.isna(s4["bh_q"])
+        fdr_pass = s4.get("fdr_pass")
         s5 = stage5_by_slug.get(slug, {})
         has_holdout = "holdout_pnl_p" in s5
         holdout_pnl_p = s5.get("holdout_pnl_p")
+        holdout_pnl_net = s5.get("holdout_total_pnl_net")
         holdout_run_ts = s5.get("holdout_run_ts")
-        stage = "stage5" if has_holdout else ("stage3" if has_stage3 else "stage2")
+        stage = ("stage5" if has_holdout else "stage4" if has_stage4
+                 else "stage3" if has_stage3 else "stage2")
 
         rows.append({
             "strategy_id": slug,
@@ -203,12 +242,15 @@ def build_catalog_rows() -> pd.DataFrame:
             "pnl_p_5bps": pnl_p_5,
             "pnl_p_20bps": pnl_p_20,
             "cost_fragile": cost_fragile,
-            "bh_q": None,          # Stage 4: computed campaign-wide at close
-            "fdr_pass": None,
+            "null_exposure_ratio": get("null_exposure_ratio"),
+            "exposure_mismatch": None if mismatch is None else bool(mismatch),
+            "bh_q": s4.get("bh_q") if has_stage4 else None,  # Stage 4: campaign close
+            "fdr_pass": None if fdr_pass is None or pd.isna(fdr_pass) else bool(fdr_pass),
             "holdout_pnl_p": holdout_pnl_p,  # Stage 5: one-shot, read from registry
+            "holdout_total_pnl_net": holdout_pnl_net,
             "holdout_run_ts": holdout_run_ts,
-            "verdict": label_verdict(stage, holdout_pnl_p),  # Stage 6 (section 5)
-            "provisional": True,
+            "verdict": label_verdict(stage, holdout_pnl_p, holdout_pnl_net),  # Stage 6
+            "provisional": not has_stage4,
             "stage": stage,
             "run_id": get("run_id"),
             "git_commit": git_commit,

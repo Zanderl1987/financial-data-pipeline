@@ -6,6 +6,13 @@ on the holdout split -- symbols with sha256(symbol) % 4 == 0, restricted to
 2018-01-01 onward -- using the identical rule and cost model as Stage 3.
 Pre-declared success: pnl_p < 0.05 on holdout.
 
+Amendment 2026-10-28: the null is evaluation.stats.circular_shift_trades, rows go
+under tv_strategy_catalog_stage5_v2, success also needs holdout net P&L > 0, and
+only Stage 4 survivors with dev net P&L > 0 and no null-exposure mismatch are
+eligible. A strategy whose holdout was opened under the voided endpoint (any row
+under the old tv_strategy_catalog_stage5 name) stays spent: already_run() checks
+both names, per section 2's "a second holdout run ... invalidates it".
+
 "Once" is enforced here, not just documented: before testing a strategy,
 this module checks the registry for an existing tv_strategy_catalog_stage5
 row for that strategy_id and refuses to run again if one exists (per section
@@ -38,6 +45,7 @@ from evaluation.universe import clean_symbols
 from strategies.catalog import build_catalog_rows, write_catalog_table
 from strategies.stage3 import (
     N_PERM,
+    PRICE_FLOOR,
     PRIMARY_COST_BPS,
     PRICE_TABLE,
     SEED,
@@ -48,7 +56,10 @@ from strategies.stage3 import (
 )
 
 HOLDOUT_START = "2018-01-01"
-EVALUATION_NAME = "tv_strategy_catalog_stage5"
+EVALUATION_NAME = "tv_strategy_catalog_stage5_v2"
+#: Every evaluation name under which a holdout counts as opened. The voided
+#: pre-amendment name stays here forever -- those holdouts were seen.
+HOLDOUT_EVALUATION_NAMES = ("tv_strategy_catalog_stage5", EVALUATION_NAME)
 SUCCESS_P = 0.05
 
 
@@ -82,7 +93,7 @@ def holdout_cache(price_table: str = PRICE_TABLE) -> dict:
 
 def already_run(strategy_id: str) -> bool:
     reg = ev_registry.load()
-    sub = reg[(reg["evaluation"] == EVALUATION_NAME)
+    sub = reg[reg["evaluation"].isin(HOLDOUT_EVALUATION_NAMES)
               & (reg["input_name"] == f"pine_{strategy_id}")]
     return not sub.empty
 
@@ -90,14 +101,20 @@ def already_run(strategy_id: str) -> bool:
 # --------------------------------------------------------------- stage 4 survivors
 
 def stage4_survivors() -> "list[str]":
-    """Strategies with fdr_pass=True in the current catalog snapshot -- only
-    valid once strategies.stage4.run_close() has actually closed the campaign;
-    an empty/partial catalog just yields an empty list, not an error, since
-    that's a legitimate ("nothing to test yet") state."""
+    """Strategies eligible for the holdout: fdr_pass=True in the current
+    catalog snapshot (only valid once strategies.stage4.run_close() has
+    actually closed the campaign), development net P&L > 0, and no
+    null-exposure mismatch (amendment 2026-10-28). An empty/partial catalog
+    just yields an empty list, not an error, since that's a legitimate
+    ("nothing to test yet") state."""
     catalog = build_catalog_rows()
-    if "fdr_pass" not in catalog.columns:
+    needed = {"fdr_pass", "total_pnl_net", "exposure_mismatch"}
+    if not needed.issubset(catalog.columns):
         return []
-    survivors = catalog[catalog["fdr_pass"] == True]  # noqa: E712
+    pnl = pd.to_numeric(catalog["total_pnl_net"], errors="coerce")
+    survivors = catalog[(catalog["fdr_pass"] == True)  # noqa: E712
+                        & (pnl > 0)
+                        & (catalog["exposure_mismatch"] == False)]  # noqa: E712
     return sorted(survivors["strategy_id"].tolist())
 
 
@@ -115,25 +132,30 @@ def run_holdout_for(slug: str, cache: dict, n_perm: int = N_PERM, seed: int = SE
     cfg = cost_config(PRIMARY_COST_BPS)
     trades_df = ev_trades.simulate(rule, cache, config=cfg)
     summary = ev_trades.trade_summary(trades_df)
-    perm = ev_stats.permutation_trades(rule, cache, n_perm=n_perm, seed=seed,
-                                       config=cfg)
+    perm = ev_stats.circular_shift_trades(rule, cache, n_perm=n_perm, seed=seed,
+                                          config=cfg, entry_floor=PRICE_FLOOR)
 
     pnl_p = perm.get("pnl_p")
+    pnl_net = summary.get("total_pnl_dollars")
     run_ts = datetime.now(timezone.utc).isoformat()
     return {
         "strategy_id": slug,
         "translation_verified": translation_verified,
         "holdout_n_trades": summary.get("n_trades", 0),
-        "holdout_total_pnl_net": summary.get("total_pnl_dollars"),
+        "holdout_total_pnl_net": pnl_net,
         "holdout_pnl_p": pnl_p,
+        "holdout_null_exposure_ratio": perm.get("null_exposure_ratio"),
         "holdout_run_ts": run_ts,
-        "holdout_success": (pnl_p is not None and pnl_p < SUCCESS_P),
+        "holdout_success": (pnl_p is not None and pnl_p < SUCCESS_P
+                            and pnl_net is not None and pnl_net > 0),
     }
 
 
 def _registry_rows(row: dict, run_id: str, universe_hash: str) -> pd.DataFrame:
     stats = {"holdout_pnl_p": row["holdout_pnl_p"],
              "holdout_n_trades": row["holdout_n_trades"],
+             "holdout_total_pnl_net": row.get("holdout_total_pnl_net"),
+             "holdout_null_exposure_ratio": row.get("holdout_null_exposure_ratio"),
              "holdout_success": row["holdout_success"]}
     recs = []
     for statistic, value in stats.items():
