@@ -288,11 +288,11 @@ class TestImpossiblePeriods:
 
     def test_only_fundamentals_tables(self):
         df = self._frame(["2201-06-30"], ["2015-08-10"])
-        assert len(curated._drop_impossible_periods("macro", df)) == 1
+        assert len(curated._drop_out_of_order_dates("macro", df)) == 1
 
     def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
         # fundamentals_* compact through DuckDB (too big for pandas); the SQL
-        # twins of _normalize_period_end and _drop_impossible_periods must give
+        # twins of _normalize_period_end and _drop_out_of_order_dates must give
         # the same rows as dedup().
         assert "fundamentals_quarterly" in curated._LARGE_TABLES
         raw = tmp_path / "raw"
@@ -322,6 +322,55 @@ class TestImpossiblePeriods:
         assert sql_out["period_end"].tolist() == pandas_out["period_end"].tolist()
         assert sql_out["value"].tolist() == pandas_out["value"].tolist() == [1.0, 3.0, 4.5]
 
+
+
+class TestTradesDisclosedBeforeMade:
+    """A trade cannot be disclosed before it happens. Found 2026-10-29: 131 PTR
+    rows, with the typo on either side -- trades dated 3031 on 2021 filings,
+    filings dated 1935 for 2025 trades and 2001 for a 2019 AAPL trade (a look-
+    ahead leak for anything keyed on disclosure_date)."""
+
+    def _frame(self, transaction_date, disclosure_date):
+        n = len(transaction_date)
+        return pd.DataFrame({
+            "chamber": ["house"] * n, "doc_id": [str(20018672 + i) for i in range(n)],
+            "row_index": [0] * n, "member_name": ["A Member"] * n,
+            "ticker": ["IBM"] * n, "transaction_type": ["P"] * n,
+            "transaction_date": transaction_date, "disclosure_date": disclosure_date,
+            "fetched_at": ["2026-08-28T21:17:46"] * n,
+        })
+
+    def test_drops_both_directions_of_typo(self):
+        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", "2025-03-13"],
+                         ["2021-04-30", "2021-04-30", "2001-11-30", "1935-03-28"])
+        out = curated.dedup("congressional_trades", df)
+        assert out["transaction_date"].tolist() == ["2021-04-01"]
+
+    def test_year_past_pandas_timestamp_limit_is_still_caught(self):
+        # pd.to_datetime coerces 3031 to NaT; a Timestamp comparison would keep it.
+        df = self._frame(["2220-04-07", "2202-09-19"], ["2022-04-07", "2022-09-19"])
+        assert curated.dedup("congressional_trades", df).empty
+
+    def test_same_day_disclosure_and_missing_dates_are_kept(self):
+        df = self._frame(["2023-03-16", None, "2023-03-16"],
+                         ["2023-03-16", "2023-03-15", None])
+        assert len(curated.dedup("congressional_trades", df)) == 3
+
+    def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", None],
+                         ["2021-04-30", "2021-04-30", "2001-11-30", "2021-01-01"])
+        df.to_parquet(raw / "congressional_house_backfill_2021.parquet")
+        monkeypatch.setitem(q.CATALOG, "congressional_trades",
+                            str(raw / "*.parquet").replace("\\", "/"))
+        monkeypatch.setattr(curated, "CURATED_ROOT", str(tmp_path / "curated"))
+
+        out_path, raw_rows, curated_rows = curated._compact_large_table("congressional_trades")
+        sql_ids = sorted(pd.read_parquet(out_path)["doc_id"])
+        pandas_ids = sorted(curated.dedup("congressional_trades", df)["doc_id"])
+        assert (raw_rows, curated_rows) == (4, 2)
+        assert sql_ids == pandas_ids == ["20018672", "20018675"]
 
 class TestZeroBars:
     """

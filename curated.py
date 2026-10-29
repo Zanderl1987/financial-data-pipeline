@@ -71,24 +71,53 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _drop_impossible_periods(table: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Drop facts whose period ends after the filing that reports them.
+# (earlier, later) date columns that cannot be out of order: a filing cannot
+# report a period that has not ended, and a trade cannot be disclosed before it
+# happens. A row where earlier > later carries a typo in one of the two dates,
+# and there is no telling which one, so curated drops it (raw keeps it).
+_DATE_ORDER = {
+    "fundamentals_annual":    ("period_end", "filed"),
+    "fundamentals_quarterly": ("period_end", "filed"),
+    # 2026-10-29: 131 of 54,966 PTR rows, both directions of typo -- trades
+    # dated 3031/2220/2202 on 2021-22 filings, and filings dated 1935-03-28
+    # (a 2025 trade) and 2001-11-30 (a 2019 AAPL trade). The second kind is
+    # look-ahead: the disclosure event study keys on disclosure_date, so the
+    # AAPL trade surfaced as public news 18 years before it was made.
+    "congressional_trades":   ("transaction_date", "disclosure_date"),
+}
 
-    A filing cannot report a period that has not ended, so ``period_end >
-    filed`` is a filer's XBRL typo, not data: 2026-10-26 found 302 such rows in
-    fundamentals_quarterly and 72 in fundamentals_annual, including periods
-    ending 2201-06-30 and 2215-09-30 on 2015 10-Qs (a 2015 typed as 2201) and
-    near misses like a Q3 dated 2011-09-30 on a 10-Q filed 2011-09-12. The
-    value is bound to a period it does not describe, so a point-in-time join
-    would hand it to the wrong quarter. Raw keeps these rows; curated drops
-    them. Rows with no parseable ``filed`` are kept -- they cannot be judged.
+
+def _drop_out_of_order_dates(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose _DATE_ORDER pair is out of order.
+
+    fundamentals: ``period_end > filed`` is a filer's XBRL typo, not data:
+    2026-10-26 found 302 such rows in fundamentals_quarterly and 72 in
+    fundamentals_annual, including periods ending 2201-06-30 and 2215-09-30 on
+    2015 10-Qs (a 2015 typed as 2201) and near misses like a Q3 dated
+    2011-09-30 on a 10-Q filed 2011-09-12. The value is bound to a period it
+    does not describe, so a point-in-time join would hand it to the wrong
+    quarter. Rows where either date does not parse are kept -- they cannot be
+    judged.
     """
-    if table not in _PERIOD_END_TABLES or not {"period_end", "filed"}.issubset(df.columns):
+    pair = _DATE_ORDER.get(table)
+    if pair is None or not set(pair).issubset(df.columns):
         return df
-    period_end = pd.to_datetime(df["period_end"], errors="coerce", format="mixed")
-    filed = pd.to_datetime(df["filed"], errors="coerce", format="mixed")
-    impossible = period_end.notna() & filed.notna() & (period_end > filed)
+    earlier, later = (_iso_day(df[c]) for c in pair)
+    impossible = (earlier > later).fillna(False).astype(bool)
     return df[~impossible] if impossible.any() else df
+
+
+def _iso_day(values: pd.Series) -> pd.Series:
+    """Each value as a YYYY-MM-DD string, NA where it does not parse.
+
+    Strings, not Timestamps: pandas cannot hold years past 2262, so a 3031 typo
+    would coerce to NaT and escape the check. ISO day strings order correctly
+    at any year; the string prefix is the fallback for what to_datetime drops.
+    """
+    parsed = pd.to_datetime(values, errors="coerce", format="mixed").dt.strftime("%Y-%m-%d")
+    prefix = values.astype("string").str.slice(0, 10)
+    prefix = prefix.where(prefix.str.fullmatch(r"\d{4}-\d{2}-\d{2}"))
+    return parsed.astype("string").fillna(prefix)
 
 
 # Tables whose snapshot_date was introduced after data had already accumulated.
@@ -775,11 +804,13 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
                     strftime(TRY_CAST(period_end AS TIMESTAMP), '%Y-%m-%d') AS period_end)
                 FROM {raw_scan}
             )"""
-            if "filed" in present:
-                # SQL twin of _drop_impossible_periods(). COALESCE keeps rows
-                # whose dates do not parse: NOT/<= on NULL would drop them.
-                predicates.append("COALESCE(TRY_CAST(period_end AS DATE) "
-                                  "<= TRY_CAST(filed AS DATE), TRUE)")
+        pair = _DATE_ORDER.get(table)
+        if pair and set(pair) <= present:
+            # SQL twin of _drop_out_of_order_dates(). COALESCE keeps rows
+            # whose dates do not parse: NOT/<= on NULL would drop them.
+            earlier, later = pair
+            predicates.append(f"COALESCE(TRY_CAST({earlier} AS DATE) "
+                              f"<= TRY_CAST({later} AS DATE), TRUE)")
         where_sanity = f"WHERE {' AND '.join(predicates)}" if predicates else ""
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         deduped = f"""
@@ -855,7 +886,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _normalize_period_end(table, df)
-    df = _drop_impossible_periods(table, df)
+    df = _drop_out_of_order_dates(table, df)
     df = _backfill_snapshot_date(table, df)
     df = _drop_zero_bars(table, df)
     subset = _dedup_subset(table, df)
