@@ -351,6 +351,13 @@ class TestTradesDisclosedBeforeMade:
         df = self._frame(["2220-04-07", "2202-09-19"], ["2022-04-07", "2022-09-19"])
         assert curated.dedup("congressional_trades", df).empty
 
+    def test_disclosure_dated_after_the_fetch_is_dropped(self):
+        # 2024 filing typed as 2204: in order against the trade, impossible
+        # against fetched_at (2026-08-28).
+        df = self._frame(["2024-06-22", "2024-06-22"], ["2204-06-22", "2024-07-01"])
+        out = curated.dedup("congressional_trades", df)
+        assert out["disclosure_date"].tolist() == ["2024-07-01"]
+
     def test_same_day_disclosure_and_missing_dates_are_kept(self):
         df = self._frame(["2023-03-16", None, "2023-03-16"],
                          ["2023-03-16", "2023-03-15", None])
@@ -359,8 +366,8 @@ class TestTradesDisclosedBeforeMade:
     def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
         raw = tmp_path / "raw"
         raw.mkdir()
-        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", None],
-                         ["2021-04-30", "2021-04-30", "2001-11-30", "2021-01-01"])
+        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", None, "2024-06-22"],
+                         ["2021-04-30", "2021-04-30", "2001-11-30", "2021-01-01", "2204-06-22"])
         df.to_parquet(raw / "congressional_house_backfill_2021.parquet")
         monkeypatch.setitem(q.CATALOG, "congressional_trades",
                             str(raw / "*.parquet").replace("\\", "/"))
@@ -369,7 +376,7 @@ class TestTradesDisclosedBeforeMade:
         out_path, raw_rows, curated_rows = curated._compact_large_table("congressional_trades")
         sql_ids = sorted(pd.read_parquet(out_path)["doc_id"])
         pandas_ids = sorted(curated.dedup("congressional_trades", df)["doc_id"])
-        assert (raw_rows, curated_rows) == (4, 2)
+        assert (raw_rows, curated_rows) == (5, 2)
         assert sql_ids == pandas_ids == ["20018672", "20018675"]
 
 class TestZeroBars:

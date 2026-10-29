@@ -72,23 +72,26 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 # (earlier, later) date columns that cannot be out of order: a filing cannot
-# report a period that has not ended, and a trade cannot be disclosed before it
-# happens. A row where earlier > later carries a typo in one of the two dates,
-# and there is no telling which one, so curated drops it (raw keeps it).
+# report a period that has not ended, a trade cannot be disclosed before it
+# happens, and nothing is disclosed after we fetched it. A row where earlier >
+# later carries a typo in one of the two dates, and there is no telling which
+# one, so curated drops it (raw keeps it).
 _DATE_ORDER = {
-    "fundamentals_annual":    ("period_end", "filed"),
-    "fundamentals_quarterly": ("period_end", "filed"),
+    "fundamentals_annual":    [("period_end", "filed")],
+    "fundamentals_quarterly": [("period_end", "filed")],
     # 2026-10-29: 131 of 54,966 PTR rows, both directions of typo -- trades
     # dated 3031/2220/2202 on 2021-22 filings, and filings dated 1935-03-28
     # (a 2025 trade) and 2001-11-30 (a 2019 AAPL trade). The second kind is
     # look-ahead: the disclosure event study keys on disclosure_date, so the
-    # AAPL trade surfaced as public news 18 years before it was made.
-    "congressional_trades":   ("transaction_date", "disclosure_date"),
+    # AAPL trade surfaced as public news 18 years before it was made. Plus one
+    # 2024 filing dated 2204-06-22, after the fetch that downloaded it.
+    "congressional_trades":   [("transaction_date", "disclosure_date"),
+                               ("disclosure_date", "fetched_at")],
 }
 
 
 def _drop_out_of_order_dates(table: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows whose _DATE_ORDER pair is out of order.
+    """Drop rows where any _DATE_ORDER pair is out of order.
 
     fundamentals: ``period_end > filed`` is a filer's XBRL typo, not data:
     2026-10-26 found 302 such rows in fundamentals_quarterly and 72 in
@@ -99,11 +102,11 @@ def _drop_out_of_order_dates(table: str, df: pd.DataFrame) -> pd.DataFrame:
     quarter. Rows where either date does not parse are kept -- they cannot be
     judged.
     """
-    pair = _DATE_ORDER.get(table)
-    if pair is None or not set(pair).issubset(df.columns):
-        return df
-    earlier, later = (_iso_day(df[c]) for c in pair)
-    impossible = (earlier > later).fillna(False).astype(bool)
+    impossible = pd.Series(False, index=df.index)
+    for pair in _DATE_ORDER.get(table, []):
+        if set(pair).issubset(df.columns):
+            earlier, later = (_iso_day(df[c]) for c in pair)
+            impossible |= (earlier > later).fillna(False).astype(bool)
     return df[~impossible] if impossible.any() else df
 
 
@@ -804,13 +807,12 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
                     strftime(TRY_CAST(period_end AS TIMESTAMP), '%Y-%m-%d') AS period_end)
                 FROM {raw_scan}
             )"""
-        pair = _DATE_ORDER.get(table)
-        if pair and set(pair) <= present:
-            # SQL twin of _drop_out_of_order_dates(). COALESCE keeps rows
-            # whose dates do not parse: NOT/<= on NULL would drop them.
-            earlier, later = pair
-            predicates.append(f"COALESCE(TRY_CAST({earlier} AS DATE) "
-                              f"<= TRY_CAST({later} AS DATE), TRUE)")
+        for earlier, later in _DATE_ORDER.get(table, []):
+            if {earlier, later} <= present:
+                # SQL twin of _drop_out_of_order_dates(). COALESCE keeps rows
+                # whose dates do not parse: NOT/<= on NULL would drop them.
+                predicates.append(f"COALESCE(TRY_CAST({earlier} AS DATE) "
+                                  f"<= TRY_CAST({later} AS DATE), TRUE)")
         where_sanity = f"WHERE {' AND '.join(predicates)}" if predicates else ""
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         deduped = f"""
