@@ -256,7 +256,9 @@ Test: `test_stale_iceberg_mirror_loses_to_newer_curated`.
 ## Known-broken / dead ends (don't re-attempt without a new angle)
 
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything; needs a replacement source.
-  Affects `market_valuation`/`treasury_yield_curve` CATALOG tables (still NO DATA).
+  `market_valuation` is still NO DATA. `treasury_yield_curve` is NOT: since 2026-08-26
+  `treasury_curve_pipeline.py` (home.treasury.gov, keyless) writes it to the same glob
+  (1990-01-02 onward).
 - USDA_NASS keys in .env return 401 (need fresh key); CENSUS_API_KEY not set.
 - Baker Hughes rig count (JS SPA), AAR rail traffic (member-gated), Stooq (JS proof-of-work),
   Motley Fool transcripts (ToS prohibits scraping) — all ruled out.
