@@ -300,7 +300,7 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
 
 def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit,
                     symbol: str, notional: float, *,
-                    config=None, volume=None) -> "list[dict]":
+                    config=None, volume=None, impact=None) -> "list[dict]":
     """
     Low-level engine on flag arrays (Tier-2 permutation re-enters here).
 
@@ -309,6 +309,9 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
     `notional` by name through inspect.signature. Both must keep working.
     config=None means ExecutionConfig LEGACY, which reproduces the pre-Step-B
     behavior exactly -- no costs, no stops, no holding cap.
+
+    `impact`, when given, is an (entry, exit) pair of per-bar impact rates used in
+    place of the ones computed from `volume`. None keeps the existing behavior.
 
     Short trades additionally accrue cfg.costs.borrow_fee_bps over their actual
     holding period (see the borrow-fee comment in _next_candidate) -- previously
@@ -331,7 +334,8 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
         [(i, "long") for i in np.flatnonzero(long_entry)] +
         [(i, "short") for i in np.flatnonzero(short_entry)]
     )
-    impact = _impact_arrays(close, volume, notional, cfg, n) if entry_positions         else (None, None)
+    if impact is None:
+        impact = _impact_arrays(close, volume, notional, cfg, n) if entry_positions else (None, None)
     rows = []
     cursor = 0
     while True:

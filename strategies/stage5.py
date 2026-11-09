@@ -22,6 +22,13 @@ campaign" -- there is deliberately no --force override).
 Reuses strategies.stage3's rule loading, price-floor gate, and cost-model
 monkeypatch rather than duplicating them, so the holdout test is mechanically
 identical to the development test in every way except the data split.
+
+Survivorship amendment: a strategy must also have passed the re-score in
+strategies/survivorship.py, and it is scored on every holdout-split CRSP company,
+alive or dead, under that module's rules. Success then needs p < 0.05 and net
+P&L > 0 in both the primary and the wipeout scenario. holdout_cache() stays on
+the Yahoo panel because strategies/portfolio.py reads it; it no longer feeds this
+test.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -39,23 +47,18 @@ import query as q
 from analytics.technical import _load_ohlcv
 from evaluation import execution as ev_execution
 from evaluation import registry as ev_registry
-from evaluation import stats as ev_stats
-from evaluation import trades as ev_trades
 from evaluation.universe import clean_symbols
+from strategies import survivorship as sv
 from strategies.catalog import build_catalog_rows, write_catalog_table
 from strategies.stage3 import (
-    N_PERM,
-    PRICE_FLOOR,
-    PRIMARY_COST_BPS,
     PRICE_TABLE,
     SEED,
-    cost_config,
     dev_holdout_symbols,
     load_rule_for,
-    with_price_floor,
 )
 
-HOLDOUT_START = "2018-01-01"
+N_PERM = sv.N_PERM
+HOLDOUT_START = sv.HOLDOUT_START
 EVALUATION_NAME = "tv_strategy_catalog_stage5_v2"
 #: Every evaluation name under which a holdout counts as opened. The voided
 #: pre-amendment name stays here forever -- those holdouts were seen.
@@ -89,6 +92,15 @@ def holdout_cache(price_table: str = PRICE_TABLE) -> dict:
     return _CACHE_SINGLETON[price_table]
 
 
+def stage3_ranges() -> dict:
+    return sv.stage3_ranges(q, PRICE_TABLE)
+
+
+def crsp_holdout_panel() -> "sv.CrspPanel":
+    """Every holdout-split CRSP company. Its prices are requested only when Stage 5 runs."""
+    return sv.load_holdout_panel(stage3_ranges())
+
+
 # --------------------------------------------------------------- one-shot guard
 
 def already_run(strategy_id: str) -> bool:
@@ -96,6 +108,15 @@ def already_run(strategy_id: str) -> bool:
     sub = reg[reg["evaluation"].isin(HOLDOUT_EVALUATION_NAMES)
               & (reg["input_name"] == f"pine_{strategy_id}")]
     return not sub.empty
+
+
+def rescore_passed(strategy_id: str) -> bool:
+    """Passed the dead-company re-score, with no failing row anywhere: failure is final,
+    so a later row cannot rescue a strategy."""
+    reg = ev_registry.load()
+    sub = reg[(reg["evaluation"] == sv.EVALUATION_NAME) & (reg["input_name"] == f"pine_{strategy_id}")
+              & (reg["statistic"] == "rescore_pass")]
+    return bool(not sub.empty and (pd.to_numeric(sub["value"]) == 1.0).all())
 
 
 # --------------------------------------------------------------- stage 4 survivors
@@ -120,34 +141,35 @@ def stage4_survivors() -> "list[str]":
 
 # --------------------------------------------------------------- per-strategy run
 
-def run_holdout_for(slug: str, cache: dict, n_perm: int = N_PERM, seed: int = SEED) -> dict:
+def run_holdout_for(slug: str, cache, n_perm: int = N_PERM, seed: int = SEED, workers: int = 2) -> dict:
+    """`cache` is the crsp_holdout_panel(). The rule is left unfloored because the panel
+    scoring applies the floor to the real traded price."""
     if already_run(slug):
         raise RuntimeError(
             f"{slug} already has a Stage 5 holdout result -- a second run "
             f"would invalidate it for this campaign (section 2). Refusing.")
+    if not rescore_passed(slug):
+        raise RuntimeError(f"{slug} has not passed the dead-company re-score. Refusing.")
 
     rule, translation_verified = load_rule_for(slug)
-    rule = with_price_floor(rule)
+    cfg = sv.crsp_config()
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        result = sv.score_panel({slug: rule}, cache, n_perm=n_perm, seed=seed, config=cfg,
+                                executor=executor, n_workers=workers)[slug]
 
-    cfg = cost_config(PRIMARY_COST_BPS)
-    trades_df = ev_trades.simulate(rule, cache, config=cfg)
-    summary = ev_trades.trade_summary(trades_df)
-    perm = ev_stats.circular_shift_trades(rule, cache, n_perm=n_perm, seed=seed,
-                                          config=cfg, entry_floor=PRICE_FLOOR)
-
-    pnl_p = perm.get("pnl_p")
-    pnl_net = summary.get("total_pnl_dollars")
+    primary, wipeout = result[sv.PRIMARY_SCENARIO], result[sv.WIPEOUT_SCENARIO]
     run_ts = datetime.now(timezone.utc).isoformat()
     return {
         "strategy_id": slug,
         "translation_verified": translation_verified,
-        "holdout_n_trades": summary.get("n_trades", 0),
-        "holdout_total_pnl_net": pnl_net,
-        "holdout_pnl_p": pnl_p,
-        "holdout_null_exposure_ratio": perm.get("null_exposure_ratio"),
+        "holdout_n_trades": primary.get("n_trades", 0),
+        "holdout_total_pnl_net": primary.get("obs_pnl_dollars"),
+        "holdout_pnl_p": primary.get("pnl_p"),
+        "holdout_null_exposure_ratio": primary.get("null_exposure_ratio"),
+        "holdout_wipeout_pnl_p": wipeout.get("pnl_p"),
+        "holdout_wipeout_total_pnl_net": wipeout.get("obs_pnl_dollars"),
         "holdout_run_ts": run_ts,
-        "holdout_success": (pnl_p is not None and pnl_p < SUCCESS_P
-                            and pnl_net is not None and pnl_net > 0),
+        "holdout_success": sv.holdout_success(result),
     }
 
 
@@ -156,6 +178,8 @@ def _registry_rows(row: dict, run_id: str, universe_hash: str) -> pd.DataFrame:
              "holdout_n_trades": row["holdout_n_trades"],
              "holdout_total_pnl_net": row.get("holdout_total_pnl_net"),
              "holdout_null_exposure_ratio": row.get("holdout_null_exposure_ratio"),
+             "holdout_wipeout_pnl_p": row.get("holdout_wipeout_pnl_p"),
+             "holdout_wipeout_total_pnl_net": row.get("holdout_wipeout_total_pnl_net"),
              "holdout_success": row["holdout_success"]}
     recs = []
     for statistic, value in stats.items():
@@ -167,7 +191,7 @@ def _registry_rows(row: dict, run_id: str, universe_hash: str) -> pd.DataFrame:
             "horizon": -1, "statistic": statistic, "value": value,
             "n": row["holdout_n_trades"], "universe_hash": universe_hash,
             "date_range": f"{HOLDOUT_START}..", "created_at": row["holdout_run_ts"],
-            "execution_hash": ev_execution.config_hash(cost_config(PRIMARY_COST_BPS)),
+            "execution_hash": ev_execution.config_hash(sv.crsp_config()),
         })
     return pd.DataFrame(recs, columns=ev_registry.COLUMNS)
 
@@ -176,10 +200,12 @@ def _registry_rows(row: dict, run_id: str, universe_hash: str) -> pd.DataFrame:
 
 def run_all(confirm: bool = False, n_perm: int = N_PERM, seed: int = SEED) -> pd.DataFrame:
     survivors = stage4_survivors()
-    to_run = [s for s in survivors if not already_run(s)]
+    passed = [s for s in survivors if rescore_passed(s)]
+    to_run = [s for s in passed if not already_run(s)]
 
     if not confirm:
         print(f"{len(survivors)} Stage 4 survivor(s): {survivors}")
+        print(f"{len(passed)} also passed the dead-company re-score: {passed}")
         print(f"{len(to_run)} not yet holdout-tested: {to_run}")
         print("Pass confirm=True (CLI: --confirm-run) to actually run the "
               "one-shot holdout test on these.")
@@ -189,7 +215,7 @@ def run_all(confirm: bool = False, n_perm: int = N_PERM, seed: int = SEED) -> pd
         print("No untested Stage 4 survivors to run.")
         return pd.DataFrame(columns=["strategy_id", "holdout_pnl_p", "holdout_success"])
 
-    cache = holdout_cache()
+    cache = crsp_holdout_panel()
     uhash = ev_registry.universe_hash(cache.keys())
     run_id = ev_registry.new_run_id()
 

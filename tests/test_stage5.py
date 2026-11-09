@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import strategies.stage5 as stage5  # noqa: E402
+from strategies.stage3 import cost_config as stage3_cost_config  # noqa: E402
 
 
 def _reg_df(rows):
@@ -94,11 +95,91 @@ def test_run_holdout_for_refuses_second_run(monkeypatch):
         stage5.run_holdout_for("foo", cache={})
 
 
+# ------------------------------------------------------------------ dead-company re-score gate
+
+def _rescore_row(slug, value, created="t1", statistic="rescore_pass"):
+    return {"run_id": "r", "input_name": f"pine_{slug}", "input_type": "trade_rule",
+            "evaluation": "tv_strategy_catalog_survivorship_v1", "horizon": -1, "statistic": statistic,
+            "value": value, "n": 1, "universe_hash": "u", "date_range": "x", "created_at": created}
+
+
+def test_rescore_passed_reads_the_registry(monkeypatch):
+    reg = _reg_df([_rescore_row("yes", 1.0), _rescore_row("no", 0.0), _rescore_row("other", 1.0, statistic="pnl_p")])
+    monkeypatch.setattr(stage5.ev_registry, "load", lambda: reg)
+    assert stage5.rescore_passed("yes") is True
+    assert stage5.rescore_passed("no") is False
+    assert stage5.rescore_passed("other") is False
+    assert stage5.rescore_passed("never_rescored") is False
+
+
+def test_a_failed_rescore_is_final_even_with_a_later_pass_row(monkeypatch):
+    """Change 12: failure is final, so a later row cannot rescue a strategy."""
+    reg = _reg_df([_rescore_row("x", 0.0, "t1"), _rescore_row("x", 1.0, "t2")])
+    monkeypatch.setattr(stage5.ev_registry, "load", lambda: reg)
+    assert stage5.rescore_passed("x") is False
+
+
+def test_run_all_only_tests_strategies_that_passed_the_rescore(monkeypatch, capsys):
+    monkeypatch.setattr(stage5, "stage4_survivors", lambda: ["a", "b"])
+    monkeypatch.setattr(stage5, "already_run", lambda slug: False)
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: slug == "b")
+    out = stage5.run_all(confirm=False)
+    assert out.empty
+    assert "['b']" in capsys.readouterr().out
+
+
+def test_nothing_runs_when_no_strategy_passed_the_rescore(monkeypatch, capsys):
+    monkeypatch.setattr(stage5, "stage4_survivors", lambda: ["a"])
+    monkeypatch.setattr(stage5, "already_run", lambda slug: False)
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: False)
+    monkeypatch.setattr(stage5, "crsp_holdout_panel", lambda: pytest.fail("holdout prices must stay closed"))
+    assert stage5.run_all(confirm=True).empty
+    assert "No untested" in capsys.readouterr().out
+
+
+def test_crsp_holdout_panel_loads_the_holdout_panel(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(stage5.sv, "load_holdout_panel", lambda ranges: calls.setdefault("panel", object()))
+    monkeypatch.setattr(stage5, "stage3_ranges", lambda: {"AAPL": None})
+    assert stage5.crsp_holdout_panel() is calls["panel"]
+
+
+def test_run_holdout_for_refuses_a_strategy_that_did_not_pass_the_rescore(monkeypatch):
+    """Older scripts call this directly, so the gate must hold here and not only in run_all."""
+    monkeypatch.setattr(stage5, "already_run", lambda slug: False)
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: False)
+    monkeypatch.setattr(stage5.sv, "score_panel", lambda *a, **k: pytest.fail("holdout prices must stay closed"))
+    with pytest.raises(RuntimeError, match="re-score"):
+        stage5.run_holdout_for("s", cache="panel")
+
+
+def test_run_holdout_for_scores_the_panel_and_needs_both_scenarios(monkeypatch):
+    monkeypatch.setattr(stage5, "already_run", lambda slug: False)
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: True)
+    monkeypatch.setattr(stage5, "load_rule_for", lambda slug: ("rule", "unit_tested"))
+    monkeypatch.setattr(stage5.sv, "crsp_config", lambda: "cfg")
+    seen = {}
+
+    def fake_score(rules, panel, **kw):
+        seen.update(rules=rules, panel=panel, **kw)
+        return {"s": {"shumway": {"pnl_p": 0.01, "obs_pnl_dollars": 50.0, "n_trades": 7, "null_exposure_ratio": 1.0},
+                      "missing_wipeout": {"pnl_p": 0.2, "obs_pnl_dollars": 40.0, "n_trades": 7}}}
+
+    monkeypatch.setattr(stage5.sv, "score_panel", fake_score)
+    row = stage5.run_holdout_for("s", cache="panel", n_perm=3, seed=1)
+    assert seen["rules"] == {"s": "rule"}             # no adjusted-price floor wrapped around the rule
+    assert seen["panel"] == "panel" and seen["config"] == "cfg" and seen["n_perm"] == 3
+    assert row["holdout_pnl_p"] == 0.01
+    assert row["holdout_wipeout_pnl_p"] == 0.2
+    assert row["holdout_success"] is False
+
+
 # ------------------------------------------------------------------ run_all guards
 
 def test_run_all_previews_without_running_when_not_confirmed(monkeypatch, capsys):
     monkeypatch.setattr(stage5, "stage4_survivors", lambda: ["a", "b"])
     monkeypatch.setattr(stage5, "already_run", lambda slug: slug == "b")
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: True)
     called = {"ran": False}
 
     def fake_run_holdout_for(*a, **k):
@@ -115,7 +196,9 @@ def test_run_all_previews_without_running_when_not_confirmed(monkeypatch, capsys
 def test_run_all_skips_already_tested_survivors(monkeypatch):
     monkeypatch.setattr(stage5, "stage4_survivors", lambda: ["a", "b"])
     monkeypatch.setattr(stage5, "already_run", lambda slug: slug == "a")
-    monkeypatch.setattr(stage5, "holdout_cache", lambda: {"AAPL": pd.DataFrame()})
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: True)
+    monkeypatch.setattr(stage5.sv, "crsp_config", lambda: stage3_cost_config(10.0))
+    monkeypatch.setattr(stage5, "crsp_holdout_panel", lambda: {"AAPL": pd.DataFrame()})
     monkeypatch.setattr(stage5.ev_registry, "universe_hash", lambda keys: "h")
     monkeypatch.setattr(stage5.ev_registry, "new_run_id", lambda: "run1")
 
@@ -151,6 +234,7 @@ def test_run_all_skips_already_tested_survivors(monkeypatch):
 def test_run_all_no_op_when_nothing_left_to_run(monkeypatch, capsys):
     monkeypatch.setattr(stage5, "stage4_survivors", lambda: ["a"])
     monkeypatch.setattr(stage5, "already_run", lambda slug: True)
+    monkeypatch.setattr(stage5, "rescore_passed", lambda slug: True)
     out = stage5.run_all(confirm=True)
     assert out.empty
     assert "No untested" in capsys.readouterr().out

@@ -417,7 +417,7 @@ class TestStage3Migration:
         import inspect as _inspect
         from strategies import stage5
         src = _inspect.getsource(stage5.run_holdout_for)
-        assert "cost_config" in src and "cost_adjusted" not in src
+        assert "crsp_config" in src and "cost_adjusted" not in src
 
 
 class TestRegistryExecutionHash:
