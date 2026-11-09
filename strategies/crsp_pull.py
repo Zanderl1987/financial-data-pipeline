@@ -79,9 +79,16 @@ MATCH_BAND = 0.02              # the same 2% as survivorship.compare_with_yahoo
 MATCH_SHARE = 0.90
 LISTING_DAYS = 7
 
-NAMES_SQL = "select permno, namedt, nameendt, shrcd, exchcd, ticker, shrcls from crsp.dsenames"
-DELIST_SQL = "select permno, dlstdt, dlstcd, dlret from crsp.dsedelist"
+NAMES_COLUMNS = ("permno", "namedt", "nameendt", "shrcd", "exchcd", "ticker", "shrcls")
+DELIST_COLUMNS = ("permno", "dlstdt", "dlstcd", "dlret")
 PRICE_COLUMNS = ("permno", "date") + sv._CRSP_COLUMNS[1:]
+NAMES_SQL = f"select {', '.join(NAMES_COLUMNS)} from crsp.dsenames"
+DELIST_SQL = f"select {', '.join(DELIST_COLUMNS)} from crsp.dsedelist"
+#: The legacy tables this script reads, and the newer-format (CIZ) tables reported alongside
+#: them. Nothing reads the newer tables yet: mapping their delisting fields onto the legacy
+#: codes is a scoring choice, made only after seeing them.
+LEGACY_TABLES = {"dsenames": NAMES_COLUMNS, "dsedelist": DELIST_COLUMNS, "dsf": PRICE_COLUMNS}
+V2_TABLES = ("dsf_v2", "stksecurityinfohist", "stkdelists")
 
 
 # ------------------------------------------------------------------ queries
@@ -120,14 +127,32 @@ class WrdsSource:
         return self.db.raw_sql(sql, params=params, date_cols=["date"])
 
     def describe(self) -> dict:
-        """Column names and types of the tables used, to check the mapping before pulling."""
-        out = {}
-        for table in ("dsenames", "dsedelist", "dsf"):
-            out[table] = self.db.describe_table("crsp", table)[["name", "type"]].astype(str).values.tolist()
-        return out
+        return describe_tables(self.db)
 
     def close(self):
         self.db.close()
+
+
+def describe_tables(db) -> dict:
+    """What --tables-only prints: which legacy and newer-format tables exist, their columns,
+    any column this script needs that is missing, and the last date in the legacy daily file.
+    Reads no company's prices."""
+    available = {str(t).lower() for t in db.list_tables(library="crsp")}
+    present = {t: t in available for t in list(LEGACY_TABLES) + list(V2_TABLES)}
+    columns = {t: db.describe_table("crsp", t)[["name", "type"]].astype(str).values.tolist()
+               for t, ok in present.items() if ok}
+    missing = {}
+    for table, needed in LEGACY_TABLES.items():
+        have = {str(c[0]).lower() for c in columns.get(table, [])}
+        lacking = [c for c in needed if c not in have]
+        if lacking:
+            missing[table] = lacking
+    last = None
+    if present["dsf"] and "dsf" not in missing:
+        value = db.raw_sql("select max(date) as last from crsp.dsf")["last"].iloc[0]
+        last = None if pd.isna(value) else str(pd.Timestamp(value).date())
+    return {"present": present, "legacy_complete": not missing, "missing_columns": missing,
+            "legacy_dsf_last_date": last, "columns": columns}
 
 
 # ------------------------------------------------------------------ the population
@@ -459,7 +484,8 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=500)
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--tables-only", action="store_true",
-                    help="print the columns of the CRSP tables used and stop; downloads no data")
+                    help="report which CRSP tables exist (legacy and newer format), their columns, any "
+                         "missing column, and the legacy daily file's last date; downloads no prices")
     args = ap.parse_args(argv)
 
     username = os.environ.get("WRDS_USER")

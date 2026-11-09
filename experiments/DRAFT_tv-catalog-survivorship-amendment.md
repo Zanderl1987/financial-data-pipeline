@@ -13,7 +13,11 @@ truth is unknown, the assumption must not favour the strategy.
 
 1. Done: the yearly borrowing fee in change 9 (270 bps, approved by Zander 2026-11-08). Zander
    confirmed the 2.70% in the published Journal of Finance version the same day.
-2. The first date in change 3, read from the CRSP tables before any strategy is scored.
+2. The first date in change 3, read from the CRSP tables before any strategy is scored, and the
+   last date: the legacy daily file may have stopped updating, in which case scoring ends at its
+   last date for every company alike. `--tables-only` reports it, and whether the newer CRSP
+   format is present. If the legacy tables are missing, the newer format needs its own mapping,
+   written and recorded here from its documentation before any price is pulled.
 3. `strategies/survivorship.py` and `strategies/stage5.py` follow this text, tested on made-up prices
    only. The CRSP pull script, `strategies/crsp_pull.py`, is written from CRSP's published legacy
    daily layout and tested on made-up rows only. Its column choices must be checked against the

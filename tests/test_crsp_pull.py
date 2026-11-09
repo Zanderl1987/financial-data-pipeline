@@ -349,3 +349,51 @@ def test_price_query_caps_holdout_dates_in_the_sql_itself():
     assert "%(end)s" not in sql and "end" not in params
     with pytest.raises(TypeError):
         cp.prices_sql(["10001; drop table x"], "1990-01-01", None)
+
+
+# ------------------------------------------------------------------ --tables-only
+
+class FakeDb:
+    """Plays a wrds.Connection for the table check. `tables` maps name -> column names."""
+
+    def __init__(self, tables, last_date="2024-12-31"):
+        self.tables, self.last_date, self.sql = tables, last_date, []
+
+    def list_tables(self, library):
+        assert library == "crsp"
+        return list(self.tables)
+
+    def describe_table(self, library, table):
+        return pd.DataFrame({"name": self.tables[table], "type": ["x"] * len(self.tables[table])})
+
+    def raw_sql(self, sql, **_):
+        self.sql.append(sql)
+        return pd.DataFrame({"last": [pd.Timestamp(self.last_date)]})
+
+
+def _legacy_tables(drop=()):
+    t = {"dsenames": list(cp.NAMES_COLUMNS), "dsedelist": list(cp.DELIST_COLUMNS), "dsf": list(cp.PRICE_COLUMNS)}
+    for table, col in drop:
+        t[table] = [c for c in t[table] if c != col]
+    return t
+
+
+def test_table_check_reports_a_complete_legacy_layout_and_its_last_date():
+    db = FakeDb({**_legacy_tables(), "dsf_v2": ["permno", "dlycaldt"]})
+    out = cp.describe_tables(db)
+    assert out["legacy_complete"] is True
+    assert out["present"] == {"dsenames": True, "dsedelist": True, "dsf": True,
+                              "dsf_v2": True, "stksecurityinfohist": False, "stkdelists": False}
+    assert out["missing_columns"] == {}
+    assert out["legacy_dsf_last_date"] == "2024-12-31"
+    assert set(out["columns"]) == {"dsenames", "dsedelist", "dsf", "dsf_v2"}
+    assert all("dsf" in s and "max(date)" in s for s in db.sql)
+
+
+def test_table_check_flags_a_missing_legacy_table_or_column_without_querying_prices():
+    db = FakeDb({k: v for k, v in _legacy_tables([("dsedelist", "dlret")]).items() if k != "dsf"})
+    out = cp.describe_tables(db)
+    assert out["legacy_complete"] is False
+    assert out["present"]["dsf"] is False
+    assert out["missing_columns"] == {"dsedelist": ["dlret"], "dsf": list(cp.PRICE_COLUMNS)}
+    assert out["legacy_dsf_last_date"] is None and db.sql == []
