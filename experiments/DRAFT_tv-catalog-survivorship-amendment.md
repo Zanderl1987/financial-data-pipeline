@@ -19,6 +19,15 @@ truth is unknown, the assumption must not favour the strategy.
    daily layout and tested on made-up rows only. Its column choices must be checked against the
    real tables (`--tables-only`) before any price is pulled. Its population rules are recorded
    under change 3 and its holdout rules under change 4.
+4. Speed changes, 2026-11-09, so the run takes days rather than weeks. They change how the work is
+   done, not what is computed: the engine skips a per-trade volatility figure that only position
+   sizing reads, and finds exits and the next entry by lookup instead of a bar-by-bar walk; the scorer
+   runs each (batch, strategy) job whole in one worker and saves it, so a crash resumes. A resume is
+   refused if any setting, the company list, the price file, the scoring code or a strategy's Pine
+   source differs. Checked: the old and new engine give identical trades on 6,000 random made-up
+   symbols and 600 portfolio cases; one and eight workers give identical results; and
+   `--stage3-check` with the new code reproduces the Stage 3 v2 registry rows of
+   `tradleware_hodl` and `high_activity_penny_stock` exactly. No CRSP data was used.
 
 ### YYYY-MM-DD — all tested strategies re-scored on a complete CRSP population before Stage 5
 

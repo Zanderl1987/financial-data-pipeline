@@ -8,6 +8,7 @@ time; realized trades only -- a position with no qualifying exit before the
 data ends is dropped and blocks later entries for that symbol.
 """
 
+import bisect
 import heapq
 
 import numpy as np
@@ -133,6 +134,7 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
         if vol_pct is not None:
             stop_pct = vol_pct
     peak = entry_price                      # for trailing stops
+    values = close.to_numpy()               # same numbers as close.iloc[j], without pandas per bar
 
     last_j = n - 1
     if risk.max_holding_days is not None:
@@ -143,7 +145,7 @@ def _find_exit(close: pd.Series, exit_cond, entry_i: int, entry_price: float,
     for j in range(entry_i + 1, last_j + 1):
         if exit_cond[j]:
             return j, "rule"
-        px = close.iloc[j]
+        px = values[j]
         if not np.isfinite(px) or px <= 0:
             continue
         if side == "long":
@@ -177,10 +179,17 @@ def _impact_arrays(close: pd.Series, volume: "pd.Series | None",
     return None, None
 
 
+def _exit_positions(long_exit, short_exit) -> "tuple[np.ndarray, np.ndarray]":
+    """Bar positions where each exit flag is set, for _next_candidate's lookup. A
+    function of the flags only, so callers compute it once per symbol."""
+    return np.flatnonzero(long_exit), np.flatnonzero(short_exit)
+
+
 def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     long_exit, short_exit, symbol: str, notional: float,
                     cfg, n: int, volume: "pd.Series | None" = None,
-                    allow_open: bool = False, impact=None) -> "dict | None":
+                    allow_open: bool = False, impact=None,
+                    exit_positions=None, entry_vol: bool = True) -> "dict | None":
     """
     First eligible candidate trade for one symbol, searching entry signals
     starting at `cursor` (an index into the signal array, not a date). The
@@ -205,6 +214,13 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
 
     `impact` is the symbol's precomputed _impact_arrays() pair; None computes
     it here (identical result, but rolling-window work per call).
+    `exit_positions` is the symbol's precomputed _exit_positions() pair; None
+    computes it here (identical result).
+
+    `entry_vol=False` leaves every row's entry_vol_pct as None instead of
+    computing it. Only position sizing (mode="inverse_vol") reads that figure,
+    so a caller that sizes every trade the same can skip it; nothing else in a
+    row changes.
     """
     risk = cfg.risk
     rate = ev_execution.round_trip_rate(cfg.costs)
@@ -215,14 +231,19 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
     if impact is None:
         impact = _impact_arrays(close, volume, notional, cfg, n)
     adv_impact_entry, adv_impact_exit = impact
+    if exit_positions is None:
+        exit_positions = _exit_positions(long_exit, short_exit)
+    values = close.to_numpy()               # same numbers as close.iloc[i], without pandas per bar
 
-    for sig_i, side in entry_positions:
-        if sig_i < cursor:
-            continue
+    # entry_positions is sorted by (bar, side) and (cursor,) sorts before
+    # every (cursor, side): start at the first signal at or after the cursor
+    # instead of stepping over all the earlier ones on every call.
+    for k in range(bisect.bisect_left(entry_positions, (cursor,)), len(entry_positions)):
+        sig_i, side = entry_positions[k]
         entry_i = sig_i + 1                 # ENGINE: next-close execution
         if entry_i >= n:
             return None
-        entry_price = close.iloc[entry_i]
+        entry_price = values[entry_i]
         if not np.isfinite(entry_price) or entry_price <= 0:
             continue                        # bad price: try the next signal
         exit_cond = long_exit if side == "long" else short_exit
@@ -230,11 +251,13 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
             exit_sig_i, reason = _find_exit(close, exit_cond, entry_i,
                                             float(entry_price), side, risk, n)
         else:
+            # First exit flag after the entry bar: the first set position
+            # past entry_i, found by binary search rather than a bar-by-bar walk.
             exit_sig_i, reason = None, None
-            for j in range(entry_i + 1, n):
-                if exit_cond[j]:
-                    exit_sig_i, reason = j, "rule"
-                    break
+            pos = exit_positions[0] if side == "long" else exit_positions[1]
+            at = int(np.searchsorted(pos, entry_i + 1))
+            if at < len(pos) and pos[at] < n:
+                exit_sig_i, reason = int(pos[at]), "rule"
         if exit_sig_i is None:
             if allow_open:
                 # The entry is still OPEN at the data edge. Default callers
@@ -247,14 +270,14 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
                     "entry_signal_date": close.index[sig_i],
                     "entry_date": close.index[entry_i],
                     "entry_price": float(entry_price),
-                    "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0),
+                    "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0) if entry_vol else None,
                 }
                 return {"sig_i": sig_i, "exit_i": n - 1, "row": row, "open": True}
             return None                     # still open: blocks the symbol
         exit_i = exit_sig_i + 1
         if exit_i >= n:
             return None
-        exit_price = close.iloc[exit_i]
+        exit_price = values[exit_i]
         if not np.isfinite(exit_price) or exit_price <= 0:
             return None
         pct = (exit_price / entry_price - 1.0) if side == "long" else \
@@ -292,7 +315,8 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
             # vol estimate to size against; reuses the exact same 14-day
             # mean-absolute-close-change calculation _find_exit uses for a
             # vol stop, mult=1.0 -> a plain (unscaled) trailing vol reading.
-            "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0),
+            # entry_vol=False skips it (None) for callers that never size by it.
+            "entry_vol_pct": _vol_stop_pct(close, entry_i, 1.0) if entry_vol else None,
         }
         return {"sig_i": sig_i, "exit_i": exit_i, "row": row}
     return None
@@ -300,7 +324,8 @@ def _next_candidate(entry_positions, cursor: int, close: pd.Series,
 
 def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit,
                     symbol: str, notional: float, *,
-                    config=None, volume=None, impact=None) -> "list[dict]":
+                    config=None, volume=None, impact=None,
+                    entry_vol: bool = True) -> "list[dict]":
     """
     Low-level engine on flag arrays (Tier-2 permutation re-enters here).
 
@@ -312,6 +337,10 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
 
     `impact`, when given, is an (entry, exit) pair of per-bar impact rates used in
     place of the ones computed from `volume`. None keeps the existing behavior.
+
+    `entry_vol=False` leaves entry_vol_pct as None in every row (see
+    _next_candidate); every other field is unchanged. For callers that never
+    size positions by trailing volatility, such as the permutation nulls.
 
     Short trades additionally accrue cfg.costs.borrow_fee_bps over their actual
     holding period (see the borrow-fee comment in _next_candidate) -- previously
@@ -336,12 +365,14 @@ def simulate_symbol(index, close, long_entry, long_exit, short_entry, short_exit
     )
     if impact is None:
         impact = _impact_arrays(close, volume, notional, cfg, n) if entry_positions else (None, None)
+    exit_positions = _exit_positions(long_exit, short_exit)
     rows = []
     cursor = 0
     while True:
         cand = _next_candidate(entry_positions, cursor, close, long_exit,
                                short_exit, symbol, notional, cfg, n, volume,
-                               impact=impact)
+                               impact=impact, exit_positions=exit_positions,
+                               entry_vol=entry_vol)
         if cand is None:
             break
         rows.append(cand["row"])
@@ -519,10 +550,13 @@ def _push_next(heap: list, sym: str, state: dict, cursor: int,
     if "impact" not in state:   # one per symbol per run: notional/cfg are fixed
         state["impact"] = _impact_arrays(state["close"], state.get("volume"),
                                          notional, cfg, state["n"])
+    if "exit_positions" not in state:
+        state["exit_positions"] = _exit_positions(state["long_exit"], state["short_exit"])
     cand = _next_candidate(state["entry_positions"], cursor, state["close"],
                            state["long_exit"], state["short_exit"], sym,
                            notional, cfg, state["n"], state.get("volume"),
-                           allow_open=allow_open, impact=state["impact"])
+                           allow_open=allow_open, impact=state["impact"],
+                           exit_positions=state["exit_positions"])
     if cand is not None:
         heapq.heappush(heap, (cand["row"]["entry_date"], sym, cand))
 

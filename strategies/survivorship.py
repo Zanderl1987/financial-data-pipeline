@@ -31,11 +31,14 @@ published publicly. CRSP may not be redistributed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import pickle
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import FIRST_COMPLETED, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -251,9 +254,11 @@ def _prepare(rule, df: pd.DataFrame, sym: str, ret, notional: float, floor, idx:
 
 
 def _simulate(item: _Item, le, lx, se, sx, notional: float, config) -> list:
+    """Every trade is the same size here, so entry_vol_pct (read only by volatility sizing)
+    is skipped: entry_vol=False changes no other field of any row."""
     if item.ret is None:
         return ev_trades.simulate_symbol(item.index, item.close, le, lx, se, sx, item.sym, notional,
-                                         config=config, volume=item.volume)
+                                         config=config, volume=item.volume, entry_vol=False)
     index2, close2, volume2, le2, lx2, se2, sx2 = _extend_for_death(
         item.index, item.close, item.volume, le, lx, se, sx, item.ret)
     impact = None
@@ -261,7 +266,7 @@ def _simulate(item: _Item, le, lx, se, sx, notional: float, config) -> list:
         extended = np.append(item.impact, [item.impact[-1], item.impact[-1]])
         impact = (extended, extended)
     rows = ev_trades.simulate_symbol(index2, close2, le2, lx2, se2, sx2, item.sym, notional,
-                                     config=config, volume=volume2, impact=impact)
+                                     config=config, volume=volume2, impact=impact, entry_vol=False)
     return _settle_short_closes(rows, item.index[-1], float(item.close[-1]), float(close2[-1]), notional)
 
 
@@ -720,48 +725,243 @@ def _assemble(groups: dict) -> dict:
     return out
 
 
+def _batch_pieces(panel: CrspPanel, sub: pd.DataFrame, first: int) -> dict:
+    """{(class, jump, scenario): (frames, terminals, positions)} for one batch of companies."""
+    frames = panel.load_batch(sub["permno"])
+    pieces: dict = defaultdict(lambda: ({}, {}, {}))
+    for pos, row in zip(range(first, first + len(sub)), sub.itertuples()):
+        frame = frames.get(int(row.permno))
+        if frame is None or frame.empty:
+            continue
+        view, _ret, died = panel.view_of(frame, 0.0, row)
+        if view.empty:
+            continue
+        sym = crsp_symbol(row.permno)
+        assumed = died and return_is_assumed(row.dlret, row.dlstcd)
+        cls = "assumed" if assumed else ("real_return" if died else "alive")
+        jump = has_big_jump(view)
+        for scenario in (SCENARIOS if assumed else (None,)):
+            ret = terminal_return(row.dlret, row.dlstcd, row.exchcd, scenario or PRIMARY_SCENARIO) if died else 0.0
+            fr, terms, idx = pieces[(cls, jump, scenario)]
+            fr[sym], terms[sym], idx[sym] = view, ret, pos
+    return dict(pieces)
+
+
+def _score_pieces(rule, pieces: dict, n_perm: int, seed: int, config, floor: float) -> dict:
+    """One strategy on one batch: {piece key: GroupTotals}. Always runs in one process, so
+    every null total is summed in the same order however many workers there are."""
+    return {key: evaluate_group(rule, fr, terms, n_perm=n_perm, seed=seed, config=config, entry_floor=floor,
+                                corrected=True, indices=idx)
+            for key, (fr, terms, idx) in pieces.items()}
+
+
+def catalog_rule(slug: str):
+    """A catalog strategy's rule, unfloored, as the re-score and Stage 5 score it. Module level
+    so a worker process can rebuild a rule that cannot be sent to it."""
+    from strategies import stage3
+    return stage3.load_rule_for(slug)[0]
+
+
+_WORKER_RULES: dict = {}
+
+
+def _rule_ref(slug: str, rule, rule_loader):
+    """What a worker is sent to get `rule`. Catalog rules are built from local functions and
+    cannot be sent, so they are rebuilt in the worker by name; the rebuilt rule must match."""
+    if rule_loader is not None:
+        rebuilt = rule_loader(slug)
+        if (rebuilt.name, rebuilt.side, rebuilt.notional) != (rule.name, rule.side, rule.notional):
+            raise ValueError(f"rule_loader({slug!r}) builds a different rule from the one given")
+        return ("by_name", slug, rule_loader)
+    try:
+        pickle.dumps(rule)
+    except (pickle.PicklingError, AttributeError, TypeError) as exc:
+        raise ValueError(f"the rule for {slug!r} cannot be sent to worker processes; "
+                         f"pass rule_loader= to rebuild it there") from exc
+    return rule
+
+
+def _job(task) -> dict:
+    ref, pieces, n_perm, seed, config, floor = task
+    if isinstance(ref, tuple) and ref[0] == "by_name":
+        _, slug, loader = ref
+        if (slug, loader) not in _WORKER_RULES:
+            _WORKER_RULES[(slug, loader)] = loader(slug)
+        rule = _WORKER_RULES[(slug, loader)]
+    else:
+        rule = ref
+    return _score_pieces(rule, pieces, n_perm, seed, config, floor)
+
+
+# --------------------------------------------------------------- saving finished work
+
+#: Everything the scoring reads besides data: a change to any of it refuses a resume.
+_SCORING_CODE = ("evaluation", "strategies", os.path.join("analytics", "technical.py"), "event_backtest.py")
+
+
+def _sha256_file(path: str, h=None):
+    h = hashlib.sha256() if h is None else h
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h
+
+
+def _code_fingerprint() -> str:
+    h = hashlib.sha256()
+    for entry in _SCORING_CODE:
+        path = os.path.join(_REPO_ROOT, entry)
+        files = [path] if os.path.isfile(path) else sorted(
+            os.path.join(d, f) for d, _sub, fs in os.walk(path) for f in fs if f.endswith(".py"))
+        for f in files:
+            h.update(os.path.relpath(f, _REPO_ROOT).replace(os.sep, "/").encode("utf-8"))
+            _sha256_file(f, h)
+    h.update(f"numpy {np.__version__} pandas {pd.__version__}".encode("utf-8"))
+    return h.hexdigest()
+
+
+def _rule_fingerprint(slug: str) -> str:
+    """The strategy's Pine source, when the rule is built from one."""
+    from strategies.stage3 import TV_SCRIPTS_DIR
+    path = os.path.join(_REPO_ROOT, TV_SCRIPTS_DIR, f"{slug}.pine")
+    return _sha256_file(path).hexdigest() if os.path.isfile(path) else ""
+
+
+def _run_fingerprint(panel: CrspPanel, *, n_perm: int, seed: int, batch: int, floor: float, config) -> dict:
+    companies = pd.util.hash_pandas_object(panel.companies, index=False).to_numpy()
+    return {"n_perm": int(n_perm), "seed": int(seed), "batch": int(batch), "floor": float(floor),
+            "config": ev_execution.config_hash(config), "view": panel.view, "start": str(panel.start),
+            "companies": hashlib.sha256(companies.tobytes()).hexdigest(),
+            "prices": _sha256_file(panel.prices_path).hexdigest(), "code": _code_fingerprint()}
+
+
+class _Checkpoint:
+    """One file per finished (batch, strategy) job, plus the settings it was made with. A
+    resume with any different setting, company list, price file or code is refused, so
+    finished work is never mixed with work done another way."""
+
+    def __init__(self, path: str, fingerprint: dict):
+        parts = os.path.normpath(os.path.abspath(path)).lower().split(os.sep)
+        if "curated" in parts:
+            raise ValueError(f"refusing to write CRSP-derived results under curated/: {path}")
+        os.makedirs(path, exist_ok=True)
+        self.path = path
+        meta = os.path.join(path, "run.json")
+        if os.path.exists(meta):
+            with open(meta, encoding="utf-8") as fh:
+                saved = json.load(fh)
+            changed = sorted(k for k in set(saved) | set(fingerprint) if saved.get(k) != fingerprint.get(k))
+            if changed:
+                raise RuntimeError(f"checkpoint {path} was made with different {', '.join(changed)}; "
+                                   f"use a new checkpoint directory")
+        else:
+            self._write(meta, json.dumps(fingerprint, indent=2).encode("utf-8"))
+
+    @staticmethod
+    def _write(path: str, data: bytes) -> None:
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+
+    def _file(self, b: int, slug: str) -> str:
+        return os.path.join(self.path, f"b{b:07d}__{slug}.pkl")
+
+    def get(self, b: int, slug: str):
+        path = self._file(b, slug)
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as fh:
+            saved = pickle.load(fh)
+        if saved["rule"] != _rule_fingerprint(slug):
+            raise RuntimeError(f"checkpoint {self.path} was made with a different rule source for {slug}")
+        return saved["groups"]
+
+    def put(self, b: int, slug: str, groups: dict) -> None:
+        self._write(self._file(b, slug), pickle.dumps({"rule": _rule_fingerprint(slug), "groups": groups}))
+
+
+# --------------------------------------------------------------- the whole panel
+
 def score_panel(rules: dict, panel: CrspPanel, *, n_perm: int = N_PERM, seed: int = SEED, config,
                 executor=None, n_workers: int = 2, batch: int = 200, log=print,
-                floor: float = PRICE_FLOOR) -> dict:
+                floor: float = PRICE_FLOOR, checkpoint: "str | None" = None, rule_loader=None) -> dict:
     """{slug: results} over the whole panel. A company's position in the sorted list seeds its
     offsets, so batch size and the class pieces do not change any number. Rules are unfloored:
-    the floor is applied here, on the real price."""
+    the floor is applied here, on the real price.
+
+    The work is split into one job per (batch, strategy), each run whole in one process, so
+    the number of workers changes no number at all. With `checkpoint` each finished job is
+    saved there, and a rerun with the same directory skips it. With an executor, a rule that
+    cannot be sent to a worker needs `rule_loader(slug)` to rebuild it (catalog_rule does)."""
     companies = panel.companies
-    groups = {slug: defaultdict(list) for slug in rules}
+    store = None if checkpoint is None else _Checkpoint(
+        checkpoint, _run_fingerprint(panel, n_perm=n_perm, seed=seed, batch=batch, floor=floor, config=config))
+    refs = None if executor is None else {s: _rule_ref(s, r, rule_loader) for s, r in rules.items()}
+    starts = list(range(0, len(companies), batch))
+    done = {}
+    if store is not None:
+        for b in starts:
+            for slug in rules:
+                saved = store.get(b, slug)
+                if saved is not None:
+                    done[(b, slug)] = saved
+    total, resumed = len(starts) * len(rules), len(done)
+    if resumed:
+        log(f"resuming: {resumed}/{total} jobs already saved in {checkpoint}")
+    pending: dict = {}
     t0 = time.time()
-    for b in range(0, len(companies), batch):
-        sub = companies.iloc[b:b + batch]
-        frames = panel.load_batch(sub["permno"])
-        pieces: dict = defaultdict(lambda: ({}, {}, {}))
-        for pos, row in zip(range(b, b + len(sub)), sub.itertuples()):
-            frame = frames.get(int(row.permno))
-            if frame is None or frame.empty:
-                continue
-            view, _ret, died = panel.view_of(frame, 0.0, row)
-            if view.empty:
-                continue
-            sym = crsp_symbol(row.permno)
-            assumed = died and return_is_assumed(row.dlret, row.dlstcd)
-            cls = "assumed" if assumed else ("real_return" if died else "alive")
-            jump = has_big_jump(view)
-            for scenario in (SCENARIOS if assumed else (None,)):
-                ret = terminal_return(row.dlret, row.dlstcd, row.exchcd, scenario or PRIMARY_SCENARIO) if died else 0.0
-                fr, terms, idx = pieces[(cls, jump, scenario)]
-                fr[sym], terms[sym], idx[sym] = view, ret, pos
-        for slug, rule in rules.items():
-            for key, (fr, terms, idx) in pieces.items():
-                groups[slug][key].append(evaluate_group(
-                    rule, fr, terms, n_perm=n_perm, seed=seed, config=config, entry_floor=floor,
-                    executor=executor, n_workers=n_workers, corrected=True, indices=idx))
-        log(f"{min(b + batch, len(companies))}/{len(companies)} companies {time.time() - t0:.0f}s")
+
+    def finish(key, groups) -> None:
+        done[key] = groups
+        if store is not None:
+            store.put(key[0], key[1], groups)
+        new = len(done) - resumed
+        left = total - len(done)
+        log(f"{len(done)}/{total} jobs (batch {key[0] // batch + 1}/{len(starts)}, {key[1]}) "
+            f"{time.time() - t0:.0f}s, about {(time.time() - t0) / new * left / 3600:.1f}h left")
+
+    def drain(limit: int) -> None:
+        try:
+            while len(pending) > limit:
+                finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for fut in finished:
+                    finish(pending.pop(fut), fut.result())
+        except BaseException:
+            for fut in pending:
+                fut.cancel()
+            raise
+
+    for b in starts:
+        todo = [s for s in rules if (b, s) not in done]
+        if not todo:
+            continue
+        pieces = _batch_pieces(panel, companies.iloc[b:b + batch], b)
+        for slug in todo:
+            if executor is None:
+                finish((b, slug), _score_pieces(rules[slug], pieces, n_perm, seed, config, floor))
+            else:
+                task = (refs[slug], pieces, n_perm, seed, config, floor)
+                pending[executor.submit(_job, task)] = (b, slug)
+        drain(2 * n_workers)          # keep every worker busy while the next batch loads
+    drain(0)
+
+    groups = {slug: defaultdict(list) for slug in rules}
+    for b in starts:
+        for slug in rules:
+            for key, g in done[(b, slug)].items():
+                groups[slug][key].append(g)
     return {slug: _assemble(g) for slug, g in groups.items()}
 
 
 def run_rescore(rules: dict, panel: CrspPanel, *, required, stage4_passed, n_perm: int = N_PERM, seed: int = SEED,
-                config, executor=None, n_workers: int = 2, log=print) -> dict:
+                config, executor=None, n_workers: int = 2, log=print, checkpoint: "str | None" = None,
+                rule_loader=None) -> dict:
     """Score and, only if the whole family is there, decide."""
     results = score_panel(rules, panel, n_perm=n_perm, seed=seed, config=config, executor=executor,
-                          n_workers=n_workers, log=log)
+                          n_workers=n_workers, log=log, checkpoint=checkpoint, rule_loader=rule_loader)
     verdict = None if set(required) - set(results) else family_verdict(results, required, stage4_passed)
     return {"results": results, "verdict": verdict, "panel": panel.report}
 
@@ -855,6 +1055,8 @@ def main(argv=None) -> int:
     ap.add_argument("--check-data", type=int, metavar="N",
                     help="compare N matched companies with Yahoo and stop; scores nothing")
     ap.add_argument("--write-registry", action="store_true", help="log results; needs the whole family")
+    ap.add_argument("--checkpoint", help="directory that saves each finished job, so a rerun resumes; "
+                                         "default <out>.checkpoint")
     args = ap.parse_args(argv)
 
     if args.stage3_check:
@@ -878,11 +1080,12 @@ def main(argv=None) -> int:
             config = crsp_config()
             required = tested_strategies(ev_registry.load())
             slugs = args.slugs.split(",") if args.slugs else required
-            rules = {s: stage3.load_rule_for(s)[0] for s in slugs}
+            rules = {s: catalog_rule(s) for s in slugs}
             with ProcessPoolExecutor(max_workers=args.workers) as executor:
                 out = run_rescore(rules, panel, required=required, stage4_passed=set(stage4_survivors()),
                                   n_perm=args.n_perm or N_PERM, seed=args.seed, config=config,
-                                  executor=executor, n_workers=args.workers)
+                                  executor=executor, n_workers=args.workers, rule_loader=catalog_rule,
+                                  checkpoint=args.checkpoint or f"{args.out}.checkpoint")
             if args.write_registry:
                 if out["verdict"] is None:
                     raise SystemExit("--write-registry needs the whole family; nothing was written")

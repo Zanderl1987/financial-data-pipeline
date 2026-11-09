@@ -155,7 +155,7 @@ def run_holdout_for(slug: str, cache, n_perm: int = N_PERM, seed: int = SEED, wo
     cfg = sv.crsp_config()
     with ProcessPoolExecutor(max_workers=workers) as executor:
         result = sv.score_panel({slug: rule}, cache, n_perm=n_perm, seed=seed, config=cfg,
-                                executor=executor, n_workers=workers)[slug]
+                                executor=executor, n_workers=workers, rule_loader=sv.catalog_rule)[slug]
 
     primary, wipeout = result[sv.PRIMARY_SCENARIO], result[sv.WIPEOUT_SCENARIO]
     run_ts = datetime.now(timezone.utc).isoformat()

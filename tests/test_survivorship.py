@@ -96,6 +96,38 @@ def test_engine_default_is_unchanged_when_no_impact_is_given():
     assert plain == given
 
 
+def _busy_flags(n, seed):
+    rng = np.random.default_rng(seed)
+    return [rng.random(n) < p for p in (0.08, 0.10, 0.06, 0.12)]
+
+
+def test_engine_can_skip_the_volatility_figure_and_nothing_else_changes():
+    """The figure only sizes positions in other modes; skipping it must not move a trade."""
+    n = 400
+    idx = pd.bdate_range("2010-01-04", periods=n)
+    close = _wiggle(n, seed=3)
+    le, lx, se, sx = _busy_flags(n, seed=4)
+    cfg = _config(fee=270.0)
+    full = ev_trades.simulate_symbol(idx, close, le, lx, se, sx, "X", NOTIONAL, config=cfg)
+    lean = ev_trades.simulate_symbol(idx, close, le, lx, se, sx, "X", NOTIONAL, config=cfg, entry_vol=False)
+    assert len(full) > 10 and {r["side"] for r in full} == {"long", "short"}
+    assert all(r["entry_vol_pct"] is None for r in lean)
+    assert any(r["entry_vol_pct"] is not None for r in full)
+    strip = lambda rows: [{k: v for k, v in r.items() if k != "entry_vol_pct"} for r in rows]  # noqa: E731
+    assert strip(full) == strip(lean)
+
+
+def test_scorer_never_computes_the_unused_volatility_figure(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("the scorer computed entry_vol_pct")
+    monkeypatch.setattr(ev_trades, "_vol_stop_pct", boom)
+    frames = {f"S{i}": _cframe(_wiggle(200, seed=i)) for i in range(3)}
+    g = _cgroup(_dip_rule(), frames, {"S0": -0.5, "S1": 0.0, "S2": 0.0}, n_perm=5)
+    assert g.obs_n > 0
+    legacy = _legacy_group(with_price_floor(_dip_rule()), frames, 5, 0, cost_config(10.0))  # the Stage 3 path
+    assert legacy.obs_n > 0
+
+
 # ------------------------------------------------------------ closing positions at the end of a company
 
 def test_open_long_is_dropped_by_the_plain_engine_but_closed_at_the_delisting_value():
@@ -806,6 +838,145 @@ def test_score_panel_applies_the_holdout_view(tmp_path):
     _raw_company(h, _wiggle(330), start="2017-06-01").to_parquet(root / "holdout_prices.parquet")
     out = _score(sv.load_holdout_panel({}, root=str(root)))
     assert out["classes"]["real_return"]["n_symbols"] == 1
+
+
+# ------------------------------------------------------------ whole jobs per worker, saved as they finish
+
+def _two_rules():
+    return {"dip": _dip_rule(), "dip_short": TradeRule(name="dip_short", entries=_dip, exits=_dip_exit, side="short")}
+
+
+def _score_all(panel, **kw):
+    kw.setdefault("n_perm", 12)
+    return sv.score_panel(_two_rules(), panel, seed=0, config=_config(fee=270.0), batch=2,
+                          log=lambda *_: None, **kw)
+
+
+def test_workers_give_exactly_the_serial_answer(crsp_root):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    serial = _score_all(panel)
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        pooled = _score_all(panel, executor=ex, n_workers=2)
+    assert pooled == serial
+
+
+def test_the_number_of_workers_does_not_change_any_number(crsp_root):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        two = _score_all(panel, executor=ex, n_workers=2)
+    with ProcessPoolExecutor(max_workers=3) as ex:
+        three = _score_all(panel, executor=ex, n_workers=3)
+    assert two == three
+
+
+def _named_dip(slug):
+    return _two_rules()[slug]
+
+
+def test_a_rule_workers_cannot_receive_needs_a_loader(crsp_root):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    local = {"dip": with_price_floor(_dip_rule(), floor=0.0)}      # wraps a lambda
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        with pytest.raises(ValueError, match="rule_loader"):
+            sv.score_panel(local, panel, n_perm=3, seed=0, config=_config(), executor=ex, log=lambda *_: None)
+
+
+def test_workers_rebuild_a_rule_by_name_with_the_loader(crsp_root):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    serial = _score_all(panel)
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        loaded = _score_all(panel, executor=ex, n_workers=2, rule_loader=_named_dip)
+    assert loaded == serial
+
+
+def test_a_loader_that_builds_a_different_rule_is_refused(crsp_root):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        with pytest.raises(ValueError, match="different rule"):
+            sv.score_panel({"dip_short": _dip_rule()}, panel, n_perm=3, seed=0, config=_config(), executor=ex,
+                           rule_loader=_named_dip, log=lambda *_: None)
+
+
+def test_a_checkpointed_run_gives_the_same_answer(crsp_root, tmp_path):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    assert _score_all(panel, checkpoint=str(tmp_path / "ck")) == _score_all(panel)
+
+
+def test_a_finished_run_is_read_back_without_touching_prices(crsp_root, tmp_path, monkeypatch):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    first = _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    monkeypatch.setattr(sv.CrspPanel, "load_batch", lambda *a, **k: pytest.fail("prices were read again"))
+    assert _score_all(panel, checkpoint=str(tmp_path / "ck")) == first
+
+
+def test_a_crashed_run_resumes_and_only_redoes_unfinished_work(crsp_root, tmp_path, monkeypatch):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    whole = _score_all(panel)
+    real = sv.evaluate_group
+    calls = {"n": 0}
+
+    def crash_later(*a, **k):
+        calls["n"] += 1
+        if calls["n"] > 5:
+            raise RuntimeError("power cut")
+        return real(*a, **k)
+
+    monkeypatch.setattr(sv, "evaluate_group", crash_later)
+    with pytest.raises(RuntimeError, match="power cut"):
+        _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    saved = len(os.listdir(tmp_path / "ck"))
+    assert saved >= 2                                           # settings plus at least one finished job
+
+    redone = []
+    monkeypatch.setattr(sv, "evaluate_group", lambda *a, **k: redone.append(1) or real(*a, **k))
+    assert _score_all(panel, checkpoint=str(tmp_path / "ck")) == whole
+    fresh = []
+    monkeypatch.setattr(sv, "evaluate_group", lambda *a, **k: fresh.append(1) or real(*a, **k))
+    _score_all(panel)
+    assert 0 < len(redone) < len(fresh)
+
+
+@pytest.mark.parametrize("change", [{"n_perm": 13}, {"seed": 1}, {"batch": 3}, {"config": "fee"}])
+def test_a_checkpoint_from_different_settings_is_refused(crsp_root, tmp_path, change):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    kw = {"n_perm": 12, "seed": 0, "batch": 2, "config": _config(fee=270.0)}
+    kw.update({k: (_config(fee=100.0) if v == "fee" else v) for k, v in change.items()})
+    with pytest.raises(RuntimeError, match="different"):
+        sv.score_panel(_two_rules(), panel, log=lambda *_: None, checkpoint=str(tmp_path / "ck"), **kw)
+
+
+def test_a_checkpoint_from_different_companies_is_refused(crsp_root, tmp_path):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    panel.companies = panel.companies.iloc[1:].reset_index(drop=True)
+    with pytest.raises(RuntimeError, match="different"):
+        _score_all(panel, checkpoint=str(tmp_path / "ck"))
+
+
+def test_a_checkpoint_from_different_code_is_refused(crsp_root, tmp_path, monkeypatch):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    monkeypatch.setattr(sv, "_code_fingerprint", lambda: "edited")
+    with pytest.raises(RuntimeError, match="different"):
+        _score_all(panel, checkpoint=str(tmp_path / "ck"))
+
+
+def test_a_checkpoint_may_cover_more_strategies_than_are_asked_for(crsp_root, tmp_path):
+    """Scoring one more strategy later must not redo or refuse the finished ones."""
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    one = sv.score_panel({"dip": _dip_rule()}, panel, n_perm=12, seed=0, config=_config(fee=270.0), batch=2,
+                         log=lambda *_: None, checkpoint=str(tmp_path / "ck"))
+    both = _score_all(panel, checkpoint=str(tmp_path / "ck"))
+    assert both["dip"] == one["dip"] == _score_all(panel)["dip"]
+
+
+def test_a_checkpoint_is_never_written_where_data_is_published(crsp_root, tmp_path):
+    panel = sv.load_dev_panel({}, root=crsp_root)
+    target = tmp_path / "storage" / "curated" / "ck"
+    with pytest.raises(ValueError, match="curated"):
+        _score_all(panel, checkpoint=str(target))
+    assert not target.exists()
 
 
 # ------------------------------------------------------------ the pass rule (change 2)
