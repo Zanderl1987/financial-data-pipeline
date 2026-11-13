@@ -14,9 +14,18 @@ Client construction) so a pipeline can fail in milliseconds with the real
 reason and the exact command to fix it.
 
 Usage:
-    from schwab_auth import preflight
+    from schwab_auth import preflight, refuse_interactive_auth
     preflight()                     # exits 2 if re-auth is needed
-    client = schwabdev.Client(...)
+    client = schwabdev.Client(..., call_on_auth=refuse_interactive_auth)
+
+Both halves are needed. On 2026-10-17 price_history and sector_etf had neither:
+with the token lapsed, each one opened its own Schwab login tab and blocked on
+input() for its full 10-minute timeout, holding tokens.db locked. A login in
+one of those tabs could never stick -- the redirect goes to 127.0.0.1:8182,
+where only scripts/schwab_reauth.py listens, and a scheduled run has no stdin
+to paste into -- so every popup asked for a login and none of them worked.
+The lock also made the next pipelines' preflight report "unreadable".
+Re-auth now happens in exactly one place: scripts/schwab_reauth.py.
 """
 
 import datetime
@@ -31,6 +40,11 @@ REFRESH_TOKEN_LIFETIME = datetime.timedelta(days=7)
 # Warn (but still run) once a token is inside this much of expiry, so a run
 # that is about to be the last good one says so while it can still succeed.
 EXPIRY_WARNING_WINDOW = datetime.timedelta(hours=24)
+
+# schwabdev forces an interactive re-auth once the refresh token has less than
+# this left (tokens.py: refresh_threshold = 3630s), not at expiry. A token in
+# that last hour is as unusable to a pipeline as an expired one.
+SCHWABDEV_REAUTH_MARGIN = datetime.timedelta(seconds=3630)
 
 # This banner is the last thing anyone reads before renewing a token, so it has
 # to name the script that verifies its own work. It used to print a bare
@@ -95,6 +109,12 @@ def check_refresh_token(path: str | None = None, now: datetime.datetime | None =
     if remaining <= datetime.timedelta(0):
         result["state"] = "expired"
         result["detail"] = f"Refresh token expired {_ago(-remaining)} ago (issued {issued:%Y-%m-%d %H:%M} UTC)."
+    elif remaining < SCHWABDEV_REAUTH_MARGIN:
+        result["state"] = "expired"
+        result["detail"] = (
+            f"Refresh token expires in {_ago(remaining)} -- inside schwabdev's "
+            f"60-minute re-auth window, so any Client would demand a login now."
+        )
     elif remaining <= EXPIRY_WARNING_WINDOW:
         result["state"] = "expiring"
         result["detail"] = f"Refresh token expires in {_ago(remaining)} ({expires:%Y-%m-%d %H:%M} UTC)."
@@ -128,18 +148,34 @@ def preflight(
     status = check_refresh_token(path, now=now)
 
     if status["state"] in ("expired", "missing", "unreadable"):
-        print("SCHWAB AUTH REQUIRED -- skipping run (no data fetched).", file=sys.stderr)
-        print(f"  {status['detail']}", file=sys.stderr)
-        print("  Schwab re-auth is interactive and must be run by hand in a real terminal;", file=sys.stderr)
-        print("  the auth code in the callback URL expires about 30 seconds after login.", file=sys.stderr)
-        print(f"  Run from {os.getcwd()}:", file=sys.stderr)
-        print(f"    {REAUTH_COMMAND}", file=sys.stderr)
-        sys.exit(exit_code)
+        _exit_for_reauth(status["detail"], exit_code)
 
     if status["state"] == "expiring":
         print(f"WARNING: {status['detail']} Re-auth soon or the next run fails.")
 
     return status
+
+
+def refuse_interactive_auth(auth_url: str) -> str:
+    """
+    schwabdev `call_on_auth` hook for pipelines: exit instead of logging in.
+
+    Without it, schwabdev opens a browser tab and blocks on input() whenever it
+    decides the refresh token needs renewing -- including mid-run, if a long
+    pull crosses into the final hour. Pipelines must never do that; re-auth
+    belongs to scripts/schwab_reauth.py, once, for every pipeline.
+    """
+    _exit_for_reauth("schwabdev asked for a new login (refresh token expired or about to).", 2)
+
+
+def _exit_for_reauth(detail: str, exit_code: int) -> None:
+    print("SCHWAB AUTH REQUIRED -- skipping run (no data fetched).", file=sys.stderr)
+    print(f"  {detail}", file=sys.stderr)
+    print("  Schwab re-auth is interactive and must be run by hand in a real terminal;", file=sys.stderr)
+    print("  one login there renews the token for every Schwab pipeline for 7 days.", file=sys.stderr)
+    print(f"  Run from {os.getcwd()}:", file=sys.stderr)
+    print(f"    {REAUTH_COMMAND}", file=sys.stderr)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

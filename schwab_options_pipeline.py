@@ -42,7 +42,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import schwabdev
-from schwab_auth import preflight
+from schwab_auth import preflight, refuse_interactive_auth
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
 from symbol_universe import get_broad_universe
@@ -276,6 +276,7 @@ def main():
         app_secret=APP_SECRET,
         callback_url=CALLBACK_URL,
         tokens_db=TOKEN_PATH,
+        call_on_auth=refuse_interactive_auth,
         timeout=CLIENT_TIMEOUT,
     )
 

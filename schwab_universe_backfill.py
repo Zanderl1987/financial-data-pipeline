@@ -39,6 +39,7 @@ from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
 from price_history_pipeline import fetch_symbol
+from schwab_auth import preflight, refuse_interactive_auth
 
 load_dotenv()
 
@@ -96,9 +97,11 @@ def main(chunk_size=DEFAULT_CHUNK_SIZE, universe_file=UNIVERSE_FILE,
         print("Nothing left to do.")
         return
 
+    preflight()
     client = schwabdev.Client(
         app_key=API_KEY, app_secret=APP_SECRET,
         callback_url=CALLBACK_URL, tokens_db=TOKEN_PATH,
+        call_on_auth=refuse_interactive_auth,
     )
 
     now = datetime.datetime.utcnow()

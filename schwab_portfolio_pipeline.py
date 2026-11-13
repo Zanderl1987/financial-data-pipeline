@@ -44,6 +44,7 @@ import schwabdev
 from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
+from schwab_auth import preflight, refuse_interactive_auth
 
 load_dotenv()
 
@@ -172,11 +173,13 @@ def fetch_transactions(client, account_hash, account, start_dt, end_dt, fetched_
 def main(days=30, backfill=False, years=10):
     for d in (POSITIONS_DIR, TRANSACTIONS_DIR):
         os.makedirs(d, exist_ok=True)
+    preflight()
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,
         callback_url=CALLBACK_URL,
         tokens_db=TOKEN_PATH,
+        call_on_auth=refuse_interactive_auth,
     )
 
     today = datetime.date.today().isoformat()

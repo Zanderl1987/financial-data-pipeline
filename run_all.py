@@ -1296,12 +1296,13 @@ def run_pipeline(
         return RunResult(spec.name, "DRY RUN", 0.0, cmd_str)
 
     t0 = time.time()
-    # Schwab pipelines need a live terminal for interactive OAuth re-auth (~30s
-    # window) -- capturing their output would hide the prompt until exit/timeout.
-    interactive = "SCHWAB_API_KEY" in spec.requires_env
+    # Schwab pipelines used to run uncaptured so schwabdev's login prompt could
+    # reach a terminal. They no longer prompt (schwab_auth.refuse_interactive_auth;
+    # re-auth is scripts/schwab_reauth.py only), so capture them like the rest and
+    # keep the "SCHWAB AUTH REQUIRED" banner in the failure log.
     try:
         result = subprocess.run(
-            cmd, timeout=spec.timeout, capture_output=not interactive,
+            cmd, timeout=spec.timeout, capture_output=True,
             text=True, encoding="utf-8",
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
@@ -1311,9 +1312,7 @@ def run_pipeline(
             print(output, end="" if output.endswith("\n") else "\n")
         if result.returncode != 0:
             log.error("%s failed: exit %d", spec.name, result.returncode)
-            fail_path = log_pipeline_failure(
-                spec.name,
-                output or "(interactive pipeline -- output streamed to console, not captured)")
+            fail_path = log_pipeline_failure(spec.name, output or "(no output)")
             return RunResult(spec.name, "FAIL", duration,
                               f"exit {result.returncode} -- log: {fail_path}")
     except subprocess.TimeoutExpired as exc:

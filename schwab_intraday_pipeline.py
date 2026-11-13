@@ -32,7 +32,7 @@ import datetime
 import argparse
 import pandas as pd
 import schwabdev
-from schwab_auth import preflight
+from schwab_auth import preflight, refuse_interactive_auth
 from dotenv import load_dotenv
 
 from storage_utils import write_partitioned
@@ -117,6 +117,7 @@ def main(freq=5, days=5, backfill=False, symbols=None):
         app_secret=APP_SECRET,
         callback_url=CALLBACK_URL,
         tokens_db=TOKEN_PATH,
+        call_on_auth=refuse_interactive_auth,
     )
 
     if backfill:

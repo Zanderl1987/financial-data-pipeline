@@ -25,6 +25,7 @@ import pandas as pd
 import schwabdev
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
+from schwab_auth import preflight, refuse_interactive_auth
 
 load_dotenv()
 
@@ -115,11 +116,13 @@ def fetch_etf(client, symbol: str, sector: str, start_ms: int, end_ms: int) -> p
 def main(backfill: bool = False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    preflight()
     client = schwabdev.Client(
         app_key=API_KEY,
         app_secret=APP_SECRET,
         callback_url=CALLBACK_URL,
         tokens_db=TOKEN_PATH,
+        call_on_auth=refuse_interactive_auth,
     )
 
     end_dt   = datetime.datetime.utcnow()
