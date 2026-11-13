@@ -5,8 +5,9 @@ Global X Holdings Pipeline:
   Writes to Iceberg table: constituents.fund_holdings with source='globalx:<TICKER>'
 
   Data source: Global X official daily holdings CSV (keyless, no auth)
-  URL pattern: https://assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{YYYYMMDD}.csv
-  Requires Referer header. Rate limited - use delays between requests.
+  URL pattern: https://assets.globalxetfs.com/funds/holdings/{ticker_lower}_full-holdings_{YYYYMMDD}.csv
+  (ticker LOWERCASE -- uppercase 404s). Rate limited - use delays between requests.
+  Do not fetch www.globalxetfs.com pages: Vercel bot checkpoint since ~2026-11.
 
   Catalog:  storage/iceberg/constituents_catalog.db
   Warehouse: storage/iceberg/constituents/
@@ -53,7 +54,9 @@ SNAPSHOT_DATE = date.today()
 FETCHED_AT = datetime.now(timezone.utc)
 
 # Global X gap tickers
-GLOBALX_TICKERS = ["AIQ", "COPX", "DIV", "QYLD", "RYLD", "XYLD"]
+# BOTZ, LIT added 2026-11-13 (moved from etf_holdings_pipeline.py when
+# securitiesdb.com died).
+GLOBALX_TICKERS = ["AIQ", "BOTZ", "COPX", "DIV", "LIT", "QYLD", "RYLD", "XYLD"]
 
 # Non-security filter patterns
 NON_SECURITY_NAME_RE = re.compile(
@@ -83,20 +86,18 @@ def fetch_globalx_holdings(ticker: str, date_str: str) -> pd.DataFrame | None:
     The CDN requires visiting the fund page first to establish a session
     before the holdings CSV can be downloaded.
     """
-    fund_page = f"https://www.globalxetfs.com/funds/{ticker.lower()}/"
-    csv_url = f"https://assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{date_str}.csv"
+    # The CDN filename is LOWERCASE (botz_full-holdings_YYYYMMDD.csv); the
+    # uppercase form this pipeline used 404s, so it never wrote a single row.
+    # The fund-page "session" visit was dropped 2026-11-13: www.globalxetfs.com
+    # now sits behind a Vercel bot checkpoint (429), and the S3 CDN serves the
+    # file without it.
+    csv_url = f"https://assets.globalxetfs.com/funds/holdings/{ticker.lower()}_full-holdings_{date_str}.csv"
     log.info(f"[{ticker}] Fetching from Global X ({date_str})...")
-    
+
     session = requests.Session()
     session.headers.update(HEADERS)
-    
+
     try:
-        # First visit the fund page to establish session
-        r1 = session.get(fund_page, timeout=15)
-        if r1.status_code != 200:
-            log.warning(f"[{ticker}] Fund page returned {r1.status_code}")
-        
-        # Then fetch the CSV
         r2 = session.get(csv_url, timeout=30)
         if r2.status_code == 200:
             # Skip first 2 rows (fund name + "Fund Holdings Data as of...")
@@ -134,7 +135,8 @@ def parse_globalx_holdings(ticker: str, raw_df: pd.DataFrame) -> pd.DataFrame:
     before = len(raw_df)
     if name_col:
         raw_df = raw_df[~raw_df[name_col].astype(str).str.contains(
-            NON_SECURITY_NAME_RE, case=False, na=False
+            # compiled with IGNORECASE; case= alongside a compiled pattern raises
+            NON_SECURITY_NAME_RE, na=False
         )]
     # Also filter rows where ticker is empty or cash-like
     if ticker_col:
@@ -343,6 +345,10 @@ def main():
 
     write_to_iceberg(frames)
     log.info("Done.")
+    if not frames:
+        # Exit non-zero so run_all reports FAIL. Exiting 0 here hid this
+        # pipeline writing nothing for weeks (fixed 2026-11-13).
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

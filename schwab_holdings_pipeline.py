@@ -53,6 +53,17 @@ FETCHED_AT = datetime.now(timezone.utc)
 SCHWAB_FUNDS = {
     "SCHM": "Schwab U.S. Mid-Cap ETF",
     "SCHY": "Schwab International Dividend Equity ETF",
+    # 2026-11-13: moved from etf_holdings_pipeline.py when securitiesdb.com died;
+    # all nine verified live through fetch/parse below.
+    "SCHA": "Schwab U.S. Small-Cap ETF",
+    "SCHB": "Schwab U.S. Broad Market ETF",
+    "SCHD": "Schwab U.S. Dividend Equity ETF",
+    "SCHE": "Schwab Emerging Markets Equity ETF",
+    "SCHF": "Schwab International Equity ETF",
+    "SCHG": "Schwab U.S. Large-Cap Growth ETF",
+    "SCHH": "Schwab U.S. REIT ETF",
+    "SCHV": "Schwab U.S. Large-Cap Value ETF",
+    "SCHX": "Schwab U.S. Large-Cap ETF",
 }
 
 PRODUCT_PAGE_URL = "https://www.schwabassetmanagement.com/products/{ticker_lower}"

@@ -48,8 +48,14 @@ CATALOG_DB = ICEBERG_WAREHOUSE / "constituents_catalog.db"
 SNAPSHOT_DATE = date.today()
 FETCHED_AT = datetime.now(timezone.utc)
 
-# VanEck gap tickers
-VANECK_TICKERS = ["MOO", "OIH"]
+# VanEck gap tickers -> fund name. SMH added 2026-11-13 (moved from
+# etf_holdings_pipeline.py when securitiesdb.com died).
+VANECK_FUNDS = {
+    "MOO": "VanEck Agribusiness ETF",
+    "OIH": "VanEck Oil Services ETF",
+    "SMH": "VanEck Semiconductor ETF",
+}
+VANECK_TICKERS = list(VANECK_FUNDS)
 
 # Non-security filter patterns
 NON_SECURITY_NAME_RE = re.compile(
@@ -66,7 +72,22 @@ def fetch_vaneck_holdings(ticker: str) -> pd.DataFrame:
     r = requests.get(url, headers=HEADERS, timeout=60, allow_redirects=True)
     r.raise_for_status()
     
-    df = pd.read_excel(BytesIO(r.content), header=1)  # Row 1 is header (row 0 is title)
+    # Locate the header row rather than hardcoding it: it moved from row 1 to
+    # row 2 (a blank row was added under the title) by 2026-10, which turned
+    # every column into "Unnamed: N" and failed every run silently.
+    raw = pd.read_excel(BytesIO(r.content), header=None)
+    header_idx = next(
+        (i for i in range(min(15, len(raw)))
+         if {"ticker", "holding name"} <= {str(c).strip().lower() for c in raw.iloc[i]}),
+        None,
+    )
+    if header_idx is None:
+        raise RuntimeError(f"[{ticker}] no 'Ticker'/'Holding Name' header row in the first 15 rows")
+    df = raw.iloc[header_idx + 1:].copy()
+    df.columns = [str(c).strip() for c in raw.iloc[header_idx]]
+    # Holding rows carry a numeric "Number"; the footer disclaimer does not.
+    if "Number" in df.columns:
+        df = df[pd.to_numeric(df["Number"], errors="coerce").notna()]
     log.info(f"[{ticker}] Raw: {len(df)} rows, cols: {list(df.columns)}")
     return df
 
@@ -98,8 +119,10 @@ def parse_vaneck_holdings(ticker: str, raw_df: pd.DataFrame) -> pd.DataFrame:
             "cash|Cash|derivative|Derivative|money market", case=False, na=False
         )]
     if name_col:
+        # NON_SECURITY_NAME_RE is compiled with IGNORECASE; passing case=
+        # alongside a compiled pattern raises ValueError in pandas.
         raw_df = raw_df[~raw_df[name_col].astype(str).str.contains(
-            NON_SECURITY_NAME_RE, case=False, na=False
+            NON_SECURITY_NAME_RE, na=False
         )]
     dropped = before - len(raw_df)
     if dropped > 0:
@@ -119,7 +142,8 @@ def parse_vaneck_holdings(ticker: str, raw_df: pd.DataFrame) -> pd.DataFrame:
     result = pd.DataFrame({
         "snapshot_date": SNAPSHOT_DATE,
         "fund_ticker": ticker,
-        "fund_name": raw_df[name_col].iloc[0] if name_col and len(raw_df) > 0 else f"VanEck {ticker} ETF",
+        # Was raw_df[name_col].iloc[0] -- the first HOLDING's name, not the fund's.
+        "fund_name": VANECK_FUNDS.get(ticker, f"VanEck {ticker} ETF"),
         "fund_cik": None,
         "holding_ticker": clean_str(raw_df[ticker_col]) if ticker_col else None,
         "holding_name": clean_str(raw_df[name_col]) if name_col else None,
@@ -290,6 +314,10 @@ def main():
 
     write_to_iceberg(frames)
     log.info("Done.")
+    if not frames:
+        # Exit non-zero so run_all reports FAIL. Exiting 0 here hid this
+        # pipeline writing nothing for weeks (fixed 2026-11-13).
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

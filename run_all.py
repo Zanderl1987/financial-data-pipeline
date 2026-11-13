@@ -915,17 +915,21 @@ PIPELINES: list[PipelineSpec] = [
         # storage/logs/failures/fund_holdings_20260822_204418.log.
         timeout=5400,
     ),
-    PipelineSpec(
-        name="etf_holdings",
-        file="etf_holdings_pipeline.py",
-        desc="ETF holdings -- SecuritiesDB free ETF holdings (200+ US ETFs, no auth) (Iceberg table)",
-        stage=1,
-        tables=['etf_holdings'],
-        # Healthy runs took 25-30 min against the old 1800 s limit (the site is
-        # ~13 s/ETF). The pipeline stops itself at TIME_BUDGET_SECONDS (3300)
-        # and writes what it has, so this outer kill should never be reached.
-        timeout=3600,
-    ),
+    # Unwired 2026-11-13: securitiesdb.com, etf_holdings_pipeline.py's only
+    # source, has failed every night since 2026-10-02 and now 301-redirects
+    # every URL (homepage included) to itself. Its 58 funds moved to issuer
+    # feeds writing fund_holdings: fund_holdings (iShares), schwab_holdings,
+    # ssga_holdings, invesco_holdings, vaneck_holdings, globalx_holdings,
+    # jpmorgan_holdings, nport_series_holdings (Vanguard/ARK/DGRW). The
+    # etf_holdings table keeps its frozen history (last snapshot 2026-10-01).
+    # PipelineSpec(
+    #     name="etf_holdings",
+    #     file="etf_holdings_pipeline.py",
+    #     desc="ETF holdings -- SecuritiesDB free ETF holdings (200+ US ETFs, no auth) (Iceberg table)",
+    #     stage=1,
+    #     tables=['etf_holdings'],
+    #     timeout=3600,
+    # ),
     PipelineSpec(
         name="ssga_holdings",
         file="ssga_holdings_pipeline.py",
@@ -1007,6 +1011,25 @@ PIPELINES: list[PipelineSpec] = [
         stage=1,
         tables=['fund_holdings'],
         requires_env=['EDGAR_USER_AGENT'],
+        timeout=300,
+    ),
+    PipelineSpec(
+        name="nport_series_holdings",
+        file="nport_series_holdings_pipeline.py",
+        desc="ETF holdings -- Vanguard equity ETFs, ARK, DGRW quarterly holdings (SEC N-PORT, series-matched, keyless) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        requires_env=['EDGAR_USER_AGENT'],
+        # All 30 funds measured at ~5 min live (2026-11-13: ARK+DGRW 145 s,
+        # Vanguard 23 in 139 s).
+        timeout=900,
+    ),
+    PipelineSpec(
+        name="jpmorgan_holdings",
+        file="jpmorgan_holdings_pipeline.py",
+        desc="ETF holdings -- J.P. Morgan JEPI/JEPQ/JPST daily holdings XLSX (official issuer, no auth) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
         timeout=300,
     ),
     PipelineSpec(

@@ -60,6 +60,9 @@ INVESCO_FUNDS = {
     "PDBC": ("46138B707", "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF"),
     "PEJ": ("46137V720", "Invesco Leisure & Entertainment ETF"),
     "TAN": ("46138G706", "Invesco Solar ETF"),
+    # 2026-11-13: moved from etf_holdings_pipeline.py when securitiesdb.com died
+    # (verified live, 103 rows).
+    "QQQ": ("46090E103", "Invesco QQQ Trust, Series 1"),
 }
 
 HOLDINGS_URL = (

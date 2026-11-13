@@ -151,6 +151,12 @@ ETF_PID_MAP = {
     "ICLN": {"pid": "239738", "name": "iShares Global Clean Energy ETF"},
     "IBIT": {"pid": "333011", "name": "iShares Bitcoin Trust"},
     "ETHA": {"pid": "337614", "name": "iShares Ethereum Trust"},
+    # US sector (2026-11-13: moved here from etf_holdings_pipeline.py when
+    # securitiesdb.com died; pids from the iShares product screener, verified live)
+    "IYE":  {"pid": "239507", "name": "iShares U.S. Energy ETF"},
+    "IYJ":  {"pid": "239514", "name": "iShares U.S. Industrials ETF"},
+    "IYK":  {"pid": "239505", "name": "iShares U.S. Consumer Staples ETF"},
+    "IYR":  {"pid": "239520", "name": "iShares U.S. Real Estate ETF"},
 }
 
 # Fixed-income iShares ETFs — same BlackRock varnish API, but a different
@@ -167,6 +173,13 @@ BOND_ETF_PID_MAP = {
     # Treasury + commodity (gap closed 2026-09-01; pids verified live)
     "IEI": {"pid": "239455", "name": "iShares 3-7 Year Treasury Bond ETF"},
     "GSG": {"pid": "239757", "name": "iShares S&P GSCI Commodity-Indexed Trust"},
+    # Treasury / EM / muni (2026-11-13: moved from etf_holdings_pipeline.py when
+    # securitiesdb.com died; pids from the iShares product screener, verified live)
+    "SHY": {"pid": "239452", "name": "iShares 1-3 Year Treasury Bond ETF"},
+    "IEF": {"pid": "239456", "name": "iShares 7-10 Year Treasury Bond ETF"},
+    "TLT": {"pid": "239454", "name": "iShares 20+ Year Treasury Bond ETF"},
+    "EMB": {"pid": "239572", "name": "iShares J.P. Morgan USD Emerging Markets Bond ETF"},
+    "MUB": {"pid": "239766", "name": "iShares National Muni Bond ETF"},
     # Short-term Treasury (gap closed 2026-09-05; pid verified live)
     "SGOV": {
         "pid": "314116",

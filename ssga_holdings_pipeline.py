@@ -82,7 +82,10 @@ SSGA_EQUITY_UNIVERSE = {
     # Broad market / style
     "SPY":  "SPDR S&P 500 ETF Trust",
     "DIA":  "SPDR Dow Jones Industrial Average ETF",
-    "SPLG": "SPDR Portfolio S&P 500 ETF",
+    # Was SPLG until State Street renamed it SPYM (late Oct 2025). SSGA still
+    # serves the SPLG file, frozen at 2025-10-29, so SPLG "worked" while
+    # writing a year-old snapshot; SPYM is the live one (verified 2026-11-13).
+    "SPYM": "SPDR Portfolio S&P 500 ETF",
     "SPTM": "SPDR Total Stock Market ETF",
     "SPYG": "SPDR Portfolio S&P 500 Growth ETF",
     "SPYV": "SPDR Portfolio S&P 500 Value ETF",
@@ -106,6 +109,10 @@ SSGA_EQUITY_UNIVERSE = {
     "KBE":  "SPDR S&P Bank ETF",
     "XOP":  "SPDR S&P Oil & Gas Exploration & Production ETF",
     "XAR":  "SPDR S&P Aerospace & Defense ETF",
+    # International (2026-11-13: moved from etf_holdings_pipeline.py when
+    # securitiesdb.com died)
+    "SPDW": "SPDR Portfolio Developed World ex-US ETF",
+    "SPEM": "SPDR Portfolio Emerging Markets ETF",
 }
 
 # State Street SPDR bond ETFs -- different Holdings layout (no Ticker col;

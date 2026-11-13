@@ -366,6 +366,31 @@ IBES, so `probe()` before building a pipeline, per `data-source-vetting` §2.
 
 ## Known-broken / dead ends (don't re-attempt without a new angle)
 
+- **ETF holdings sources (vetted 2026-11-13).** `securitiesdb.com` is dead: every URL,
+  homepage included, 301-redirects to itself via Cloudflare; `etf_holdings_pipeline.py`
+  failed nightly from 2026-10-02 and is unwired (table kept as frozen history). Its 58
+  funds now come from issuers into `fund_holdings`. Verdicts:
+  - **ARK -- NO-GO direct.** `assets.ark-funds.com/robots.txt` is `User-agent: * /
+    Disallow: /`; www 403s. ARK comes from SEC N-PORT instead (`nport_series_holdings`).
+  - **WisdomTree -- NO-GO direct.** robots.txt disallows `/api`. DGRW via N-PORT.
+  - **Vanguard -- no keyless file** (site API 404s). Equity ETFs via N-PORT, matched on
+    series_id: `Fund(ticker)` resolves an ETF to its Admiral share class.
+  - **Global X -- www is behind a Vercel bot checkpoint (429); don't fetch it.** The S3
+    CDN still serves `{ticker_LOWERCASE}_full-holdings_YYYYMMDD.csv` without it. The
+    uppercase filename the pipeline used 404'd, so it had never written a row.
+  - **Amplify (DIVO) -- Firestore feed 403s** since ~2026-09; DIVO also comes via N-PORT
+    in fund_holdings' mutual-fund path. Not fixed.
+  - **J.P. Morgan -- GO**: `am.jpmorgan.com/FundsMarketingHandler/excel?type=
+    dailyETFHoldings&cusip=...` (robots.txt only fences `/asset-management/`).
+  - **SSGA SPLG was renamed SPYM** (late Oct 2025); the SPLG file still downloads,
+    frozen at 2025-10-29. A holdings file that "works" can be a year old: check its
+    as-of date, not the HTTP status.
+  - **N-PORT holdings are quarterly with a ~60-day lag.** Use `reporting_period_end`,
+    not `snapshot_date`, for anything point-in-time.
+- **A pipeline that exits 0 after fetching nothing reads as PASS.** VanEck (a header-row
+  move plus `str.contains(compiled_re, case=False)`, which raises) and Global X wrote
+  nothing for weeks while `run_all` showed them green. Exit non-zero when zero funds land.
+
 - `nasdaq_data_link_pipeline.py` — Incapsula WAF 403s everything; needs a replacement source.
   `market_valuation` is still NO DATA. `treasury_yield_curve` is NOT: since 2026-08-26
   `treasury_curve_pipeline.py` (home.treasury.gov, keyless) writes it to the same glob

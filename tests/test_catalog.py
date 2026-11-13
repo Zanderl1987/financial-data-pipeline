@@ -575,6 +575,10 @@ class TestNoOrphanedTables:
         # yfinance ag-futures OHLCV fetched by the backtester's AgProvider
         # (external repo, C:\Users\zande), synced into storage/raw/agriculture
         "agriculture",
+        # Frozen history: its only source (securitiesdb.com) died 2026-10-02 and
+        # the pipeline was unwired 2026-11-13. Its funds now land in
+        # fund_holdings via issuer pipelines; see run_all.py's note.
+        "etf_holdings",
     }
 
     def test_every_catalog_table_has_a_producing_pipeline(self):
