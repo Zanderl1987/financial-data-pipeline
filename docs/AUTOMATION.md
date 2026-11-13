@@ -30,6 +30,16 @@ Set up 2026-07-06 (by Claude, with Zander's approval).
   **Failure signal:** `COVERAGE_GAP.txt` appears at repo root when a confirmed gap
   is found. Separate from `QUALITY_FAIL.txt` — a coverage gap is "we should add a
   series," not "something is broken." Auto-clears on the next clean run.
+- **Also runs `depth_audit.py --fail-on-thin`** (added 2026-10-26), archived to
+  `storage\quality_reports\depth_audit_YYYY-MM-DD.txt`, summary line appended to
+  `depth_audit_summary_log.txt`. Depth, not presence: for every CATALOG table it
+  reports rows, entity count, date span and future-dated rows from the curated
+  snapshot, and judges the tables listed in `DEPTH_FLOORS` against what a consumer
+  needs (THIN / SHALLOW / STALE). Exists because `options_history` held rows and
+  passed validation with 4 symbols from 2023-12 — a consumer found that, not this
+  repo. Floors marked `known_gap` (no free source) are reported but don't trip it.
+  **Failure signal:** `DEPTH_GAP.txt` at repo root when a declared floor fails.
+  Auto-clears on the next clean run.
 
 ## ClaudeAuto-DailyAccumulators (Windows Scheduled Task)
 

@@ -100,6 +100,7 @@ class ValidationResult:
 # date_col      — column for future-date check (None = skip)
 # value_ranges  — {col: (lo, hi)}                              → WARN if violated
 # positive_cols — columns that must be STRICTLY > 0            → WARN if violated
+# ohlc_range    — True: open and close must lie in [low, high]  → WARN if violated
 
 SCHEMAS: dict[str, dict] = {
     "prices": {
@@ -170,6 +171,12 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["symbol", "date", "close", "volume"],
         "date_col":    "date",
         "positive_cols": ["open", "high", "low", "close"],
+        # Yahoo's ICE softs (cocoa, coffee, cotton, orange juice, sugar) carry
+        # a close outside the day's high-low range on ~1,360 rows as of
+        # 2026-10-26 -- apparently the settlement price paired with another
+        # session's high/low. Fine for close-to-close returns; wrong for
+        # anything that reads the range (ATR, stops). Flagged, not repaired.
+        "ohlc_range":  True,
     },
     "cot": {
         "required":    ["date"],
@@ -1759,6 +1766,48 @@ def _check_positive(df: pd.DataFrame, schema: dict) -> list:
     return results
 
 
+def _check_ohlc_range(df: pd.DataFrame, schema: dict) -> list:
+    """
+    Open and close must lie inside the bar's [low, high].
+
+    A bar whose close is outside its own range is internally inconsistent:
+    close-to-close returns survive it, but any range-based calculation (ATR,
+    stop and take-profit fills, intrabar extremes) reads a range that never
+    contained the price. Opt-in per table via ``"ohlc_range": True``; the
+    message names the symbols carrying the most violations, because these
+    cluster by instrument rather than by date.
+    """
+    if not schema.get("ohlc_range"):
+        return []
+    if not {"low", "high"}.issubset(df.columns):
+        return []
+    low = pd.to_numeric(df["low"], errors="coerce")
+    high = pd.to_numeric(df["high"], errors="coerce")
+    results = []
+    for col in ("open", "close"):
+        if col not in df.columns:
+            continue
+        price = pd.to_numeric(df[col], errors="coerce")
+        tol = 1e-9 * price.abs()  # float noise, e.g. 80.010002 vs 80.01
+        bad = (price < low - tol) | (price > high + tol)
+        n_bad = int(bad.sum())
+        if n_bad == 0:
+            results.append(CheckResult(
+                f"ohlc_range:{col}", Severity.OK, f"all {col} values within [low, high]"))
+            continue
+        miss = ((price - high).clip(lower=0) + (low - price).clip(lower=0)) / price.abs()
+        detail = f"median miss {miss[bad].median():.2%}, max {miss[bad].max():.2%}"
+        if "symbol" in df.columns:
+            by_symbol = df.loc[bad, "symbol"].value_counts()
+            top = ", ".join(f"{s} {n}" for s, n in by_symbol.head(5).items())
+            more = f" (+{len(by_symbol) - 5} more)" if len(by_symbol) > 5 else ""
+            detail = f"{top}{more}; {detail}"
+        results.append(CheckResult(
+            f"ohlc_range:{col}", Severity.WARNING,
+            f"{n_bad} rows with {col} outside [low, high] -- {detail}"))
+    return results
+
+
 def _latest_file(glob_path: str) -> list[str]:
     """
     List matching files sorted OLDEST to NEWEST by modification time.
@@ -1854,6 +1903,7 @@ def validate_df(
     checks.append(_check_future_dates(df, schema))
     checks.extend(_check_value_ranges(df, schema))
     checks.extend(_check_positive(df, schema))
+    checks.extend(_check_ohlc_range(df, schema))
     checks.append(_check_row_count(table, df))
     if check_freshness:
         checks.append(_check_fetched_at(df, max_age_hours))

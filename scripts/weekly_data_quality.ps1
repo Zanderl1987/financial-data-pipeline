@@ -14,9 +14,11 @@ $py = "C:\ProgramData\anaconda3\python.exe"
 $reportDir = Join-Path $repo "storage\quality_reports"
 $flag = Join-Path $repo "QUALITY_FAIL.txt"
 $covFlag = Join-Path $repo "COVERAGE_GAP.txt"
+$depthFlag = Join-Path $repo "DEPTH_GAP.txt"
 $stamp = Get-Date -Format "yyyy-MM-dd"
 $report = Join-Path $reportDir "validate_$stamp.txt"
 $covReport = Join-Path $reportDir "coverage_audit_$stamp.txt"
+$depthReport = Join-Path $reportDir "depth_audit_$stamp.txt"
 
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 Set-Location $repo
@@ -54,3 +56,22 @@ if ($covExit -eq 0) {
         Out-File $covFlag -Encoding utf8
 }
 Add-Content (Join-Path $reportDir "coverage_audit_summary_log.txt") "$stamp | $covStatus | $gapCount"
+
+# --- depth_audit.py (added 2026-10-26): depth, not presence. Separate signal ---
+# A table that exists but is too thin/short/stale for what a consumer needs
+# (options_history: 4 symbols from 2023-12) passes validate.py. Floors that are
+# known to fail (no free source) are marked known_gap and do not trip this flag.
+cmd /c "`"$py`" depth_audit.py --fail-on-thin > `"$depthReport`" 2>&1"
+$depthExit = $LASTEXITCODE
+$depthLine = (Select-String -Path $depthReport -Pattern "DECLARED FLOOR\(S\) FAILED" | Select-Object -Last 1).Line
+if (-not $depthLine) { $depthLine = "no floor-count line - depth_audit.py crashed? (exit=$depthExit)" }
+
+if ($depthExit -eq 0) {
+    if (Test-Path $depthFlag) { Remove-Item $depthFlag -Force }
+    $depthStatus = "OK"
+} else {
+    $depthStatus = "GAP"
+    "Depth audit: declared floor(s) failed on $stamp.`n$depthLine`nFull report: $depthReport" |
+        Out-File $depthFlag -Encoding utf8
+}
+Add-Content (Join-Path $reportDir "depth_audit_summary_log.txt") "$stamp | $depthStatus | $depthLine"

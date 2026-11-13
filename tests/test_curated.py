@@ -255,6 +255,130 @@ class TestPeriodEndNormalization:
 
 # -- zero-bar filter (added 2026-08-29, SCOPE NARROWED 2026-08-30) ------------
 
+class TestImpossiblePeriods:
+    """A filing cannot report a period that has not ended. Found 2026-10-26:
+    2015 10-Qs reporting periods ending 2201-06-30 / 2215-09-30 (XBRL typos)."""
+
+    def _frame(self, period_end, filed):
+        n = len(period_end)
+        return pd.DataFrame({
+            "cik": [str(i) for i in range(n)], "metric": ["revenue"] * n,
+            "period_end": period_end, "filed": filed, "fiscal_period": ["Q2"] * n,
+            "form": ["10-Q"] * n, "unit": ["USD"] * n, "value": [1.0] * n,
+            "fetched_at": ["2026-08-06T00:00:00"] * n,
+        })
+
+    def test_drops_period_ending_after_filing(self):
+        df = self._frame(["2015-06-30", "2201-06-30", "2011-09-30"],
+                         ["2015-08-10", "2015-08-10", "2011-09-12"])
+        out = curated.dedup("fundamentals_quarterly", df)
+        assert out["period_end"].tolist() == ["2015-06-30"]
+
+    def test_period_ending_on_the_filing_date_is_kept(self):
+        df = self._frame(["2020-03-31 00:00:00"], ["2020-03-31"])
+        assert len(curated.dedup("fundamentals_annual", df)) == 1
+
+    def test_unparseable_or_missing_filed_is_kept(self):
+        df = self._frame(["2201-06-30", "2201-06-30"], [None, "not a date"])
+        assert len(curated.dedup("fundamentals_quarterly", df)) == 2
+
+    def test_frames_without_filed_are_untouched(self):
+        df = self._frame(["2201-06-30"], ["x"]).drop(columns="filed")
+        assert len(curated.dedup("fundamentals_quarterly", df)) == 1
+
+    def test_only_fundamentals_tables(self):
+        df = self._frame(["2201-06-30"], ["2015-08-10"])
+        assert len(curated._drop_out_of_order_dates("macro", df)) == 1
+
+    def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
+        # fundamentals_* compact through DuckDB (too big for pandas); the SQL
+        # twins of _normalize_period_end and _drop_out_of_order_dates must give
+        # the same rows as dedup().
+        assert "fundamentals_quarterly" in curated._LARGE_TABLES
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        old = pd.DataFrame({
+            "cik": ["1", "2", "3", "4"], "metric": ["revenue"] * 4,
+            "period_end": ["2015-06-30", "2201-06-30 00:00:00", "2201-06-30", "2020-03-31"],
+            "filed": ["2015-08-10", "2015-08-10", None, "2020-05-01"],
+            "fiscal_period": ["Q2"] * 4, "form": ["10-Q"] * 4, "unit": ["USD"] * 4,
+            "value": [1.0, 2.0, 3.0, 4.0], "fetched_at": ["2026-08-06T00:00:00"] * 4,
+        })
+        old.to_parquet(raw / "fundamentals_quarterly_20260806.parquet")
+        # a later fetch of cik 4 in timestamp form: must collapse onto the same key
+        new = old.iloc[[3]].assign(period_end=pd.Timestamp("2020-03-31"), value=4.5,
+                                   fetched_at="2026-10-26T00:00:00")
+        new.to_parquet(raw / "fundamentals_quarterly_20261026.parquet")
+        monkeypatch.setitem(q.CATALOG, "fundamentals_quarterly",
+                            str(raw / "*.parquet").replace("\\", "/"))
+        monkeypatch.setattr(curated, "CURATED_ROOT", str(tmp_path / "curated"))
+
+        out_path, raw_rows, curated_rows = curated._compact_large_table("fundamentals_quarterly")
+        sql_out = pd.read_parquet(out_path).sort_values("cik").reset_index(drop=True)
+        pandas_out = curated.dedup("fundamentals_quarterly", pd.concat(
+            [old, new.assign(period_end="2020-03-31")])).sort_values("cik").reset_index(drop=True)
+        assert (raw_rows, curated_rows) == (5, 3)
+        assert sql_out["cik"].tolist() == pandas_out["cik"].tolist() == ["1", "3", "4"]
+        assert sql_out["period_end"].tolist() == pandas_out["period_end"].tolist()
+        assert sql_out["value"].tolist() == pandas_out["value"].tolist() == [1.0, 3.0, 4.5]
+
+
+
+class TestTradesDisclosedBeforeMade:
+    """A trade cannot be disclosed before it happens. Found 2026-10-29: 131 PTR
+    rows, with the typo on either side -- trades dated 3031 on 2021 filings,
+    filings dated 1935 for 2025 trades and 2001 for a 2019 AAPL trade (a look-
+    ahead leak for anything keyed on disclosure_date)."""
+
+    def _frame(self, transaction_date, disclosure_date):
+        n = len(transaction_date)
+        return pd.DataFrame({
+            "chamber": ["house"] * n, "doc_id": [str(20018672 + i) for i in range(n)],
+            "row_index": [0] * n, "member_name": ["A Member"] * n,
+            "ticker": ["IBM"] * n, "transaction_type": ["P"] * n,
+            "transaction_date": transaction_date, "disclosure_date": disclosure_date,
+            "fetched_at": ["2026-08-28T21:17:46"] * n,
+        })
+
+    def test_drops_both_directions_of_typo(self):
+        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", "2025-03-13"],
+                         ["2021-04-30", "2021-04-30", "2001-11-30", "1935-03-28"])
+        out = curated.dedup("congressional_trades", df)
+        assert out["transaction_date"].tolist() == ["2021-04-01"]
+
+    def test_year_past_pandas_timestamp_limit_is_still_caught(self):
+        # pd.to_datetime coerces 3031 to NaT; a Timestamp comparison would keep it.
+        df = self._frame(["2220-04-07", "2202-09-19"], ["2022-04-07", "2022-09-19"])
+        assert curated.dedup("congressional_trades", df).empty
+
+    def test_disclosure_dated_after_the_fetch_is_dropped(self):
+        # 2024 filing typed as 2204: in order against the trade, impossible
+        # against fetched_at (2026-08-28).
+        df = self._frame(["2024-06-22", "2024-06-22"], ["2204-06-22", "2024-07-01"])
+        out = curated.dedup("congressional_trades", df)
+        assert out["disclosure_date"].tolist() == ["2024-07-01"]
+
+    def test_same_day_disclosure_and_missing_dates_are_kept(self):
+        df = self._frame(["2023-03-16", None, "2023-03-16"],
+                         ["2023-03-16", "2023-03-15", None])
+        assert len(curated.dedup("congressional_trades", df)) == 3
+
+    def test_duckdb_path_matches_pandas_path(self, tmp_path, monkeypatch):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        df = self._frame(["2021-04-01", "3031-04-30", "2019-11-18", None, "2024-06-22"],
+                         ["2021-04-30", "2021-04-30", "2001-11-30", "2021-01-01", "2204-06-22"])
+        df.to_parquet(raw / "congressional_house_backfill_2021.parquet")
+        monkeypatch.setitem(q.CATALOG, "congressional_trades",
+                            str(raw / "*.parquet").replace("\\", "/"))
+        monkeypatch.setattr(curated, "CURATED_ROOT", str(tmp_path / "curated"))
+
+        out_path, raw_rows, curated_rows = curated._compact_large_table("congressional_trades")
+        sql_ids = sorted(pd.read_parquet(out_path)["doc_id"])
+        pandas_ids = sorted(curated.dedup("congressional_trades", df)["doc_id"])
+        assert (raw_rows, curated_rows) == (5, 2)
+        assert sql_ids == pandas_ids == ["20018672", "20018675"]
+
 class TestZeroBars:
     """
     Originally this dropped every non-positive price. That was wrong: the

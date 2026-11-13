@@ -313,3 +313,76 @@ which correlates with lower parameter counts — the same direction the protocol
 existing "high parameter count: deprioritize" rule already pushes. Any writeup must
 state that the catalog describes short-to-moderate-length community strategies, not the
 full population.
+
+### 2026-10-28 — primary endpoint's null replaced; every endpoint result voided
+
+**What was found.** Section 4's null "relocates the same number of entries per symbol to
+random days under the same exit rule". As implemented
+(`evaluation.stats.permutation_trades`), it does not hold the exit rule fixed. It holds
+the exit *flags* fixed. 13 of the 18 tested ports build their exit flags by walking their
+own entries (stops, targets, `max_bars` via `strategies/ports/base.py`
+`simulate_positions*`), so a relocated entry has no stop, no target and no time limit. It
+rides until the next day a *real* trade exited. Separately, relocated entries are drawn
+from every bar, so the $5 entry floor (section 2) is not applied to the null.
+
+A diagnostic on a fixed random sample of 143 development symbols (10 permutations per
+strategy, same engine and cost model) measured the consequence. The null spent 0.8x to
+47.7x as many days in the market as the strategy (over 2x for 13 of 18), and 8-23% of
+null entries fell below $5. In a rising market that makes the null a near buy-and-hold
+for long strategies, and a long-held short for short strategies. The 13 results at
+`pnl_p` = 1.0000 and the `optimized_doji_breakout_short` pass (worse than its null per
+position-day: -15.80 vs -8.20 dollars) are artifacts of exposure, not evidence about
+timing. Script and output: `work-notes/financial-data-pipeline/exposure_check_2026-10-27.py`.
+
+**Disclosure.** Before writing this amendment the author saw, for all 18 tested strategies
+on that 143-symbol development sample: days in market, mean hold, total and per-day net
+P&L for the strategy and the old null, and the old null's p-value on the sample. No
+p-value under the corrected null below has been computed for any strategy. No holdout
+data was touched.
+
+**Changes.**
+
+1. **Primary endpoint replaced.** `pnl_p` is replaced by **`shift_pnl_p`**: the one-sided
+   empirical p-value (+1 correction, n_perm = 200) on net-of-cost total P&L, from
+   `evaluation.stats.circular_shift_trades`. For each permutation and each symbol, the
+   strategy's four signal arrays (long entry, long exit, short entry, short exit) are
+   rolled *together* by one offset drawn uniformly from [1, n-1] bars, and shifted
+   entries whose close is below $5 are dropped. The engine then re-simulates. This keeps
+   the trade count, hold lengths, side mix and time in market (up to one seam-straddling
+   trade per symbol, plus floor drops). It randomizes only *when* the trades happen. The
+   question becomes "did this strategy's timing, entries and exits together, beat its
+   own holding pattern placed at random times?" This is the same family of null as the
+   backtester catalog's `circular_shift_pvalue`. Engine, cost model (2026-09-07
+   square-root-law amendment), splits, and the 5/20 bps sensitivity runs are unchanged.
+   Each sensitivity run uses the same null.
+2. **Exposure guard.** Every result reports `null_exposure_ratio`, the median over
+   permutations of (null days in market / strategy days in market). A ratio outside
+   **[0.8, 1.25]** flags the result `null_exposure_mismatch`, and the strategy cannot
+   advance past Stage 3. That is the failure this amendment exists to fix, so it is
+   checked rather than assumed.
+3. **Profit gate.** Advancing to Stage 5 now requires all of: BH rejection at Stage 4,
+   development net P&L > 0, and no exposure mismatch. "Promising" at Stage 6 now
+   requires holdout `shift_pnl_p` < 0.05 **and** holdout net P&L > 0. Under the old
+   rules two of three "promising" strategies lost money. Beating random timing while
+   losing money is not a result this catalog should advertise.
+4. **Voiding.** Every registry row under `tv_strategy_catalog_stage3`, `_stage4` and
+   `_stage5` is void for verdicts. The rows stay in the append-only registry. New results
+   are written under `tv_strategy_catalog_stage3_v2`, `_stage4_v2` and `_stage5_v2`, and
+   the catalog reads only those.
+5. **Spent holdouts stay spent.** Section 2: "a second holdout run on the same strategy
+   invalidates it for this campaign". Holdouts for `bollinger_bands_simple`,
+   `optimized_doji_breakout_short` and `rsi_bb_inside_strategy` were opened on
+   2026-09-07 under the voided endpoint. They are re-scored on development data for the
+   record, but they cannot receive a v2 holdout in this campaign. The v2 Stage 5 guard
+   refuses any strategy with a row under either evaluation name. If any of the three is
+   to be confirmed, it must be on data dated after 2026-09-07, under a separately
+   pre-registered forward test whose statistical power is checked before it is opened.
+6. **Recorded, not repaired.** Those three holdouts were run before the campaign closed
+   (section 5 forbids promotion to Stage 5 before close). The registry shows a Stage 4
+   write on 2026-09-06 over the 16-18 strategies tested so far, not a close under the
+   stopping rule. The v2 Stage 4 close keeps the existing guard: every admitted strategy
+   needs a Stage 3 v2 result first.
+
+**Not changed:** sample and splits (section 2), execution timing and costs (section 3),
+the one-primary-test rule and descriptive statistics (section 4), BH-FDR at q = 0.10
+campaign-wide, the stopping rule, and translation fidelity (section 6).

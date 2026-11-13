@@ -32,7 +32,7 @@ from evaluation import stats as ev_stats
 from strategies.catalog import build_catalog_rows, write_catalog_table
 
 ALPHA = 0.10
-EVALUATION_NAME = "tv_strategy_catalog_stage4"
+EVALUATION_NAME = "tv_strategy_catalog_stage4_v2"   # amendment 2026-10-28; _stage4 rows void
 MIN_CAMPAIGN_SIZE = 30  # preregistration section 5 stopping-rule floor
 
 

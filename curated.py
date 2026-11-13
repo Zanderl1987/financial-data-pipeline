@@ -71,6 +71,58 @@ def _normalize_period_end(table: str, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# (earlier, later) date columns that cannot be out of order: a filing cannot
+# report a period that has not ended, a trade cannot be disclosed before it
+# happens, and nothing is disclosed after we fetched it. A row where earlier >
+# later carries a typo in one of the two dates, and there is no telling which
+# one, so curated drops it (raw keeps it).
+_DATE_ORDER = {
+    "fundamentals_annual":    [("period_end", "filed")],
+    "fundamentals_quarterly": [("period_end", "filed")],
+    # 2026-10-29: 131 of 54,966 PTR rows, both directions of typo -- trades
+    # dated 3031/2220/2202 on 2021-22 filings, and filings dated 1935-03-28
+    # (a 2025 trade) and 2001-11-30 (a 2019 AAPL trade). The second kind is
+    # look-ahead: the disclosure event study keys on disclosure_date, so the
+    # AAPL trade surfaced as public news 18 years before it was made. Plus one
+    # 2024 filing dated 2204-06-22, after the fetch that downloaded it.
+    "congressional_trades":   [("transaction_date", "disclosure_date"),
+                               ("disclosure_date", "fetched_at")],
+}
+
+
+def _drop_out_of_order_dates(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows where any _DATE_ORDER pair is out of order.
+
+    fundamentals: ``period_end > filed`` is a filer's XBRL typo, not data:
+    2026-10-26 found 302 such rows in fundamentals_quarterly and 72 in
+    fundamentals_annual, including periods ending 2201-06-30 and 2215-09-30 on
+    2015 10-Qs (a 2015 typed as 2201) and near misses like a Q3 dated
+    2011-09-30 on a 10-Q filed 2011-09-12. The value is bound to a period it
+    does not describe, so a point-in-time join would hand it to the wrong
+    quarter. Rows where either date does not parse are kept -- they cannot be
+    judged.
+    """
+    impossible = pd.Series(False, index=df.index)
+    for pair in _DATE_ORDER.get(table, []):
+        if set(pair).issubset(df.columns):
+            earlier, later = (_iso_day(df[c]) for c in pair)
+            impossible |= (earlier > later).fillna(False).astype(bool)
+    return df[~impossible] if impossible.any() else df
+
+
+def _iso_day(values: pd.Series) -> pd.Series:
+    """Each value as a YYYY-MM-DD string, NA where it does not parse.
+
+    Strings, not Timestamps: pandas cannot hold years past 2262, so a 3031 typo
+    would coerce to NaT and escape the check. ISO day strings order correctly
+    at any year; the string prefix is the fallback for what to_datetime drops.
+    """
+    parsed = pd.to_datetime(values, errors="coerce", format="mixed").dt.strftime("%Y-%m-%d")
+    prefix = values.astype("string").str.slice(0, 10)
+    prefix = prefix.where(prefix.str.fullmatch(r"\d{4}-\d{2}-\d{2}"))
+    return parsed.astype("string").fillna(prefix)
+
+
 # Tables whose snapshot_date was introduced after data had already accumulated.
 # Raw parquet is append-only history and never gets rewritten, so those earlier
 # files stay on the old schema forever. Derive the column from fetched_at when
@@ -445,7 +497,11 @@ def _curated_path(table: str) -> str:
 # `schwab_options` added 2026-10-01, the day the pipeline widened from 40
 # strikes / 4 weeks to full chains: ~580k rows/day (measured on a 40-symbol
 # sample), so the pandas path would be holding 100M+ rows within the year.
-_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options"}
+# fundamentals_* added 2026-10-26: 62M / 29M raw rows. The pandas path for
+# fundamentals_quarterly committed 86 GB on a 32 GB machine and never finished,
+# so the period_end rules below have SQL twins in _compact_large_table().
+_LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options",
+                 "fundamentals_annual", "fundamentals_quarterly"}
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
 # SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
@@ -745,8 +801,7 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
             ) AS snapshot_date)
             FROM {raw_scan}
         )"""
-    sanity = _sanity_sql_predicate(table)
-    where_sanity = f"WHERE {sanity}" if sanity else ""
+    predicates = [p for p in [_sanity_sql_predicate(table)] if p]
 
     con = duckdb.connect()
     try:
@@ -758,6 +813,20 @@ def _compact_large_table(table: str) -> "tuple[str, int, int] | None":
         if missing:
             nulls = ", ".join(f"NULL::VARCHAR AS {c}" for c in missing)
             raw_scan = f"(SELECT *, {nulls} FROM {raw_scan})"
+        if table in _PERIOD_END_TABLES and "period_end" in present:
+            # SQL twin of _normalize_period_end(): date-only string before dedup.
+            raw_scan = f"""(
+                SELECT * REPLACE (
+                    strftime(TRY_CAST(period_end AS TIMESTAMP), '%Y-%m-%d') AS period_end)
+                FROM {raw_scan}
+            )"""
+        for earlier, later in _DATE_ORDER.get(table, []):
+            if {earlier, later} <= present:
+                # SQL twin of _drop_out_of_order_dates(). COALESCE keeps rows
+                # whose dates do not parse: NOT/<= on NULL would drop them.
+                predicates.append(f"COALESCE(TRY_CAST({earlier} AS DATE) "
+                                  f"<= TRY_CAST({later} AS DATE), TRUE)")
+        where_sanity = f"WHERE {' AND '.join(predicates)}" if predicates else ""
         raw_rows = con.execute(f"SELECT count(*) FROM {raw_scan}").fetchone()[0]
         deduped = f"""
             SELECT * EXCLUDE (_rn) FROM (
@@ -832,6 +901,7 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _normalize_period_end(table, df)
+    df = _drop_out_of_order_dates(table, df)
     df = _backfill_snapshot_date(table, df)
     df = _drop_zero_bars(table, df)
     subset = _dedup_subset(table, df)

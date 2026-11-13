@@ -21,11 +21,14 @@ def _reg_df(rows):
     return pd.DataFrame(rows, columns=cols)
 
 
-def _catalog(fdr_pass_map):
-    """{strategy_id: fdr_pass_bool_or_None}"""
+def _catalog(fdr_pass_map, pnl_map=None, mismatch_map=None):
+    """{strategy_id: fdr_pass_bool_or_None}; dev net P&L defaults to +1000 and
+    exposure_mismatch to False, so only the FDR column varies unless asked."""
     rows = []
     for sid, fdr_pass in fdr_pass_map.items():
         rows.append({"strategy_id": sid, "fdr_pass": fdr_pass,
+                     "total_pnl_net": (pnl_map or {}).get(sid, 1000.0),
+                     "exposure_mismatch": (mismatch_map or {}).get(sid, False),
                      "holdout_pnl_p": None, "holdout_run_ts": None, "stage": "stage4"})
     return pd.DataFrame(rows)
 
@@ -42,6 +45,20 @@ def test_already_run_true_when_registry_has_stage5_row(monkeypatch):
     assert stage5.already_run("bar") is False
 
 
+def test_holdout_opened_under_voided_endpoint_stays_spent(monkeypatch):
+    """Amendment 2026-10-28 item 5: a pre-amendment Stage 5 row means the
+    holdout was SEEN, so the v2 runner must refuse it too."""
+    reg = _reg_df([{"run_id": "r", "input_name": "pine_old", "input_type": "trade_rule",
+                    "evaluation": "tv_strategy_catalog_stage5", "horizon": -1,
+                    "statistic": "holdout_pnl_p", "value": 0.0099, "n": 1,
+                    "universe_hash": "u", "date_range": "2018-01-01..",
+                    "created_at": "2026-09-07T12:13:15Z"}])
+    monkeypatch.setattr(stage5.ev_registry, "load", lambda: reg)
+    assert stage5.already_run("old") is True
+    with pytest.raises(RuntimeError, match="already has a Stage 5"):
+        stage5.run_holdout_for("old", cache={})
+
+
 def test_already_run_false_on_empty_registry(monkeypatch):
     monkeypatch.setattr(stage5.ev_registry, "load", lambda: _reg_df([]))
     assert stage5.already_run("foo") is False
@@ -53,6 +70,15 @@ def test_stage4_survivors_filters_to_fdr_pass_true(monkeypatch):
     catalog = _catalog({"a": True, "b": False, "c": None})
     monkeypatch.setattr(stage5, "build_catalog_rows", lambda: catalog)
     assert stage5.stage4_survivors() == ["a"]
+
+
+def test_stage4_survivors_need_dev_profit_and_matched_exposure(monkeypatch):
+    """Amendment 2026-10-28 items 2-3: an FDR pass alone no longer advances."""
+    catalog = _catalog({"ok": True, "loses": True, "flat": True, "mismatch": True},
+                       pnl_map={"loses": -5.0, "flat": 0.0},
+                       mismatch_map={"mismatch": True})
+    monkeypatch.setattr(stage5, "build_catalog_rows", lambda: catalog)
+    assert stage5.stage4_survivors() == ["ok"]
 
 
 def test_stage4_survivors_empty_when_no_fdr_column(monkeypatch):
@@ -117,7 +143,7 @@ def test_run_all_skips_already_tested_survivors(monkeypatch):
     assert ran_slugs == ["b"]  # "a" already run, skipped
     assert list(out["strategy_id"]) == ["b"]
     assert len(appended) == 1
-    assert set(appended[0]["evaluation"]) == {"tv_strategy_catalog_stage5"}
+    assert set(appended[0]["evaluation"]) == {"tv_strategy_catalog_stage5_v2"}
     assert written["df"].set_index("strategy_id").loc["b", "stage"] == "stage5"
     assert written["df"].set_index("strategy_id").loc["a", "stage"] == "stage4"  # untouched
 

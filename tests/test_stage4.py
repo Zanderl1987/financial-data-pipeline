@@ -121,5 +121,5 @@ def test_run_close_writes_registry_and_catalog_when_complete(monkeypatch):
 
     assert "rows" in appended
     reg = appended["rows"]
-    assert set(reg["evaluation"]) == {"tv_strategy_catalog_stage4"}
+    assert set(reg["evaluation"]) == {"tv_strategy_catalog_stage4_v2"}
     assert set(reg["statistic"]) == {"bh_q", "fdr_pass"}

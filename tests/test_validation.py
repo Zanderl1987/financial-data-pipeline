@@ -248,3 +248,54 @@ class TestPositiveCols:
             for col in schema.get("positive_cols", []):
                 assert col in schema["required"],                     f"{table}: positive_cols has '{col}' which is not in required"
 
+
+# -- ohlc_range check (added 2026-10-26) --------------------------------------
+
+class TestOhlcRange:
+    """Open/close outside the bar's own [low, high] -- found on Yahoo's ICE
+    softs in `agriculture`, where the close looks like a settlement price."""
+
+    def frame(self, close, open_=None, symbol=None):
+        df = pd.DataFrame({"low": [9.0, 9.0, 9.0], "high": [11.0, 11.0, 11.0],
+                           "close": close, "open": open_ or [10.0, 10.0, 10.0]})
+        if symbol:
+            df["symbol"] = symbol
+        return df
+
+    def test_flags_close_outside_range_and_names_symbols(self):
+        df = self.frame([10.0, 12.0, 8.1], symbol=["corn", "cocoa", "cocoa"])
+        res = {r.name: r for r in v._check_ohlc_range(df, {"ohlc_range": True})}
+        assert res["ohlc_range:close"].severity == v.Severity.WARNING
+        assert res["ohlc_range:close"].message.startswith("2 rows")
+        assert "cocoa 2" in res["ohlc_range:close"].message
+        assert "corn" not in res["ohlc_range:close"].message
+        assert res["ohlc_range:open"].severity == v.Severity.OK
+
+    def test_flags_open_outside_range(self):
+        res = {r.name: r for r in v._check_ohlc_range(
+            self.frame([10.0] * 3, open_=[0.0, 10.0, 10.0]), {"ohlc_range": True})}
+        assert res["ohlc_range:open"].severity == v.Severity.WARNING
+
+    def test_bounds_are_inclusive_and_tolerate_float_noise(self):
+        df = self.frame([9.0, 11.0, 11.0 + 1e-12])
+        res = v._check_ohlc_range(df, {"ohlc_range": True})
+        assert all(r.severity == v.Severity.OK for r in res)
+
+    def test_nulls_are_ignored(self):
+        df = self.frame([10.0, None, 10.0])
+        res = v._check_ohlc_range(df, {"ohlc_range": True})
+        assert all(r.severity == v.Severity.OK for r in res)
+
+    def test_opt_in_only(self):
+        assert v._check_ohlc_range(self.frame([99.0] * 3), {}) == []
+
+    def test_missing_range_columns_is_skipped(self):
+        assert v._check_ohlc_range(pd.DataFrame({"close": [1.0]}), {"ohlc_range": True}) == []
+
+    def test_agriculture_declares_it_and_validate_df_runs_it(self):
+        assert v.SCHEMAS["agriculture"].get("ohlc_range") is True
+        df = pd.DataFrame({"symbol": ["coffee"], "date": ["2020-01-02"], "open": [10.0],
+                           "high": [11.0], "low": [9.0], "close": [12.0], "volume": [1]})
+        res = v.validate_df("agriculture", df, check_freshness=False)
+        flagged = [c for c in res.checks if c.name == "ohlc_range:close"]
+        assert flagged and flagged[0].severity == v.Severity.WARNING

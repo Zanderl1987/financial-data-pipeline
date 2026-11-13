@@ -28,7 +28,14 @@ class TestLabelVerdict:
         ("stage4", 0.0099, 0.05, "undetermined"),
     ])
     def test_boundary(self, stage, pnl, p, expected):
-        assert cat.label_verdict(stage, pnl) == expected
+        # holdout P&L held profitable here so only the p-value bar varies
+        assert cat.label_verdict(stage, pnl, 1000.0) == expected
+
+    @pytest.mark.parametrize("holdout_pnl_net", [-91177.0, 0.0, None, float("nan")])
+    def test_significant_but_not_profitable_is_not_promising(self, holdout_pnl_net):
+        """Amendment 2026-10-28 item 3: beating the null while losing money (or
+        with no P&L recorded) is not promising."""
+        assert cat.label_verdict("stage5", 0.0099, holdout_pnl_net) == "undetermined"
 
     def test_nan_holdout_not_promising(self):
         assert cat.label_verdict("stage5", float("nan")) == "undetermined"
@@ -69,3 +76,27 @@ class TestStage6Runners:
         out = stage6.apply()
         assert written["df"].equals(rows)
         assert not out.empty
+
+class TestVoidedRowsIgnored:
+    """Amendment 2026-10-28 item 4: the catalog derives nothing from rows
+    written under the pre-amendment evaluation names."""
+
+    @staticmethod
+    def _row(evaluation, slug, statistic, value):
+        return {"run_id": "r", "input_name": f"pine_{slug}", "input_type": "trade_rule",
+                "evaluation": evaluation, "horizon": -1, "statistic": statistic,
+                "value": value, "n": 1, "universe_hash": "u", "date_range": None,
+                "created_at": "2026-10-28T00:00:00Z"}
+
+    def test_only_v2_rows_are_read(self, monkeypatch):
+        rows = [
+            self._row("tv_strategy_catalog_stage3", "old", "pnl_p", 0.005),
+            self._row("tv_strategy_catalog_stage3_v2", "new", "pnl_p", 0.30),
+            self._row("tv_strategy_catalog_stage4", "old", "bh_q", 0.01),
+            self._row("tv_strategy_catalog_stage4_v2", "new", "bh_q", 0.40),
+            self._row("tv_strategy_catalog_stage5", "old", "holdout_pnl_p", 0.0099),
+        ]
+        monkeypatch.setattr(cat.ev_registry, "load", lambda: pd.DataFrame(rows))
+        assert cat._stage3_wide()["strategy_id"].tolist() == ["new"]
+        assert cat._stage4_wide()["strategy_id"].tolist() == ["new"]
+        assert cat._stage5_wide().empty
