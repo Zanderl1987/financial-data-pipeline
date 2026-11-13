@@ -21,6 +21,63 @@ load_dotenv(Path(__file__).parent / ".env")
 from huggingface_hub import HfApi, HfFileSystem, login
 
 STORAGE_ROOT = Path(__file__).parent / "storage" / "curated"
+LICENSED_ROOT = Path(os.environ.get(
+    "FDP_LICENSED_ROOT", Path(__file__).parent / "storage" / "licensed"))
+
+# Tables derived from licensed data whose terms prohibit redistribution.
+# CRSP, Compustat and IBES are all non-redistributable, and this script publishes
+# to a PUBLIC dataset under CC BY 4.0 while asserting "data sourced from public
+# APIs and government databases". So the rule is that these never enter
+# storage/curated at all -- they live under storage/licensed/ (see wrds_client.py)
+# -- and this list is the backstop for the day someone puts one in the wrong
+# directory.
+#
+# Deliberately conservative: a false positive costs one renamed file, a false
+# negative costs the licence. `--private` is NOT sufficient cover, because a
+# private dataset repo is still redistribution to a third-party host, and this
+# repo has already shipped a real upload to a public repo by accident (the
+# exist_ok/private no-op noted below). Guard is `restricted_reason()`.
+#
+# Exact matches (full table stem) - these are known licensed table names
+LICENSED_EXACT = {
+    "crsp", "crspm", "compustat", "ibes", "ibessub", "ibesfn",
+    "gdxr", "g_link", "g_security", "msenames", "dlret", "wrds",
+}
+# Prefix matches - only for known licensed table families with trailing underscore
+LICENSED_PREFIXES = (
+    "crsp_", "comp_", "compustat_", "ibes_", "wrds_",
+)
+
+
+def restricted_reason(parquet_path: Path):
+    """Why this file must not be published, or None if it is fine.
+
+    Two independent gates, because either alone has a failure mode. The path
+    check catches a licensed root that is somehow nested under the published
+    tree. The prefix check catches the more likely accident: a licensed table
+    copied into storage/curated under an unremarkable filename.
+    """
+    try:
+        resolved = parquet_path.resolve()
+        licensed = LICENSED_ROOT.resolve()
+        if resolved == licensed or licensed in resolved.parents:
+            return (f"path {resolved} is inside the non-redistributable root {licensed}")
+    except OSError:
+        # Unresolvable path: fall through to the name check rather than
+        # publishing on the assumption that it is probably fine.
+        pass
+
+    stem = parquet_path.stem.lower()
+    # Exact match first (most specific)
+    if stem in LICENSED_EXACT:
+        return f"table name {stem!r} is a known licensed table"
+    # Prefix match for known families
+    for prefix in LICENSED_PREFIXES:
+        if stem.startswith(prefix):
+            return f"table name {stem!r} matches licensed prefix {prefix!r}"
+    return None
+
+
 README_TEMPLATE = """---
 language:
   - en
@@ -170,6 +227,24 @@ def main(repo_name: str = "financial-data-pipeline", private: bool = False, forc
     if not parquet_files:
         print(f"ERROR: No parquet files found under {STORAGE_ROOT} -- "
               f"refusing to publish an empty snapshot.")
+        return
+
+    # Fail loudly rather than skipping. A licensed table inside the published
+    # tree is a mistake that needs fixing at the source; quietly omitting one
+    # file from a snapshot whose README claims a uniform CC BY 4.0 licence would
+    # hide it until the data is already public. This runs BEFORE login() and
+    # before any byte is sent, because the whole point is that the data must
+    # never reach HuggingFace even transiently.
+    violations = [(pf, restricted_reason(pf)) for pf in parquet_files]
+    violations = [(pf, why) for pf, why in violations if why]
+    if violations:
+        print("ERROR: refusing to publish -- non-redistributable tables found "
+              f"under {STORAGE_ROOT}:")
+        for pf, why in violations:
+            print(f"  {pf.name}: {why}")
+        print("\nMove these to storage/licensed/ (see wrds_client.py). Licensed "
+              "CRSP/Compustat/IBES data cannot be published here, publicly or "
+              "privately.")
         return
 
     login(token=token)

@@ -12,6 +12,13 @@ __pycache__/
 # Storage (data files — not tracked in git, but keep directory structure)
 storage/**/*.parquet
 storage/**/*.csv
+# Licensed data: CRSP / Compustat / IBES pulled via WRDS (wrds_client.py).
+# Non-redistributable, so this is excluded TWICE over -- `storage/**/*.parquet`
+# already covers the data, and this entry makes the intent explicit rather than
+# incidental, so nobody "helpfully" commits a sample or loosens the glob below.
+# Also outside storage/curated/ because upload_huggingface.py publishes that tree
+# to a PUBLIC HuggingFace dataset under CC BY 4.0; see upload_huggingface.LICENSED_PREFIXES.
+storage/licensed/
 # CIK map cache is regenerable — exclude it
 storage/**/cik_map.json
 storage/dividend_research_cache.json
