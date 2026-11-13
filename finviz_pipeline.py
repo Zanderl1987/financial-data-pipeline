@@ -176,9 +176,14 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 # finviz_movers / finviz_insider rows written since 2026-08-02 (~88k rows) and is
 # repaired by re-running the pipeline; see _assert_tickers_plausible for the
 # guard that stops the next markup change from doing it again unnoticed.
-# More robust: match company-ticker class regardless of attribute order/quotes
+# Match the element through ITS OWN closing tag. A lazy `.*?</(a|span)>` stops
+# at the inner letter span's `</span>` and leaves the wrapper's closing tag
+# behind as a stray `</a>` / `</span>`. Structure: opening tag, non-a/span
+# content (the <img>), the optional one-letter <span>, then `</same-tag>`.
+_NO_A_SPAN = r'(?:(?!</?(?:a|span)\b).)*'
 _TICKER_LOGO_RE = re.compile(
-    r'<(?:a|span)\b[^>]*\bclass="[^"]*company-ticker[^"]*"[^>]*>.*?</(?:a|span)>',
+    r'<(a|span)\b[^>]*\bclass="[^"]*company-ticker[^"]*"[^>]*>'
+    + _NO_A_SPAN + r'(?:<span\b[^>]*>[^<]*</span>)?' + _NO_A_SPAN + r'</\1>',
     re.S | re.I,
 )
 

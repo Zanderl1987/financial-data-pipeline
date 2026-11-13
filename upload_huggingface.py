@@ -45,7 +45,7 @@ LICENSED_EXACT = {
 }
 # Prefix matches - only for known licensed table families with trailing underscore
 LICENSED_PREFIXES = (
-    "crsp_", "comp_", "compustat_", "ibes_", "wrds_",
+    "crsp_", "comp_", "compustat_", "ibes_", "ibesfn_", "ibessub_", "wrds_",
 )
 
 
