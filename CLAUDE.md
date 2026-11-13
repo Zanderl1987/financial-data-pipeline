@@ -163,6 +163,57 @@ macro/fundamentals frozen since early August) while curated was current. So any
 analytics or backtest run between early August and 2026-09-29 read the old data.
 Test: `test_stale_iceberg_mirror_loses_to_newer_curated`.
 
+## Licensed data — CRSP / Compustat / IBES via WRDS (added 2026-10-03)
+
+**This repo's charter is free/public sources only. WRDS data is the one licensed
+exception, and it is fenced off deliberately.**
+
+`wrds_client.py` pulls CRSP and Compustat tables into **`storage/licensed/`**,
+never `storage/curated/`. Three independent reasons that separation is load-bearing:
+
+1. **Licence.** CRSP, Compustat and IBES all prohibit redistribution.
+2. **The publisher.** `upload_huggingface.py` globs `storage/curated/**/*.parquet`
+   and publishes all of it to a **PUBLIC** HF dataset under a single `CC BY 4.0`
+   README that asserts "data sourced from public APIs and government databases".
+   A licensed table in that tree is both a licence breach and a false licence
+   statement. `--private` does **not** fix it: a private dataset repo is still
+   redistribution to a third-party host, and this repo has already shipped a real
+   upload publicly by accident (the `create_repo(exist_ok=True)` / `--private`
+   no-op). `upload_huggingface.LICENSED_PREFIXES` + `restricted_reason()` is the
+   backstop and it **aborts before `login()`**; tests: `tests/test_hf_license_guard.py`.
+3. **`curated.py` + `query.py` CATALOG.** Licensed tables are deliberately NOT wired
+   into either. They are not public-pipeline tables and must not become
+   `EXPECTED_TABLES` entries. The strategy catalog reads them through a *second*
+   root, not this one.
+
+`storage/licensed/` is gitignored twice over — `storage/**/*.parquet` already covers
+the data, plus an explicit entry so the intent is not incidental.
+
+**Why this exists:** the strategy catalog's binding constraint is data, not ideas.
+336 of 341 records are ineligible, and the largest block is survivorship —
+`yfinance_universe_prices` holds only firms that survived to the present. A sibling
+session measured an 83-point coverage gap on 2000-03-01 and established that a
+delisting-inclusive panel is **not buildable from free sources**. CRSP supplies
+`dlret` and a never-recycled `permno`, which is the whole fix.
+
+**Point-in-time is not optional here.** `comp.fundamentals_quarterly` is a
+RESTATED panel. Use `compustat_pit.pit_snapshot()`. Never filter on `latest == 1` —
+that flag selects the *final* restatement and hands it to every historical
+cross-section, which is a look-ahead. `compustat_pit.latest_flag_snapshot()`
+reproduces that mistake so the guard can be tested against a real leak.
+
+```
+pip install wrds                          # not preinstalled
+# .env (gitignored):  WRDS_USER=...  WRDS_PASS=...
+python wrds_client.py manifest            # target list, no credentials needed
+python wrds_client.py probe               # entitlement + row cap. RUN THIS FIRST
+python wrds_client.py pull --all          # resumable, chunked, per-chunk cached
+```
+
+Credentials come from `.env` only — never argv, which lands in shell history and in
+`ps` output. Entitlement is **per-product**: expect CRSP+Compustat and possibly not
+IBES, so `probe()` before building a pipeline, per `data-source-vetting` §2.
+
 ## Adding a new pipeline — wiring checklist
 
 1. Standalone `<name>_pipeline.py` at repo root. Free/public sources only.
@@ -179,6 +230,61 @@ Test: `test_stale_iceberg_mirror_loses_to_newer_curated`.
 
 ## Hard-won gotchas (violating these has caused real data corruption)
 
+- **A scraper that silently falls back is worse than one that crashes.** The DJIA-30
+  constituent list lived in seven copy-pasted `get_dji_symbols()` functions
+  (`alpha_vantage_fundamentals`, `finnhub`, `fundamentals`, `options_chain`,
+  `price_history`, `sec_edgar`, plus an inline list in `synthetic_options`). All seven
+  scraped `pd.read_html(".../wiki/Dow_Jones_Industrial_Average")` and looked for a
+  Symbol/Ticker column -- but that table had **moved** to
+  `List of Dow Jones Industrial Average companies`. So the loop never matched, every
+  copy raised internally, and every pipeline silently used its hardcoded fallback on
+  every run. The `print("Scraped N symbols")` branch was dead code, and a stale answer
+  is indistinguishable from a fresh one to the caller. That fallback had also gone
+  stale in both directions: it still carried **VZ** (Alphabet replaced Verizon
+  2026-06-29) and omitted **GOOGL** -- both invisible to a count check, since the list
+  was still exactly 30 names. Fixed 2026-10-05 by consolidating into `dji_symbols.py`
+  (MediaWiki action API + wikitext `{{NYSE link|X}}` regex; `read_html` does not
+  resolve those templates, the same trap `sp500_membership_pipeline.py` hit).
+  **Rules that came out of it:** fetch index membership from ONE shared module, never
+  a per-pipeline copy; assert the expected count so a wrong-table parse raises instead
+  of returning a bogus universe; and make the fallback path announce itself. Guard
+  tests live in `tests/test_pipelines.py::TestDJISymbols`, including
+  `test_no_module_defines_its_own_get_dji_symbols`.
+- **DOW (Dow Inc.) is NOT a DJIA constituent** and must stay out of any DJIA universe.
+  Sherwin-Williams replaced it 2024-11-08 (alongside Nvidia for Intel). It IS an S&P 500
+  and Russell 3000 member, and it has full coverage in `prices`/`tiingo_prices`/
+  `yfinance_universe_prices`/`fundamentals_*`/`securities` (CIK 1751788) -- those are
+  driven by `symbol_universe.csv`, not index membership. Don't "fix" it back in.
+  `securities.is_dji30` is `<NA>` for DOW, which agrees.
+- **Finviz silently doubled the first letter of every ticker since 2026-08-02** (found
+  2026-10-05 while checking whether DOW was tracked). It was NOT missing -- it was stored
+  as `DDOW`. Finviz changed its Ticker cell to nest a logo `<img>` plus a one-letter
+  exchange hint inside a `company-ticker` element, with the real ticker in a sibling
+  `tab-link` anchor; `pd.read_html` concatenates all descendant text in a cell, so
+  "A" + "AAPL" = "AAAPL". **Every** row of `finviz_screener`/`financials`/`movers`/
+  `insider` written since 2026-08-02 was affected (~88k rows, all 49 daily snapshots).
+  The strings are valid, so nothing crashed and no count check would notice -- they just
+  failed to join on `ticker` against prices/fundamentals/securities. Join rate was 7.2%
+  (screener) / 1.5% (movers) / 2.4% (insider); after the repair, 98.4% / 95.9% / 98.2%.
+  Fixed by `_strip_ticker_logo_anchors()` stripping the logo element before `read_html`
+  -- note the screener/movers pages use `<a class="company-ticker">` while the insider
+  page uses `<span>`, so the strip regex must match both. Historical rows were repaired
+  in place by `scripts\repair_finviz_tickers.py`, which only rewrites X -> X[1:] when X is
+  not itself a known symbol AND X[1:] is, so a wrong guess can't be written; the ~50
+  tickers absent from every in-repo symbol reference are reported and left alone.
+  **Rules:** after any Finviz markup change, check parsed tickers against
+  `symbol_universe.csv` (`_assert_tickers_plausible`) rather than trusting row counts;
+  and a table that looks like it "lost" a company may just have a mangled key --
+  check for a doubled prefix before concluding a coverage gap.
+- **Finviz tables are rolling-snapshot pages, so their history is NOT re-fetchable.**
+  `insider-trading.ashx` shows the most recent Form 4s and `screener.ashx?t=111` shows
+  today's movers; there is no way to ask Finviz for "2026-08-05's insider filings".
+  Deleting and re-running loses that day permanently -- repair in place instead. Related:
+  `finviz_insider` raw is **75.9% duplicate rows** (97,733 raw vs 11,925 real filings)
+  because each daily fetch re-reads the same filings, so its curated snapshot is doing
+  real work and must not be deleted to "force a clean read" -- `curated.py` KEYS gained
+  an explicit `finviz_insider` entry (restored 2026-10-05; the key reproduces the
+  historical 11,925-row snapshot exactly, so it is verified rather than guessed).
 - **Never name a DataFrame column `year` or `month`.** Hive partitioning exposes these as
   virtual columns and silently overwrites your data with the *fetch* date. Use `obs_year`
   or bake a `date` column. (Corrupted fhfa_hpi and fao_* before being caught.)
@@ -203,6 +309,11 @@ Test: `test_stale_iceberg_mirror_loses_to_newer_curated`.
   `/run`, wrapper .bat captures logs) — see work-notes/financial-data-pipeline/SESSION_NOTES_2026-08-11.md. Fallbacks:
   `--paste` (prompt) and `--callback-url "<url>"` (non-interactive, for agent sessions
   where a stdin prompt hits EOF). Tests: `tests/test_schwab_reauth.py`.
+  **Pipelines never log in themselves** (2026-10-17): every `schwabdev.Client(...)` in a
+  pipeline must call `schwab_auth.preflight()` first AND pass
+  `call_on_auth=schwab_auth.refuse_interactive_auth`, or a lapsed token pops one useless
+  login tab per pipeline per run (redirect has no listener, no stdin) and hangs 10 min
+  holding tokens.db locked. Guard: `test_every_pipeline_client_refuses_interactive_auth`.
   App has Market Data API only; Trader API (positions/transactions) 401s until enabled at
   developer.schwab.com. Schwab has NO historical options — chains are snapshot-only.
 - **`validate.py` printed row counts** (fixed 2026-07-26) now spot-check the
