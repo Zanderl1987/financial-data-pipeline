@@ -8,9 +8,10 @@ Pulls federal lobbying disclosure filings straight from the official source:
   CATALOG table: lda_lobbying_filings
 
 Source notes (probed live 2026-08-26):
-  - GET https://lda.senate.gov/api/v1/filings/?filing_year={YYYY}&page={N}
+  - GET https://lda.gov/api/v1/filings/?filing_year={YYYY}&page={N}
     Keyless JSON; page_size silently capped at 25 rows/page (~2.2k pages for
-    a recent year). Follows `next` URLs (they point at the lda.gov mirror).
+    a recent year). Follows `next` URLs. (Was lda.senate.gov until that host
+    was retired; it 503s on every path since 2026-11-10.)
   - ~57k filings by late September, ~109k for a full year (2025). At ~1.7s
     per page plus REQUEST_GAP, a whole year is 2-4 hours of paging.
   - `filing_dt_posted_after=YYYY-MM-DD` filters server-side (verified
@@ -51,7 +52,9 @@ from storage_utils import write_partitioned
 
 load_dotenv()
 
-API_URL = "https://lda.senate.gov/api/v1/filings/"
+# lda.senate.gov was retired (announced cutoff 2026-06-30; whole host 503 from
+# 2026-11-10). lda.gov serves the same /api/v1/ schema, verified 2026-11-13.
+API_URL = "https://lda.gov/api/v1/filings/"
 BASE_DIR = "storage/raw/lda_lobbying"
 REQUEST_GAP = 1.5
 RETRIES = 6
