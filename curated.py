@@ -200,6 +200,19 @@ KEYS: dict[str, list[str]] = {
     # doc_id+vessel_name as a fallback keeps those from colliding across docs.
     "jmic_documents":          ["doc_id"],
     "jmic_incidents":          ["doc_id", "ukmto_reference", "vessel_name"],
+    # Finviz Form 4 insider filings. The insider-trading page shows the most
+    # RECENT filings, so every daily fetch re-reads the same filings for as long
+    # as they stay on the page -- raw is 75.9% duplicate rows (97,733 raw vs
+    # 11,925 real filings). There is no filing id in the scraped schema, so the
+    # whole payload tuple is the key: every one of those columns is part of what
+    # makes a row a distinct filing, and this exact key reproduces the historical
+    # curated snapshot row-for-row (11,925), so it is verified rather than guessed.
+    # Deliberately EXCLUDES snapshot_date/fetched_date -- a filing first seen on
+    # 2026-09-01 and still on the page on 09-05 is ONE filing, and keying on the
+    # observation date would keep five copies of it.
+    "finviz_insider":          ["ticker", "owner", "relationship", "transaction",
+                                 "date", "shares", "value", "shares_total",
+                                 "cost", "sec_form_4"],
     # Index constituents (Iceberg-backed raw store, same caveat as above)
     "index_members":          ["index_code", "ticker", "snapshot_date"],
     "securities":             ["symbol"],

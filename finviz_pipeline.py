@@ -46,11 +46,14 @@ import io
 import os
 import re
 import time
+from pathlib import Path
 
 import pandas as pd
 import requests
 
 from storage_utils import write_partitioned
+
+REPO_ROOT = Path(__file__).resolve().parent
 
 BASE_URL = "https://finviz.com"
 HEADERS = {
@@ -143,6 +146,107 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── HTML table parsers ───────────────────────────────────────────────────────
 
+# Finviz's Ticker cell used to be a single anchor containing just the ticker.
+# It now nests a logo placeholder plus a one-letter exchange hint inside a
+# `company-ticker` element, with the real ticker in a SIBLING `tab-link` anchor:
+#
+#   <span class="flex ...">
+#     <a class="company-ticker" href="stock?t=AAPL&...">     <-- on screener/movers
+#       <img src=".../AAPL.svg" alt="AAPL logo" ... />
+#       <span>A</span>          <-- exchange initial, shown until logo loads
+#     </a>
+#     <a href="stock?t=AAPL&..." class="tab-link">AAPL</a>
+#   </span>
+#
+# The insider-trading page uses the same structure but with <span> in place of
+# the <a> wrapper, so the tag name has to be matched rather than hardcoded.
+#
+# pd.read_html concatenates ALL descendant text in a cell, so that cell parsed
+# as "A" + "AAPL" = "AAAPL". Confirmed live 2026-10-05 on both markups. Every
+# ticker gained a spurious leading capital, so NO row joined to any other table
+# on `ticker` (prices/fundamentals/securities all key on the real symbol) and
+# DOW -- the ticker this whole investigation started from -- looked like it was
+# missing from Finviz entirely when it was present as "DDOW".
+#
+# Strip that element before parsing; the sibling `tab-link` anchor carries the
+# true ticker on its own. The pattern matches the whole element (img + letter
+# span) so the surrounding markup stays balanced.
+#
+# This silently corrupted 100% of finviz_screener / finviz_financials /
+# finviz_movers / finviz_insider rows written since 2026-08-02 (~88k rows) and is
+# repaired by re-running the pipeline; see _assert_tickers_plausible for the
+# guard that stops the next markup change from doing it again unnoticed.
+# More robust: match company-ticker class regardless of attribute order/quotes
+_TICKER_LOGO_RE = re.compile(
+    r'<(?:a|span)\b[^>]*\bclass="[^"]*company-ticker[^"]*"[^>]*>.*?</(?:a|span)>',
+    re.S | re.I,
+)
+
+
+def _strip_ticker_logo_anchors(html: str) -> str:
+    """Remove Finviz's logo/exchange-letter element so tickers parse cleanly."""
+    return _TICKER_LOGO_RE.sub("", html)
+
+
+from functools import lru_cache
+
+
+def _known_tickers() -> set[str]:
+    """
+    Repo-wide symbol reference, used only as a sanity check on parsed tickers.
+
+    Read once and cached. A missing file is NOT an error -- the check is skipped.
+    """
+    return _load_known_tickers()
+
+
+@lru_cache(maxsize=1)
+def _load_known_tickers() -> set[str]:
+    path = REPO_ROOT / "symbol_universe.csv"
+    try:
+        if path.exists():
+            return {
+                s.strip().upper()
+                for s in pd.read_csv(path, usecols=[0], dtype=str).iloc[:, 0]
+                if isinstance(s, str) and s.strip()
+            }
+    except Exception as exc:  # noqa: BLE001 - a sanity check must not break the run
+        print(f"    (ticker sanity check unavailable: {exc})")
+    return set()
+
+
+def _assert_tickers_plausible(df: pd.DataFrame) -> None:
+    """
+    Fail loudly when a scrape's tickers are mostly unrecognisable.
+
+    This is the guard for the bug above: a markup change that mangles the
+    ticker column produces a frame full of valid-looking strings that simply
+    don't exist, and nothing downstream notices -- the rows just quietly fail
+    to join. Cross-checking overlap against the repo's own symbol universe
+    catches that class of failure. Raises rather than warns: a silently
+    corrupted ticker column is worse than a failed run.
+
+    Skipped for small frames (not enough signal) and when the reference file is
+    unavailable.
+    """
+    if "ticker" not in df.columns:
+        return
+    known = _known_tickers()
+    tickers = [str(t).strip().upper() for t in df["ticker"].dropna().tolist()]
+    if not known or len(tickers) < 50:
+        return
+    hits = sum(1 for t in tickers if t in known)
+    ratio = hits / len(tickers)
+    if ratio < 0.8:
+        sample = sorted(set(tickers))[:8]
+        raise ValueError(
+            f"only {hits}/{len(tickers)} ({ratio:.0%}) parsed tickers are "
+            f"recognized symbols -- Finviz's markup likely changed and the "
+            f"ticker column is being mangled. Sample: {sample}. Refusing to "
+            f"write corrupted rows."
+        )
+
+
 def _find_table_with_col(html: str, col_name: str) -> pd.DataFrame:
     """
     Parse all HTML tables and return the LARGEST one that contains col_name
@@ -153,7 +257,9 @@ def _find_table_with_col(html: str, col_name: str) -> pd.DataFrame:
     rows.  Uses pd.read_html so no extra deps are needed.
     """
     try:
-        tables = pd.read_html(io.StringIO(html), match=col_name)
+        tables = pd.read_html(
+            io.StringIO(_strip_ticker_logo_anchors(html)), match=col_name
+        )
     except Exception:
         return pd.DataFrame()
 
@@ -270,6 +376,7 @@ def run_movers() -> None:
     combined = pd.concat(frames, ignore_index=True)
     combined = _normalize_cols(combined)
     combined = _coerce_numerics(combined)
+    _assert_tickers_plausible(combined)
 
     path = write_partitioned(combined, DIR_MOVERS, f"finviz_movers_{today_str}.parquet")
     print(f"\n  Saved {len(combined)} total rows -> {path}")
@@ -302,6 +409,7 @@ def run_screener(max_results: int = 500) -> None:
     df["fetched_at"] = fetched_at
     df = _normalize_cols(df)
     df = _coerce_numerics(df)
+    _assert_tickers_plausible(df)
 
     path = write_partitioned(df, DIR_SCREENER, f"finviz_screener_{today_str}.parquet")
     print(f"  Saved {len(df)} rows -> {path}")
@@ -330,6 +438,7 @@ def run_financials(max_results: int = 500) -> None:
     df["fetched_at"] = fetched_at
     df = _normalize_cols(df)
     df = _coerce_numerics(df)
+    _assert_tickers_plausible(df)
 
     path = write_partitioned(df, DIR_FINANCIALS, f"finviz_financials_{today_str}.parquet")
     print(f"  Saved {len(df)} rows -> {path}")
@@ -392,6 +501,8 @@ def run_insider(pages: int = 10) -> None:
                 combined[col].astype(str).str.replace(r"[,$]", "", regex=True),
                 errors="coerce",
             )
+
+    _assert_tickers_plausible(combined)
 
     path = write_partitioned(combined, DIR_INSIDER, f"finviz_insider_{today_str}.parquet")
     print(f"  Saved {len(combined)} rows -> {path}")
