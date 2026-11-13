@@ -91,6 +91,13 @@ TRUSTS: dict[int, list[str]] = {
 MAX_FILINGS_SCANNED_PER_TRUST = 300
 
 
+def _as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _find_reports(cik: int, want_series: set[str]) -> dict:
     """Walk one trust's NPORT-P filings (newest first), returning {series_id:
     report} for every wanted series found. The scan ends once a full quarter's
@@ -164,7 +171,9 @@ def _parse_report(fund_name: str, ticker: str, report) -> pd.DataFrame:
         "snapshot_date": SNAPSHOT_DATE,
         "fund_ticker": ticker,
         "fund_name": fund_name,
-        "fund_cik": getattr(report, "cik", None),
+        # EdgarTools returns cik as int for some filings and as a zero-padded
+        # string ('0000225997') for others; the column is int64.
+        "fund_cik": _as_int(getattr(report, "cik", None)),
         "holding_ticker": df.get("holding_ticker"),
         "holding_name": df.get("holding_name"),
         "cusip": df.get("cusip"),

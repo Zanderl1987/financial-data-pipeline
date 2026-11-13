@@ -378,8 +378,19 @@ IBES, so `probe()` before building a pipeline, per `data-source-vetting` §2.
   - **Global X -- www is behind a Vercel bot checkpoint (429); don't fetch it.** The S3
     CDN still serves `{ticker_LOWERCASE}_full-holdings_YYYYMMDD.csv` without it. The
     uppercase filename the pipeline used 404'd, so it had never written a row.
-  - **Amplify (DIVO) -- Firestore feed 403s** since ~2026-09; DIVO also comes via N-PORT
-    in fund_holdings' mutual-fund path. Not fixed.
+  - **Amplify (DIVO) -- Firestore feed 403s** since ~2026-09; `amplify_holdings` is
+    unwired. DIVO comes from `nport_series_holdings` (series S000055107).
+  - **Name guards that match the wrong fund.** fund_holdings_pipeline's `Fund(ticker)`
+    resolved BND/BNDX/VTEB/DIVO to sibling funds (Total Bond Market *II*, Total Intl
+    Bond *II*, Intermediate-Term Tax-Exempt, Amplify BlackSwan), and their
+    `NPORT_ETF_NAME_GUARD` entries had been edited to match those wrong names, so the
+    guard passed for months. All four moved to `nport_series_holdings`; 1.16M
+    wrong-fund rows removed 2026-11-13. A guard names what the ticker IS; when it
+    fails, fix the resolution, never the guard.
+  - **USO (`uscf_holdings_pipeline.py`) was never wired into run_all**, so USO holdings
+    stopped at the two manual runs (2026-09-01/04). It is still unwired: it scrapes a
+    per-page-load Bearer token from the site's `api_key.php`, and that access pattern
+    was flagged as unauthorized access in review. Needs a decision before scheduling.
   - **J.P. Morgan -- GO**: `am.jpmorgan.com/FundsMarketingHandler/excel?type=
     dailyETFHoldings&cusip=...` (robots.txt only fences `/asset-management/`).
   - **SSGA SPLG was renamed SPYM** (late Oct 2025); the SPLG file still downloads,

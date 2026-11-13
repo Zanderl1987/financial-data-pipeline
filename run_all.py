@@ -971,14 +971,16 @@ PIPELINES: list[PipelineSpec] = [
         tables=['fund_holdings'],
         timeout=300,
     ),
-    PipelineSpec(
-        name="amplify_holdings",
-        file="amplify_holdings_pipeline.py",
-        desc="ETF holdings -- Amplify daily holdings (public Firestore feed, keyless) (Iceberg table)",
-        stage=1,
-        tables=['fund_holdings'],
-        timeout=300,
-    ),
+    # Unwired 2026-11-13: the Amplify Firestore feed 403s on every request since
+    # ~2026-09-04. DIVO now comes from nport_series_holdings (quarterly N-PORT).
+    # PipelineSpec(
+    #     name="amplify_holdings",
+    #     file="amplify_holdings_pipeline.py",
+    #     desc="ETF holdings -- Amplify daily holdings (public Firestore feed, keyless) (Iceberg table)",
+    #     stage=1,
+    #     tables=['fund_holdings'],
+    #     timeout=300,
+    # ),
     PipelineSpec(
         name="firsttrust_holdings",
         file="firsttrust_holdings_pipeline.py",

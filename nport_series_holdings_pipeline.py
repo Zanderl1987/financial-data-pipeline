@@ -92,6 +92,17 @@ FUNDS: dict[str, tuple[int, str, str]] = {
     "ARKX": (1579982, "S000071318", "ARK Space & Defense Innovation ETF"),
     # WisdomTree Trust
     "DGRW": (1350487, "S000040816", "WisdomTree U.S. Quality Dividend Growth Fund"),
+    # Amplify ETF Trust. The Firestore feed (amplify_holdings_pipeline.py) 403s
+    # since 2026-09, and fund_holdings_pipeline.py's Fund("DIVO") resolved to a
+    # sibling series (BlackSwan Growth & Treasury Core) -- hence series matching.
+    "DIVO": (1633061, "S000055107", "Amplify CWP Enhanced Dividend Income ETF"),
+    # Vanguard bond ETFs formerly fetched by fund_holdings_pipeline.py's
+    # Fund(ticker), which resolved each to a "II"/sibling fund (BND -> Total Bond
+    # Market II, BNDX -> Total International Bond II, VTEB -> Intermediate-Term
+    # Tax-Exempt) while its name guard had been set to match the wrong fund.
+    "BND":  (794105, "S000002564", "Vanguard Total Bond Market ETF"),
+    "BNDX": (1532203, "S000035729", "Vanguard Total International Bond ETF"),
+    "VTEB": (225997, "S000048568", "Vanguard Tax-Exempt Bond ETF"),
 }
 
 

@@ -259,23 +259,19 @@ MUTUAL_FUND_UNIVERSE = {
     # to the exact expected fund (2026-09-01) and carry an expected-name guard
     # (nt: each must match a substring of report.name or the fetch raises) so a
     # future regressions fails loudly instead of writing a sibling fund's
-    # holdings. BND/BNDX/VTEB add holdings for gap tickers that SecuritiesDB,
-    # the BlackRock varnish API, and the SSGA SPDR feed all miss.
-    "BND":  "Vanguard Total Bond Market ETF (N-PORT, name-guarded)",
-    "BNDX": "Vanguard Total International Bond ETF (N-PORT, name-guarded)",
-    "VTEB": "Vanguard Tax-Exempt Bond ETF (N-PORT, name-guarded)",
-    # Amplify ETFs (Firestore API 403, but N-PORT works)
-    "DIVO": "Amplify ETF Trust - Amplify BlackSwan Growth & Treasury Core ETF (N-PORT, name-guarded)",
+    # holdings.
+    #
+    # REMOVED 2026-11-13: BND, BNDX, VTEB, DIVO. All four resolved to the WRONG
+    # fund (Total Bond Market II, Total International Bond II, Intermediate-Term
+    # Tax-Exempt, Amplify BlackSwan) and their guards had been edited to match
+    # the wrong fund's name, so the guard could never fire. They now come from
+    # nport_series_holdings_pipeline.py, matched on SEC series_id. A guard must
+    # name the fund the TICKER is, never what the resolver returned.
 }
 
 # Substring that must appear in the resolved report.name (case-insensitive)
 # before a guarded ETF's holdings are accepted.
-NPORT_ETF_NAME_GUARD = {
-    "BND":  "total bond market ii",
-    "BNDX": "total international bond ii",
-    "VTEB": "intermediate-term tax-exempt",
-    "DIVO": "blackswan growth & treasury core",
-}
+NPORT_ETF_NAME_GUARD: dict[str, str] = {}
 
 
 def _fetch_blackrock_holdings_rows(ticker: str, pid: str, api_params: dict | None = None) -> list:
