@@ -11,6 +11,7 @@ import argparse
 import pyarrow.parquet as pq
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
+from dji_symbols import get_dji_symbols
 
 load_dotenv()
 
@@ -173,36 +174,6 @@ def load_cik_map(force_refresh=False):
         json.dump(cik_map, f)
     print(f"Fetched and cached {len(cik_map)} tickers.")
     return cik_map
-
-
-def get_dji_symbols():
-    try:
-        tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
-            storage_options={"User-Agent": "Mozilla/5.0"},
-        )
-        for df in tables:
-            col = next(
-                (c for c in df.columns
-                 if str(c).strip().lower() in ("symbol", "ticker")),
-                None,
-            )
-            if col is not None and 25 <= len(df) <= 35:
-                symbols = (
-                    df[col].astype(str).str.strip().str.upper()
-                    .str.replace(r"\s+.*$", "", regex=True)
-                    .tolist()
-                )
-                print(f"Fetched {len(symbols)} DJI symbols from Wikipedia.")
-                return symbols
-        raise ValueError("no components table with a Symbol/Ticker column found")
-    except Exception as e:
-        print(f"Wikipedia fetch failed ({e}). Using fallback list.")
-        return [
-            "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
-            "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
-            "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
-        ]
 
 
 # ---------------------------------------------------------------------------

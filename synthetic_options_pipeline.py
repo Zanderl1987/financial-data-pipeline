@@ -46,17 +46,15 @@ import pandas as pd
 
 import pricing_models as pm
 from storage_utils import write_partitioned
+from dji_symbols import FALLBACK_DJI_SYMBOLS
 
 OUTPUT_DIR = os.path.join("storage", "raw", "synthetic_options")
 PRICES_GLOB = os.path.join("storage", "raw", "prices", "prices_*.parquet")
 MACRO_GLOB = os.path.join("storage", "raw", "macro", "macro_*.parquet")
 
-# DJI-30 default universe (matches price_history_pipeline fallback list).
-DEFAULT_SYMBOLS = [
-    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
-    "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
-    "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
-]
+# DJI-30 default universe -- single source of truth is dji_symbols (verified
+# 2026-10-05; previously an inline copy that went stale, see that module).
+DEFAULT_SYMBOLS = list(FALLBACK_DJI_SYMBOLS)
 
 DEFAULT_DTE = [7, 14, 30, 60, 90, 180, 365]
 VOL_METHODS = ["cc", "yz", "vix"]          # -> column sigma_cc / sigma_yz / sigma_vix

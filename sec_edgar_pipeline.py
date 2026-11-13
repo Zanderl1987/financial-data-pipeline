@@ -23,6 +23,7 @@ import time
 import pandas as pd
 import requests
 from storage_utils import write_partitioned
+from dji_symbols import get_dji_symbols
 
 SEC_BASE = "https://data.sec.gov"
 EFTS_BASE = "https://efts.sec.gov/LATEST"
@@ -70,37 +71,6 @@ EFTS_SEARCH_QUERIES = [
     '"cybersecurity"',
     '"artificial intelligence"',
 ]
-
-
-def get_dji_symbols():
-    """Scrape DOW 30 tickers from Wikipedia."""
-    try:
-        tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
-            storage_options={"User-Agent": "Mozilla/5.0"},
-        )
-        for df in tables:
-            col = next(
-                (c for c in df.columns
-                 if str(c).strip().lower() in ("symbol", "ticker")),
-                None,
-            )
-            if col is not None and 25 <= len(df) <= 35:
-                symbols = (
-                    df[col].astype(str).str.strip().str.upper()
-                    .str.replace(r"\s+.*$", "", regex=True)
-                    .tolist()
-                )
-                print(f"Scraped {len(symbols)} DJI symbols from Wikipedia.")
-                return symbols
-        raise ValueError("no components table found")
-    except Exception as e:
-        print(f"Wikipedia scrape failed ({e}). Using fallback.")
-        return [
-            "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
-            "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
-            "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
-        ]
 
 
 def get_cik_lookup():

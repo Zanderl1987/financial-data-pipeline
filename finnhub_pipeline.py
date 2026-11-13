@@ -30,6 +30,12 @@ import pandas as pd
 from dotenv import load_dotenv
 from storage_utils import write_partitioned
 
+# DJI-30 universe comes from dji_symbols (single source of truth). Re-exported
+# under the old name because short_interest_pipeline and stockanalysis_pipeline
+# import get_dji_symbols from this module.
+from dji_symbols import FALLBACK_DJI_SYMBOLS as FALLBACK_SYMBOLS  # noqa: F401
+from dji_symbols import get_dji_symbols  # noqa: F401
+
 load_dotenv()
 
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
@@ -51,43 +57,6 @@ DIRS = {
 REQUEST_INTERVAL = 1.1  # seconds
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 60
-
-FALLBACK_SYMBOLS = [
-    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
-    "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
-    "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
-]
-
-def get_dji_symbols():
-    """Scrape the 30 Dow components from Wikipedia.
-
-    The components table's index on the page shifts over time, so locate it by
-    content — the table carrying a Symbol/Ticker column with ~30 rows — rather
-    than by a hardcoded position. Falls back to a static list on any failure.
-    """
-    try:
-        tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
-            storage_options={"User-Agent": "Mozilla/5.0"},
-        )
-        for df in tables:
-            col = next(
-                (c for c in df.columns
-                 if str(c).strip().lower() in ("symbol", "ticker")),
-                None,
-            )
-            if col is not None and 25 <= len(df) <= 35:
-                symbols = (
-                    df[col].astype(str).str.strip().str.upper()
-                    .str.replace(r"\s+.*$", "", regex=True)  # drop footnote suffixes
-                    .tolist()
-                )
-                print(f"Scraped {len(symbols)} DJI symbols from Wikipedia.")
-                return symbols
-        raise ValueError("no components table with a Symbol/Ticker column found")
-    except Exception as e:
-        print(f"Scraping DJI symbols failed ({e}). Using hardcoded fallback symbols.")
-        return FALLBACK_SYMBOLS
 
 class RateLimiter:
     def __init__(self, interval):
