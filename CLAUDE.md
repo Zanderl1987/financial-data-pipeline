@@ -387,10 +387,12 @@ IBES, so `probe()` before building a pipeline, per `data-source-vetting` §2.
     guard passed for months. All four moved to `nport_series_holdings`; 1.16M
     wrong-fund rows removed 2026-11-13. A guard names what the ticker IS; when it
     fails, fix the resolution, never the guard.
-  - **USO (`uscf_holdings_pipeline.py`) was never wired into run_all**, so USO holdings
-    stopped at the two manual runs (2026-09-01/04). It is still unwired: it scrapes a
-    per-page-load Bearer token from the site's `api_key.php`, and that access pattern
-    was flagged as unauthorized access in review. Needs a decision before scheduling.
+  - **USO -- from SEC 10-Q/10-K** (`uso_10q_holdings`, source `edgar_10q:USO`, wired
+    2026-11-13, backfilled to 2024-12-31). USO is a commodity pool, so no N-PORT; the
+    Schedule of Investments HTML is parsed. `uscf_holdings_pipeline.py` (USCF
+    Marketing API) was never wired and stays unwired: it scrapes a Bearer token from
+    the site's `api_key.php`, flagged as unauthorized access in review. Its weights
+    sum past 100% by design: futures/swaps are exposure, T-bills/MMFs the collateral.
   - **J.P. Morgan -- GO**: `am.jpmorgan.com/FundsMarketingHandler/excel?type=
     dailyETFHoldings&cusip=...` (robots.txt only fences `/asset-management/`).
   - **SSGA SPLG was renamed SPYM** (late Oct 2025); the SPLG file still downloads,

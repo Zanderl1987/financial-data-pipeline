@@ -1027,6 +1027,15 @@ PIPELINES: list[PipelineSpec] = [
         timeout=900,
     ),
     PipelineSpec(
+        name="uso_10q_holdings",
+        file="uso_10q_holdings_pipeline.py",
+        desc="ETF holdings -- USO quarterly holdings (SEC 10-Q/10-K Schedule of Investments, keyless) (Iceberg table)",
+        stage=1,
+        tables=['fund_holdings'],
+        requires_env=['EDGAR_USER_AGENT'],
+        timeout=300,
+    ),
+    PipelineSpec(
         name="jpmorgan_holdings",
         file="jpmorgan_holdings_pipeline.py",
         desc="ETF holdings -- J.P. Morgan JEPI/JEPQ/JPST daily holdings XLSX (official issuer, no auth) (Iceberg table)",

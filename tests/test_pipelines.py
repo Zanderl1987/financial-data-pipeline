@@ -101,6 +101,7 @@ PIPELINE_MODULES = [
     "robo_holdings_pipeline",
     "vanguard_bond_holdings_pipeline",
     "nport_series_holdings_pipeline",
+    "uso_10q_holdings_pipeline",
     "jpmorgan_holdings_pipeline",
     "schwab_holdings_pipeline",
     "gold_bar_holdings_pipeline",
