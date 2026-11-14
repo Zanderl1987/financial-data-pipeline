@@ -168,7 +168,9 @@ BLACKROCK_PIDS = {
 }
 
 # Patterns that indicate non-security rows to filter out
-NON_SECURITY_TICKER_RE = re.compile(r"^--+$|^[A-Z]{0,2}\d{2,}$")
+# Only the "--" CVR/escrow placeholder; digit tickers are real listings (see
+# fund_holdings_pipeline, where the old digit pattern dropped foreign stocks).
+NON_SECURITY_TICKER_RE = re.compile(r"^--+$")
 NON_SECURITY_NAME_RE = re.compile(
     r"Cash|Derivative|Emini|Futures|Option|Swap|Note\b", re.IGNORECASE
 )
@@ -249,10 +251,13 @@ def fetch_blackrock_holdings(ticker: str) -> pd.DataFrame:
 
     # Drop rows where name or asset class indicates cash / derivatives
     if asset_class_col:
-        df = df[~df[asset_class_col].astype(str).str.contains(
-            "cash|Cash|derivative|Derivative", case=False, na=False
+        df = df[~df[asset_class_col].astype(str).str.strip().str.contains(
+            r"cash|derivative|^futures$|^fx$|^forwards$|^swaps?$|^options?$",
+            case=False, na=False
         )]
-    if name_col:
+    elif name_col:
+        # Fallback only: substring names hit real companies (FIRSTCASH,
+        # OPTION CARE HEALTH), so the asset class wins when the sheet has one.
         df = df[~df[name_col].astype(str).str.contains(
             "Cash|Derivative|Emini|Futures|Option|Swap", case=False, na=False
         )]

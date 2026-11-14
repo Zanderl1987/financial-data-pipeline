@@ -66,8 +66,16 @@ FETCHED_AT = datetime.now(timezone.utc)
 BLACKROCK_SLEEP = 0.5  # seconds between BlackRock API calls
 EDGAR_SLEEP = 0.15     # seconds between EdgarTools calls (~6 req/sec, conservative)
 
-# Non-security filter patterns (same as index_constituents_pipeline)
-NON_SECURITY_TICKER_RE = re.compile(r"^--+$|^[A-Z]{0,2}\d{2,}$")
+# Non-security filter patterns (same as index_constituents_pipeline).
+# Only the "--" placeholder BlackRock puts on CVR/escrow stubs. Digit tickers
+# are real foreign listings (TSMC 2330, Samsung 005930, DBS D05): an old
+# ^[A-Z]{0,2}\d{2,}$ alternative dropped them and cut 66-70% of the weight out
+# of EEM/IEMG/ESGE until 2026-11-14.
+NON_SECURITY_TICKER_RE = re.compile(r"^--+$")
+# BlackRock's asset classes for cash and derivatives (none say "derivative").
+NON_SECURITY_ASSET_CLASS_RE = re.compile(
+    r"cash|derivative|^futures$|^fx$|^forwards$|^swaps?$|^options?$", re.IGNORECASE
+)
 NON_SECURITY_NAME_RE = re.compile(
     r"Cash|Derivative|Emini|Futures|Option|Swap|Note\b", re.IGNORECASE
 )
@@ -352,10 +360,12 @@ def fetch_blackrock_etf_holdings(ticker: str) -> pd.DataFrame:
     before = len(df)
     df = df[~df[ticker_col].astype(str).str.strip().str.match(NON_SECURITY_TICKER_RE)]
     if asset_class_col:
-        df = df[~df[asset_class_col].astype(str).str.contains(
-            "cash|Cash|derivative|Derivative", case=False, na=False
+        df = df[~df[asset_class_col].astype(str).str.strip().str.contains(
+            NON_SECURITY_ASSET_CLASS_RE, na=False
         )]
-    if name_col:
+    elif name_col:
+        # Fallback only: substring names also hit real companies (CAPGEMINI,
+        # FIRSTCASH, LANCASHIRE, OPTION CARE HEALTH), so the asset class wins.
         df = df[~df[name_col].astype(str).str.contains(
             "Cash|Derivative|Emini|Futures|Option|Swap", case=False, na=False
         )]
