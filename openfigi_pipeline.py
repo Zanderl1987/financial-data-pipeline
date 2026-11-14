@@ -49,6 +49,10 @@ RATE_LIMIT_RPM_WITH_KEY = 250   # approx
 RATE_LIMIT_RPM_NO_KEY = 25
 DELAY_WITH_KEY = 60.0 / RATE_LIMIT_RPM_WITH_KEY   # ~0.24s
 DELAY_NO_KEY = 60.0 / RATE_LIMIT_RPM_NO_KEY        # 2.4s
+# Tickers per Iceberg write. Without a key 500 tickers is ~50 requests, about
+# 5 minutes, inside run_all's 600s timeout. A run used to write only at the
+# end, so ~4,170 new tickers on 2026-11-14 timed out and saved nothing.
+WRITE_CHUNK = 500
 
 log = logging.getLogger("openfigi")
 
@@ -352,16 +356,16 @@ def main(backfill: bool = False, tickers: list[str] | None = None):
         log.info("All tickers already mapped. Nothing to do.")
         return
 
-    # Resolve
+    # Resolve and write in chunks, so a run killed by run_all's timeout keeps
+    # what it resolved and the next run skips those tickers. Unmatched tickers
+    # are written too, so they are not retried either.
     sorted_tickers = sorted(all_tickers)
-    df = resolve_tickers(sorted_tickers)
-
-    if df.empty:
-        log.warning("No results from OpenFIGI.")
-        return
-
-    # Write to Iceberg
-    write_to_iceberg(df)
+    for start in range(0, len(sorted_tickers), WRITE_CHUNK):
+        df = resolve_tickers(sorted_tickers[start:start + WRITE_CHUNK])
+        if df.empty:
+            log.warning("No results from OpenFIGI for chunk starting at %d.", start)
+            continue
+        write_to_iceberg(df)
 
     log.info("=" * 60)
     log.info("Done.")
