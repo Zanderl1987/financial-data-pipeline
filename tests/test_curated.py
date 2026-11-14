@@ -247,6 +247,28 @@ class TestBatchDedup:
         twice = curated.dedup("fund_holdings", once)
         pd.testing.assert_frame_equal(once, twice)
 
+    def test_iceberg_rewrite_copy_of_a_fetch_is_dropped(self):
+        # An overwrite that matches part of a file makes Iceberg copy the rest
+        # into a new file with the same fetched_at (USO, 2026-11-13). The
+        # identical AOA lines still both survive: they share one file.
+        df = self._df().assign(_source_file="a.parquet")
+        copy = df[df.fund_ticker == "BND"].assign(_source_file="b.parquet")
+        out = curated.dedup("fund_holdings", pd.concat([df, copy], ignore_index=True))
+        assert len(out[out.fund_ticker == "BND"]) == 3
+        assert len(out[out.fund_ticker == "AOA"]) == 2
+        assert "_source_file" not in out.columns
+
+    def test_load_raw_tags_batch_rows_with_their_file(self, tmp_path, monkeypatch):
+        d = tmp_path / "fund_holdings"
+        d.mkdir()
+        self._df().to_parquet(d / "a.parquet")
+        self._df().to_parquet(d / "b.parquet")
+        monkeypatch.setitem(curated.q.CATALOG, "fund_holdings",
+                            (d / "*.parquet").as_posix())
+        raw = curated._load_raw("fund_holdings")
+        assert raw["_source_file"].nunique() == 2
+        assert len(curated.dedup("fund_holdings", raw)) == 5
+
 
 @pytest.mark.parametrize("table", ["prices", "macro", "fundamentals_annual"])
 def test_curated_views_have_no_duplicate_keys(table):

@@ -515,6 +515,17 @@ _LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options",
 # fetched_at per fund per run, so (fund, date, source, fetched_at) identifies a
 # fetch. Verified on all raw files: no file mixes timestamps within a batch;
 # only one re-fetch ever shrank (FAN 2026-08-31, 52 -> 47, the issuer's file).
+#
+# One fetch, one file (added 2026-11-14). These tables are Iceberg, and raw
+# reads glob every data file, including files an overwrite has retired: that
+# is where fund_holdings' history lives (each run overwrites a fund's whole
+# partition, so the live snapshot holds ~2% of the rows). But an overwrite
+# whose filter matches only PART of a file makes Iceberg copy the rest of that
+# file into a new one, keeping its fetched_at. Both copies then look like the
+# newest fetch. uso_10q's backfill wrote eight quarters in one file, the next
+# run overwrote one quarter, and seven quarters were curated twice (weights
+# summed to ~350%). So within a fetch, rows from one file only.
+_SOURCE_FILE = "_source_file"
 _BATCH_KEYS: dict[str, list[str]] = {
     "fund_holdings": ["fund_ticker", "snapshot_date", "source"],
 }
@@ -523,7 +534,29 @@ _BATCH_KEYS: dict[str, list[str]] = {
 def _keep_latest_batch(table: str, df: pd.DataFrame) -> pd.DataFrame:
     keys = [c for c in _BATCH_KEYS[table] if c in df.columns]
     newest = df.groupby(keys, dropna=False)["fetched_at"].transform("max")
-    return df[df["fetched_at"] == newest]
+    df = df[df["fetched_at"] == newest]
+    if _SOURCE_FILE in df.columns:
+        # Copies are identical, so which file wins doesn't matter; max() is
+        # just deterministic.
+        one = df.groupby(keys + ["fetched_at"], dropna=False)[_SOURCE_FILE].transform("max")
+        df = df[df[_SOURCE_FILE] == one]
+    return df
+
+
+def _load_raw(table: str) -> pd.DataFrame:
+    """Raw rows for compaction. Batch tables also get each row's file path."""
+    if table not in _BATCH_KEYS:
+        return q.load(table)
+    import glob as glob_mod
+
+    glob_path = q.CATALOG[table]
+    if not glob_mod.glob(glob_path.replace("/", os.sep), recursive=True):
+        return pd.DataFrame()
+    return q.sql(
+        f"SELECT * EXCLUDE (filename), filename AS {_SOURCE_FILE} "
+        f"FROM read_parquet('{glob_path}', union_by_name=True, "
+        f"hive_partitioning=True, filename=True)"
+    )
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
 # SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
@@ -927,7 +960,9 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     df = _backfill_snapshot_date(table, df)
     df = _drop_zero_bars(table, df)
     if table in _BATCH_KEYS and "fetched_at" in df.columns:
-        return _keep_latest_batch(table, df).reset_index(drop=True)
+        df = _keep_latest_batch(table, df)
+        return df.drop(columns=[_SOURCE_FILE], errors="ignore").reset_index(drop=True)
+    df = df.drop(columns=[_SOURCE_FILE], errors="ignore")
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)
@@ -951,7 +986,7 @@ def compact(table: str) -> "str | None":
         return result[0]
 
     with _raw_reads():
-        raw = q.load(table)
+        raw = _load_raw(table)
     if raw.empty:
         return None
 
@@ -998,7 +1033,7 @@ def compact_all(tables: "list[str] | None" = None, verbose: bool = True) -> pd.D
                 continue
 
             try:
-                raw = q.load(name)
+                raw = _load_raw(name)
             except Exception as e:  # noqa: BLE001 — surface, keep going
                 if verbose:
                     print(f"  {name:28s} ERROR {str(e)[:50]}")
@@ -1035,7 +1070,7 @@ def summary(tables: "list[str] | None" = None) -> pd.DataFrame:
         loaded = {}
         for name in names:
             try:
-                df = q.load(name)
+                df = _load_raw(name)
             except Exception:
                 continue
             if not df.empty:

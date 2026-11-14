@@ -125,6 +125,14 @@ full diagnostic trail.
   every write, retains 30 days of snapshot history — trims the logical snapshot
   log, though pyiceberg 0.11.1's Python client has no on-disk orphan-file GC yet,
   so it doesn't reclaim old data/manifest files already written).
+- **Retired data files ARE the history.** query.py/curated glob every parquet under
+  `data/`, not the live snapshot. fund_holdings overwrites a fund's whole partition each
+  run, so its live snapshot holds ~2% of the rows (567k of 23.4M, 2026-11-14); reading
+  "live files only" would drop the rest. The catch: an overwrite whose filter matches
+  only PART of a file makes Iceberg copy the rest into a new file with the same
+  `fetched_at`, and the glob reads both copies. Write one file per unit you will later
+  overwrite (uso_10q: one overwrite per quarter), and curated `_keep_latest_batch`
+  keeps each fetch from a single file as a backstop.
 - The Bash tool's working directory persists across tool calls in a session. A
   stray `cd` into the other clone (e.g. to check its git log) will silently
   redirect every subsequent *relative*-path command to the wrong repo. Use

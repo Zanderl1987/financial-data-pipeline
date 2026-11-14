@@ -317,7 +317,7 @@ def write_to_iceberg(df: pd.DataFrame) -> int:
     """Replace this source's USO rows (other USO sources are left alone)."""
     import pyarrow as pa
     from pyiceberg.catalog import load_catalog
-    from pyiceberg.expressions import And, EqualTo, In
+    from pyiceberg.expressions import And, EqualTo
 
     catalog = load_catalog(
         "constituents", type="sql",
@@ -339,13 +339,21 @@ def write_to_iceberg(df: pd.DataFrame) -> int:
     arrow = pa.Table.from_pandas(df, schema=arrow_schema, preserve_index=False)
 
     # Replace only the quarters fetched in this run, so the default 1-filing
-    # daily run doesn't wipe the backfilled history.
-    periods = sorted({d.isoformat() for d in df["reporting_period_end"]})
-    table.overwrite(arrow, overwrite_filter=And(
-        EqualTo("fund_ticker", FUND_TICKER),
-        EqualTo("source", SOURCE),
-        In("reporting_period_end", periods),
-    ))
+    # daily run doesn't wipe the backfilled history. One overwrite per quarter
+    # puts each quarter in its own file: when a later run replaces one quarter,
+    # Iceberg retires that file whole. A file holding several quarters would be
+    # rewritten instead, and the copy of the untouched quarters looked like a
+    # second fetch to curated (USO weights summed to ~350%, 2026-11-14).
+    import pyarrow.compute as pc
+
+    with table.transaction() as txn:
+        for period in sorted(set(df["reporting_period_end"])):
+            part = arrow.filter(pc.equal(arrow["reporting_period_end"], pa.scalar(period)))
+            txn.overwrite(part, overwrite_filter=And(
+                EqualTo("fund_ticker", FUND_TICKER),
+                EqualTo("source", SOURCE),
+                EqualTo("reporting_period_end", period.isoformat()),
+            ))
     log.info("[Iceberg] USO: %d rows written (source=%s)", len(arrow), SOURCE)
 
     try:

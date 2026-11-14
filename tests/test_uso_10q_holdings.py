@@ -91,3 +91,59 @@ def test_rows_carry_period_and_source(df):
 
 def test_merge_numeric_cells():
     assert _merge_numeric_cells(["x", "$", "(", "993", ")"]) == ["x", "$(993)"]
+
+
+def test_write_puts_each_quarter_in_its_own_file(tmp_path, monkeypatch):
+    """A later one-quarter overwrite must retire files whole, never rewrite one.
+    A rewrite copies the untouched quarters into a new file with their old
+    fetched_at, and curated read both copies (USO 2026-11-14)."""
+    import pandas as pd
+    from pyiceberg.catalog import load_catalog
+    from pyiceberg.partitioning import PartitionField, PartitionSpec
+    from pyiceberg.schema import Schema
+    from pyiceberg.transforms import IdentityTransform
+    from pyiceberg.types import (DateType, DoubleType, NestedField, StringType,
+                                 TimestamptzType)
+
+    import uso_10q_holdings_pipeline as uso
+
+    monkeypatch.setattr(uso, "ICEBERG_WAREHOUSE", tmp_path)
+    monkeypatch.setattr(uso, "CATALOG_DB", tmp_path / "cat.db")
+    cat = load_catalog("constituents", type="sql",
+                       uri=f"sqlite:///{(tmp_path / 'cat.db').as_posix()}",
+                       warehouse=f"file://{tmp_path.as_posix()}")
+    cat.create_namespace("constituents")
+    schema = Schema(
+        NestedField(1, "snapshot_date", DateType(), required=True),
+        NestedField(2, "fund_ticker", StringType(), required=True),
+        NestedField(3, "holding_name", StringType()),
+        NestedField(4, "weight_pct", DoubleType()),
+        NestedField(5, "filing_date", DateType()),
+        NestedField(6, "reporting_period_end", DateType()),
+        NestedField(7, "maturity_date", DateType()),
+        NestedField(8, "source", StringType(), required=True),
+        NestedField(9, "fetched_at", TimestamptzType(), required=True),
+    )
+    table = cat.create_table(
+        "constituents.fund_holdings", schema,
+        partition_spec=PartitionSpec(PartitionField(2, 1000, IdentityTransform(), "fund_ticker")))
+
+    def quarters(*periods):
+        return pd.DataFrame([{
+            "snapshot_date": p, "fund_ticker": "USO", "holding_name": name,
+            "weight_pct": 50.0, "filing_date": p, "reporting_period_end": p,
+            "maturity_date": None, "source": uso.SOURCE,
+        } for p in periods for name in ("CL futures", "T-bill")])
+
+    uso.write_to_iceberg(quarters("2026-03-31", "2026-06-30", "2026-09-30"))
+    uso.write_to_iceberg(quarters("2026-09-30"))
+
+    table.refresh()
+    live = [t.file.file_path for t in table.scan().plan_files()]
+    per_file = [pd.read_parquet(p.replace("file://", "")).reporting_period_end.nunique()
+                for p in live]
+    assert per_file == [1, 1, 1]
+    rows = table.scan().to_pandas()
+    assert len(rows) == 6
+    on_disk = list(tmp_path.rglob("*.parquet"))
+    assert len(on_disk) == 4   # 3 from the backfill + 1 replacement, no rewrite
