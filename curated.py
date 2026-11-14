@@ -272,15 +272,7 @@ KEYS: dict[str, list[str]] = {
     # end_date) is the natural key; identical intervals across runs collapse
     # to one row, a real reconstitution shows up as a genuinely new interval.
     "sp500_membership":       ["symbol", "start_date", "end_date"],
-    # Bond ETF rows have no holding_ticker (BlackRock's fixed-income sheets
-    # identify positions by name only) -- holding_ticker alone would collapse
-    # every bond in a fund to one row. holding_name/maturity_date/coupon_pct/
-    # par_value together are unique per position (verified against live AGG/
-    # LQD/HYG/TIP data, 2026-07-31); harmless no-ops for equity/MF rows since
-    # holding_ticker already disambiguates those and the added columns are
-    # consistently null within each real ticker's rows.
-    "fund_holdings":          ["fund_ticker", "holding_ticker", "holding_name",
-                                "maturity_date", "coupon_pct", "par_value", "snapshot_date"],
+    # fund_holdings is NOT row-keyed: see _BATCH_KEYS below.
     "etf_holdings":           ["fund_ticker", "holding_ticker", "snapshot_date"],
     "identifier_map":         ["ticker"],
     # EIA refinery activity / crude trade
@@ -502,6 +494,36 @@ def _curated_path(table: str) -> str:
 # so the period_end rules below have SQL twins in _compact_large_table().
 _LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options",
                  "fundamentals_annual", "fundamentals_quarterly"}
+
+# ── Batch dedup (whole-snapshot tables) ───────────────────────────────────────
+# Some tables are lists of positions with no natural per-row key. For these,
+# a re-fetch replaces the earlier fetch WHOLE: within each batch group, only
+# rows carrying the group's newest fetched_at are kept, and every one of them
+# is kept, including rows identical to each other.
+#
+# fund_holdings, changed 2026-11-13. Its old row key (fund_ticker,
+# holding_ticker, holding_name, maturity_date, coupon_pct, par_value,
+# snapshot_date) dropped 5.6M of 20.9M real positions (27%):
+#   - N-PORT bonds: par_value is empty, so two bonds of one issuer with the same
+#     maturity and coupon but different CUSIPs collapsed (BND 17,408 -> 13,719).
+#   - BlackRock look-through sheets (AOA/AOR/AOK/AOM): bonds carry no maturity
+#     or coupon, so every bond of an issuer collapsed; some lines are identical
+#     in every column (rounded weights) yet are separate positions.
+#   - Same security in two lots, and two companies sharing a ticker string
+#     (EQT, RIO TINTO in ACWI).
+# Adding cusip/isin to the key still lost 84k live rows. Pipelines write one
+# fetched_at per fund per run, so (fund, date, source, fetched_at) identifies a
+# fetch. Verified on all raw files: no file mixes timestamps within a batch;
+# only one re-fetch ever shrank (FAN 2026-08-31, 52 -> 47, the issuer's file).
+_BATCH_KEYS: dict[str, list[str]] = {
+    "fund_holdings": ["fund_ticker", "snapshot_date", "source"],
+}
+
+
+def _keep_latest_batch(table: str, df: pd.DataFrame) -> pd.DataFrame:
+    keys = [c for c in _BATCH_KEYS[table] if c in df.columns]
+    newest = df.groupby(keys, dropna=False)["fetched_at"].transform("max")
+    return df[df["fetched_at"] == newest]
 
 # ── Price sanity filter ───────────────────────────────────────────────────────
 # SCOPE NARROWED 2026-08-30. This originally dropped every non-positive price.
@@ -904,6 +926,8 @@ def dedup(table: str, df: pd.DataFrame) -> pd.DataFrame:
     df = _drop_out_of_order_dates(table, df)
     df = _backfill_snapshot_date(table, df)
     df = _drop_zero_bars(table, df)
+    if table in _BATCH_KEYS and "fetched_at" in df.columns:
+        return _keep_latest_batch(table, df).reset_index(drop=True)
     subset = _dedup_subset(table, df)
     out = _sort_recency(df).drop_duplicates(subset=subset, keep="last")
     return out.reset_index(drop=True)
@@ -1025,7 +1049,7 @@ def summary(tables: "list[str] | None" = None) -> pd.DataFrame:
             "curated_rows": len(clean),
             "removed": removed,
             "pct_removed": round(100 * removed / len(raw), 1) if len(raw) else 0.0,
-            "keyed": name in KEYS,
+            "keyed": name in KEYS or name in _BATCH_KEYS,
         })
     df = pd.DataFrame(rows)
     return df.sort_values("pct_removed", ascending=False).reset_index(drop=True) if not df.empty else df

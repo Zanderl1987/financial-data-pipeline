@@ -195,6 +195,59 @@ class TestIdempotentOutput:
         pd.testing.assert_frame_equal(once.reset_index(drop=True), twice.reset_index(drop=True))
 
 
+class TestBatchDedup:
+    """fund_holdings keeps the newest fetch of each (fund, date, source) WHOLE.
+    Positions can't be keyed: N-PORT leaves par_value empty, look-through sheets
+    carry no maturity/coupon, and a fund can hold the same name in two lots."""
+
+    def _df(self):
+        return pd.DataFrame({
+            "fund_ticker":   ["BND"] * 5 + ["AOA"] * 2,
+            "snapshot_date": ["2026-11-13"] * 7,
+            "source":        ["edgar_nport:BND"] * 5 + ["blackrock:AOA"] * 2,
+            # Two Ally bonds: same issuer/maturity/coupon, different CUSIPs.
+            "holding_name":  ["Ally", "Ally", "Ally", "Ally", "Apollo", "APPLE", "APPLE"],
+            "holding_ticker": [None] * 5 + ["AAPL", "AAPL"],
+            "maturity_date": ["2031-11-01"] * 4 + ["2032-03-15", None, None],
+            "coupon_pct":    [8.0] * 4 + [6.55, None, None],
+            "par_value":     [None] * 7,
+            "cusip":         ["36186CBY8", "370425RZ5", "36186CBY8", "370425RZ5", "03770DAE3", None, None],
+            "weight_pct":    [0.1, 0.2, 0.1, 0.2, 0.3, 0.0005, 0.0005],
+            # BND fetched twice the same day; the AOA rows are two identical
+            # look-through lines from ONE fetch.
+            "fetched_at":    ["t1", "t1", "t2", "t2", "t2", "t1", "t1"],
+        })
+
+    def test_keeps_latest_batch_whole(self):
+        out = curated.dedup("fund_holdings", self._df())
+        bnd = out[out.fund_ticker == "BND"]
+        assert len(bnd) == 3 and set(bnd.fetched_at) == {"t2"}
+        assert set(bnd.cusip) == {"36186CBY8", "370425RZ5", "03770DAE3"}
+
+    def test_identical_rows_within_one_fetch_are_kept(self):
+        out = curated.dedup("fund_holdings", self._df())
+        assert len(out[out.fund_ticker == "AOA"]) == 2
+
+    def test_older_batch_dropped_even_if_it_had_more_rows(self):
+        df = self._df()
+        df.loc[4, "fetched_at"] = "t1"   # Apollo only in the older fetch
+        out = curated.dedup("fund_holdings", df)
+        assert "Apollo" not in set(out.holding_name)
+
+    def test_sources_and_dates_are_separate_batches(self):
+        df = self._df()
+        extra = df.iloc[[0]].assign(source="other:BND", fetched_at="t0")
+        older = df.iloc[[0]].assign(snapshot_date="2026-11-12", fetched_at="t0")
+        out = curated.dedup("fund_holdings", pd.concat([df, extra, older]))
+        assert len(out[out.source == "other:BND"]) == 1
+        assert len(out[out.snapshot_date == "2026-11-12"]) == 1
+
+    def test_idempotent(self):
+        once = curated.dedup("fund_holdings", self._df())
+        twice = curated.dedup("fund_holdings", once)
+        pd.testing.assert_frame_equal(once, twice)
+
+
 @pytest.mark.parametrize("table", ["prices", "macro", "fundamentals_annual"])
 def test_curated_views_have_no_duplicate_keys(table):
     """If a curated snapshot exists, its natural key must be unique (NULL-safe)."""

@@ -224,7 +224,9 @@ IBES, so `probe()` before building a pipeline, per `data-source-vetting` §2.
 4. Wire ALL of: `query.py` CATALOG (use filename-prefix globs, e.g.
    `dir/**/name_*.parquet`, to avoid glob collisions — guard test exists),
    `validate.py` SCHEMAS, `run_all.py` PipelineSpec (stage, requires_env, timeout),
-   `curated.py` KEYS (natural dedup key), `tests/test_catalog.py` EXPECTED_TABLES,
+   `curated.py` KEYS (natural dedup key; for a whole-snapshot table with no per-row
+   key, e.g. fund_holdings, `_BATCH_KEYS` keeps each newest fetch whole instead),
+   `tests/test_catalog.py` EXPECTED_TABLES,
    `tests/test_pipelines.py` PIPELINE_MODULES. Create the storage dir.
 5. Verify live with an incremental sample run, then `validate.py`, then full test suite.
 
