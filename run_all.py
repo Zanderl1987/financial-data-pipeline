@@ -1304,6 +1304,19 @@ def _fmt_duration(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
+def _echo(text: str) -> None:
+    """Print a pipeline's captured output without letting the console's
+    encoding fail the run. Under the scheduler stdout is a cp1252 file, and
+    a "→" in options_chain/sector_etfs output used to raise here and turn
+    pipelines that had already saved their data into FAILs."""
+    end = "" if text.endswith("\n") else "\n"
+    try:
+        print(text, end=end)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(text.encode(enc, errors="backslashreplace").decode(enc), end=end)
+
+
 def run_pipeline(
     spec: PipelineSpec,
     backfill: bool,
@@ -1343,7 +1356,7 @@ def run_pipeline(
         duration = time.time() - t0
         output = (result.stdout or "") + (result.stderr or "")
         if output:
-            print(output, end="" if output.endswith("\n") else "\n")
+            _echo(output)
         if result.returncode != 0:
             log.error("%s failed: exit %d", spec.name, result.returncode)
             fail_path = log_pipeline_failure(spec.name, output or "(no output)")
@@ -1353,7 +1366,7 @@ def run_pipeline(
         duration = time.time() - t0
         output = (exc.stdout or "") + (exc.stderr or "")
         if output:
-            print(output, end="" if output.endswith("\n") else "\n")
+            _echo(output)
         log.error("%s timed out after %ds", spec.name, spec.timeout)
         fail_path = log_pipeline_failure(
             spec.name, output or "(no output captured before timeout)")

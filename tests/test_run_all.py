@@ -274,3 +274,28 @@ class TestCliWiringInProcess:
         rc = run_all.main()
 
         assert rc == 0
+
+
+class TestCapturedOutputEcho:
+    """
+    run_all re-prints each pipeline's captured output to its own stdout. Under
+    the scheduler that stdout is a cp1252 file, so a pipeline printing "→"
+    (options_chain, sector_etfs) crashed the echo and a pipeline that had
+    already saved its data was recorded as FAIL (2026-11-14 nightly run).
+    """
+
+    def test_unencodable_pipeline_output_does_not_fail_the_pipeline(self, monkeypatch, tmp_path):
+        import io
+
+        script = tmp_path / "arrow_pipeline.py"
+        script.write_text('print("Saved 3 rows \u2192 out.parquet")\n', encoding="utf-8")
+        buf = io.BytesIO()
+        console = io.TextIOWrapper(buf, encoding="cp1252", errors="strict")
+        monkeypatch.setattr(sys, "stdout", console)
+
+        spec = run_all.PipelineSpec(name="arrow", file=str(script), desc="", stage=1)
+        result = run_all.run_pipeline(spec, backfill=False, dry_run=False, validate=False)
+
+        console.flush()
+        assert result.status == "PASS", result.note
+        assert b"Saved 3 rows" in buf.getvalue()
