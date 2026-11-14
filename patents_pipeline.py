@@ -22,11 +22,17 @@ CLI:
 
 Outputs:
   storage/raw/patents/patents_{mode}_{YYYYMMDD}.parquet
+
+DEAD SOURCE (2026-11-14): search.patentsview.org no longer resolves (NXDOMAIN).
+PatentsView moved into the USPTO Open Data Portal, which needs an ODP API key.
+This exited 0 with no data every night (12 min of DNS retries), so it now exits
+1 when nothing comes back and is skipped in scripts/daily_pipelines.ps1.
 """
 
 import argparse
 import datetime
 import os
+import sys
 import time
 
 import pandas as pd
@@ -183,7 +189,7 @@ def main():
 
     if not all_rows:
         print("\nNo data returned.")
-        return
+        return 1
 
     df = (
         pd.DataFrame(all_rows)
@@ -195,7 +201,8 @@ def main():
     path = write_partitioned(df, PATENTS_DIR, f"patents_{mode}_{today_str}.parquet")
     print(f"\n-> {path}  ({len(df):,} patents, {df['sector'].nunique()} sectors)")
     print("\n--- PATENTS PIPELINE COMPLETE ---")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

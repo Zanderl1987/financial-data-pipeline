@@ -281,6 +281,28 @@ Get-ScheduledTask | Where-Object { $_.TaskName -like "ClaudeAuto*" -or $_.TaskNa
 A newly registered task will silently reacquire the default unless you pass
 `New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`.
 
+## No-window wrapper — every task starts through `run_hidden.pyw`
+
+Since 2026-10-30 every task's action is
+`pythonw.exe %USERPROFILE%\Scripts\run_hidden.pyw <original exe> <original args>`
+(the script lives outside this repo). It starts the real command with `CREATE_NO_WINDOW`
+and exits with the child's exit code.
+
+**Why:** with the default terminal left on "Let Windows decide", any console a task starts,
+even `powershell -WindowStyle Hidden`, opens a *visible* Windows Terminal window. Closing
+that window sends CTRL_CLOSE to everything on the console: the wrapper and the pipeline exit
+`0xC000013A` and `run_all.py` dies mid-call with `PyEval_SaveThread ... GIL is released`.
+That is the cause of the kills that were long read as Ctrl+C or schwabdev crashes (10-26,
+10-29, 10-30 and the post-wake bursts). `conhost.exe --headless` also hides the window but
+always reports exit 0, which would blind the watchdog; the wrapper passes the code through.
+
+A task registered in future must use the same wrapper. Audit:
+
+```powershell
+Get-ScheduledTask | Where-Object { $_.TaskName -like "ClaudeAuto*" -or $_.TaskName -like "SchwabUniverse*" } |
+  ForEach-Object { "{0}  {1}" -f $_.TaskName, $_.Actions[0].Execute }   # all should be pythonw.exe
+```
+
 ## Managing
 
 ```powershell

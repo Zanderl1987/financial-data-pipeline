@@ -66,6 +66,9 @@ $skip = @(
     "massive_option_listings",
     # known-dead sources
     "nasdaq_data_link", "usda", "congressional_trades",
+    #   patents: search.patentsview.org is NXDOMAIN (moved to USPTO ODP, needs a
+    #   key); it exited 0 with no data every night, 12 min of DNS retries.
+    "patents",
     # failing every night as of 2026-09-29:
     #   schwab_portfolio needs the Schwab Trader API, which isn't enabled
     # (lda_lobbying and ibkr_borrow_fee were here briefly, both fixed the same
