@@ -57,7 +57,10 @@ INVESCO_FUNDS = {
     "DBC": ("46138B103", "Invesco DB Commodity Index Tracking Fund"),
     "PBJ": ("46137V753", "Invesco Food & Beverage ETF"),
     "PCY": ("46138E784", "Invesco Emerging Markets Sovereign Debt ETF"),
-    "PDBC": ("46138B707", "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF"),
+    # 2026-11-14: was 46138B707, which the API answers with an empty list, so
+    # PDBC never loaded. Its holdings are the money-market collateral plus one
+    # line for the Cayman subsidiary that holds the futures.
+    "PDBC": ("46090F100", "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF"),
     "PEJ": ("46137V720", "Invesco Leisure & Entertainment ETF"),
     "TAN": ("46138G706", "Invesco Solar ETF"),
     # 2026-11-13: moved from etf_holdings_pipeline.py when securitiesdb.com died
@@ -85,6 +88,10 @@ def fetch_invesco_holdings(ticker: str, cusip: str) -> dict:
     r = creq.get(url, headers=HEADERS, impersonate="chrome124", timeout=60)
     r.raise_for_status()
     data = r.json()
+    if not isinstance(data, dict):
+        # An unknown CUSIP is HTTP 200 with an empty JSON list, not an error.
+        raise ValueError(f"no holdings document for CUSIP {cusip} (got {data!r:.80}); "
+                         "check the CUSIP")
     log.info(f"[{ticker}] Raw: {data.get('totalNumberOfHoldings')} holdings, as of {data.get('effectiveDate')}")
     return data
 
