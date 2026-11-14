@@ -117,3 +117,11 @@ def test_index_constituents_keeps_real_names_and_drops_derivatives(monkeypatch):
     monkeypatch.setattr(icp.requests, "get", lambda *a, **k: _Resp())
     out = icp.fetch_blackrock_holdings("IWM")
     assert list(out.ticker) == ["FCFS", "OPCH"]
+
+
+def test_fund_maps_route_shv_to_bond_parser_and_drop_metal_trusts():
+    # SHV's sheet is the bond layout and its T-bills are Asset Class "Cash";
+    # IAU/SLV have no Holdings worksheet at all.
+    assert "SHV" not in fhp.ETF_PID_MAP
+    assert fhp.BOND_ETF_PID_MAP["SHV"]["skip_cash_filter"] is True
+    assert not {"IAU", "SLV"} & set(fhp.ETF_PID_MAP)

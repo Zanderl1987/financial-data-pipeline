@@ -142,16 +142,15 @@ ETF_PID_MAP = {
     "AOM":  {"pid": "239765", "name": "iShares Core Moderate Allocation ETF"},
     "AOA":  {"pid": "239729", "name": "iShares Core Aggressive Allocation ETF"},
     "AOK":  {"pid": "239733", "name": "iShares Core Conservative Allocation ETF"},
-    # Commodities & Real Estate
-    "IAU":  {"pid": "239561", "name": "iShares Gold Trust"},
-    "SLV":  {"pid": "239855", "name": "iShares Silver Trust"},
+    # Real Estate. IAU/SLV removed 2026-11-14: grantor trusts that hold only
+    # the metal, so BlackRock serves no Holdings worksheet and they failed
+    # every run ("No Holdings worksheet found").
     "REET": {"pid": "268752", "name": "iShares Global REIT ETF"},
     # Real Estate (gap closed 2026-09-01; pid verified live -- product slug is
     # the legacy name "ishares-real-estate-50-etf", which is why the slug map
     # miss; the varnish API resolves the pid fine)
     "USRT": {"pid": "239544", "name": "iShares Core US REIT ETF"},
-    # Short Duration
-    "SHV":  {"pid": "239466", "name": "iShares Short Treasury Bond ETF"},
+    # Short Duration (SHV moved to BOND_ETF_PID_MAP 2026-11-14)
     "NEAR": {"pid": "239854", "name": "iShares Short Duration Bond Active ETF"},
     # International (gap closed 2026-09-01; pids verified live)
     "ACWX": {"pid": "239594", "name": "iShares MSCI ACWI ex US ETF"},
@@ -194,6 +193,14 @@ BOND_ETF_PID_MAP = {
         "name": "iShares 0-3 Month Treasury Bond ETF",
         "api_params": {"appSubType": "ISHARES", "targetSite": "us-ishares"},
         "skip_cash_filter": True
+    },
+    # 2026-11-14: was in ETF_PID_MAP, where the equity parser found no header
+    # row every run. Like SGOV, BlackRock files its T-bills as Asset Class
+    # "Cash" (81% of weight), so the cash filter would keep only the notes.
+    "SHV": {
+        "pid": "239466",
+        "name": "iShares Short Treasury Bond ETF",
+        "skip_cash_filter": True,
     },
 }
 
