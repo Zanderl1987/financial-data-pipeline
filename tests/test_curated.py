@@ -270,7 +270,7 @@ class TestBatchDedup:
         assert len(curated.dedup("fund_holdings", raw)) == 5
 
 
-@pytest.mark.parametrize("table", ["prices", "macro", "fundamentals_annual"])
+@pytest.mark.parametrize("table", ["prices", "macro", "fundamentals_annual", "schwab_intraday"])
 def test_curated_views_have_no_duplicate_keys(table):
     """If a curated snapshot exists, its natural key must be unique (NULL-safe)."""
     key = curated.KEYS.get(table)

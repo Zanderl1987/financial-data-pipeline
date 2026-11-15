@@ -194,6 +194,11 @@ KEYS: dict[str, list[str]] = {
     "tiingo_prices":          ["symbol", "date"],
     "sector_etfs":            ["symbol", "date"],
     "schwab_quotes":          ["symbol"],            # snapshot table
+    # One bar per symbol per timestamp per bar size. Keyed 2026-11-14: the
+    # full-row fallback kept both versions whenever Schwab revised a bar on a
+    # later fetch (volume off by 100, e.g. A 2026-08-11 13:45: 38,472 then
+    # 38,372), so 11,394 bars were in curated twice. Newest fetch wins.
+    "schwab_intraday":        ["symbol", "datetime", "freq_min"],
     "company_profile":        ["symbol"],            # snapshot table
     "futures":                ["symbol", "date"],
     # Backtester AgProvider (external repo) — one OHLCV bar per symbol per day
@@ -492,8 +497,10 @@ def _curated_path(table: str) -> str:
 # fundamentals_* added 2026-10-26: 62M / 29M raw rows. The pandas path for
 # fundamentals_quarterly committed 86 GB on a 32 GB machine and never finished,
 # so the period_end rules below have SQL twins in _compact_large_table().
+# schwab_intraday added 2026-11-14: 7.1M raw rows peaked at 5.7 GB through
+# pandas, enough for the 8 AM job to get other processes killed for memory.
 _LARGE_TABLES = {"prices", "fed_soma", "cfpb_complaints", "schwab_options",
-                 "fundamentals_annual", "fundamentals_quarterly"}
+                 "fundamentals_annual", "fundamentals_quarterly", "schwab_intraday"}
 
 # ── Batch dedup (whole-snapshot tables) ───────────────────────────────────────
 # Some tables are lists of positions with no natural per-row key. For these,
