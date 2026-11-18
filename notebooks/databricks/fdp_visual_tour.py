@@ -32,13 +32,19 @@
 # MAGIC 7. Fundamentals: SEC filing coverage, margins by sector
 # MAGIC 8. Sentiment and alternative data: news, ratings, complaints, housing, supply chains
 # MAGIC 9. Pipeline health: signal monitor and column completeness
+# MAGIC 10. Energy and commodities: futures scoreboard, natural gas storage, speculator positioning
+# MAGIC 11. Government, banks and credit: federal debt, Treasury auction demand, bank failures since 1934
+# MAGIC 12. Insiders and settlement fails: Form 4 buying and selling, SEC fails-to-deliver
+# MAGIC 13. Strategy research: 35 TradingView strategies tested against a random-timing null
+# MAGIC 14. Lakehouse engineering: bronze/silver/gold layers, an idempotent MERGE, constraints, time travel
+# MAGIC 15. Machine learning with MLflow: forecasting SPY volatility from the gold table, walk-forward
 # MAGIC
 # MAGIC Use the widgets at the top to change the options symbol, the fund, the lookback window, and
-# MAGIC whether section 2 writes Delta tables.
+# MAGIC whether sections 2 and 14 write Delta tables.
 
 # COMMAND ----------
 
-# MAGIC %pip install -q "duckdb>=1.1" "plotly>=5.22" "huggingface_hub>=0.24"
+# MAGIC %pip install -q "duckdb>=1.4" "plotly>=5.22" "huggingface_hub>=0.24" "scikit-learn>=1.3" "mlflow-skinny[databricks]>=2.16"
 
 # COMMAND ----------
 
@@ -56,8 +62,12 @@ except NameError:
 
 # COMMAND ----------
 
+import io
+import json
 import math
+import os
 import time
+import urllib.request
 from datetime import date, datetime, timedelta
 
 import duckdb
@@ -1075,12 +1085,754 @@ table(empty.groupby("table")["column"].apply(lambda s: ", ".join(sorted(s))).res
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 10. Energy and commodities
+# MAGIC Futures closes from Yahoo Finance (`futures`), weekly natural gas storage from the EIA, and the
+# MAGIC CFTC Commitments of Traders report (`cot`).
+
+# COMMAND ----------
+
+fut = q(f"""SELECT symbol, name, category, CAST(date AS DATE) AS date, close FROM {T('futures')}
+            WHERE category IN ('energy', 'metals', 'agriculture', 'industrial') AND close > 0""")
+fut["date"] = pd.to_datetime(fut["date"])
+rows = []
+for sym, d in fut.sort_values("date").groupby("symbol"):
+    end = d.iloc[-1]
+    base = d[d["date"] <= end["date"] - pd.DateOffset(years=1)]
+    if base.empty or end["date"] < TODAY - pd.Timedelta(days=14):
+        continue  # no year-ago price, or the contract stopped updating
+    rows.append({"symbol": sym, "label": f"{end['name']} ({end['category']})",
+                 "chg": (end["close"] / base["close"].iloc[-1] - 1) * 100, "asof": end["date"]})
+board = pd.DataFrame(rows).sort_values("chg")
+fig = go.Figure(go.Bar(x=board["chg"], y=board["label"], orientation="h",
+                       marker_color=np.where(board["chg"] >= 0, POS, NEG), customdata=board["symbol"],
+                       hovertemplate="%{y} [%{customdata}]: %{x:+.1f}%<extra></extra>"))
+fig.update_xaxes(title="price change over 12 months (%)", ticksuffix="%")
+fig.update_layout(title="Commodity futures scoreboard: 12-month price change", yaxis_title=None, margin=dict(l=230))
+show(fig, height=max(420, 22 * len(board) + 140),
+     subtitle=f"{len(board)} front-month contracts as of {board['asof'].max():%Y-%m-%d}. Continuous front-month "
+              "prices include roll jumps, so this is a price change, not a futures return.")
+
+# COMMAND ----------
+
+ng = q(f"""SELECT CAST(date AS DATE) AS date, value FROM {T('eia_natgas_storage')}
+           WHERE duoarea = 'R48' AND value IS NOT NULL ORDER BY date""")
+ng["date"] = pd.to_datetime(ng["date"])
+ng["yr"] = ng["date"].dt.year
+ng["wk"] = ng["date"].dt.isocalendar().week.astype(int).clip(upper=52)
+cur = int(ng["yr"].max())
+band = ng[ng["yr"].between(cur - 5, cur - 1)].groupby("wk")["value"].agg(["min", "max", "mean"])
+fig = go.Figure()
+fig.add_scatter(x=band.index, y=band["max"], line=dict(width=0), showlegend=False, hoverinfo="skip")
+fig.add_scatter(x=band.index, y=band["min"], fill="tonexty", fillcolor="rgba(42,120,214,0.12)", line=dict(width=0),
+                name=f"{cur - 5}-{cur - 1} range", hoverinfo="skip")
+fig.add_scatter(x=band.index, y=band["mean"], name="5-year average", line=dict(color=MUTED, dash="dot", width=1.5))
+for yr, color, width in [(cur - 1, INK2, 1.5), (cur, PALETTE[0], 2.8)]:
+    d = ng[ng["yr"] == yr]
+    fig.add_scatter(x=d["wk"], y=d["value"], name=str(yr), line=dict(color=color, width=width),
+                    hovertemplate=f"{yr} week %{{x}}: %{{y:,.0f}} Bcf<extra></extra>")
+fig.update_xaxes(title="week of year")
+fig.update_yaxes(title="working gas in storage (Bcf)")
+fig.update_layout(title="US natural gas storage (Lower 48) against its 5-year range", hovermode="x unified")
+last_ng = ng.iloc[-1]
+vs_avg = (last_ng["value"] / band.loc[last_ng["wk"], "mean"] - 1) * 100
+show(fig, height=460, subtitle=f"Week ending {last_ng['date']:%Y-%m-%d}: {last_ng['value']:,.0f} Bcf, "
+                               f"{vs_avg:+.1f}% against the 5-year average for that week. Storage fills April-October "
+                               "and draws down in winter.")
+
+# COMMAND ----------
+
+COT_MARKETS = {"GOLD - COMMODITY EXCHANGE INC.": "Gold (COMEX)",
+               "S&P 500 Consolidated - CHICAGO MERCANTILE EXCHANGE": "S&P 500 (CME, consolidated)",
+               "CRUDE OIL, LIGHT SWEET-WTI - ICE FUTURES EUROPE": "WTI crude (ICE Europe)",
+               "BITCOIN - CHICAGO MERCANTILE EXCHANGE": "Bitcoin (CME)"}
+mkt_list = ",".join("'" + m.replace("'", "''") + "'" for m in COT_MARKETS)
+cot = q(f"""SELECT market, CAST(date AS DATE) AS date,
+                   (noncomm_long - noncomm_short) * 100.0 / NULLIF(open_interest, 0) AS net_spec_pct
+            FROM {T('cot')}
+            WHERE market IN ({mkt_list}) AND CAST(date AS DATE) >= DATE '2015-01-01'
+            ORDER BY date""")
+fig = make_subplots(rows=2, cols=2, subplot_titles=list(COT_MARKETS.values()), vertical_spacing=0.14,
+                    horizontal_spacing=0.07)
+for k, (mkt, lab) in enumerate(COT_MARKETS.items()):
+    d = cot[cot["market"] == mkt]
+    r, c = divmod(k, 2)
+    fig.add_scatter(x=d["date"], y=d["net_spec_pct"], line=dict(color=PALETTE[0], width=1.6), showlegend=False,
+                    hovertemplate=f"{lab}<br>%{{x|%Y-%m-%d}}: %{{y:+.1f}}% of open interest<extra></extra>",
+                    row=r + 1, col=c + 1)
+    fig.add_hline(y=0, line=dict(color=AXIS, width=1), row=r + 1, col=c + 1)
+fig.update_yaxes(ticksuffix="%")
+fig.update_layout(title="Speculator positioning: non-commercial net long as a share of open interest")
+show(fig, height=560, subtitle=f"CFTC legacy report, weekly. Latest report in the table: {cot['date'].max()}. "
+                               "Above zero, large speculators are net long.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Government, banks and credit
+# MAGIC From the Treasury's Fiscal Data API (debt to the penny, auction results) and the FDIC's
+# MAGIC failed-bank list.
+
+# COMMAND ----------
+
+debt = q(f"""SELECT CAST(record_date AS DATE) AS date, debt_held_public_amt / 1e12 AS public,
+                    intragov_hold_amt / 1e12 AS intragov,
+                    try_cast(tot_pub_debt_out_amt AS DOUBLE) / 1e12 AS total  -- stored as text on HF
+             FROM {T('treasury_debt_to_penny')} WHERE try_cast(tot_pub_debt_out_amt AS DOUBLE) > 0
+             ORDER BY date""")
+debt["date"] = pd.to_datetime(debt["date"])
+fig = go.Figure()
+fig.add_scatter(x=debt["date"], y=debt["public"], name="held by the public", stackgroup="one",
+                line=dict(width=0.5, color=PALETTE[0]), hovertemplate="public: $%{y:.2f}T<extra></extra>")
+fig.add_scatter(x=debt["date"], y=debt["intragov"], name="intragovernmental (trust funds)", stackgroup="one",
+                line=dict(width=0.5, color=PALETTE[1]), hovertemplate="intragov: $%{y:.2f}T<extra></extra>")
+fig.update_yaxes(title="trillions of dollars", tickprefix="$", ticksuffix="T")
+fig.update_layout(title="US federal debt outstanding, daily since 1993", hovermode="x unified")
+lt = debt.iloc[-1]
+yr_ago = debt[debt["date"] <= lt["date"] - pd.DateOffset(years=1)].iloc[-1]
+show(fig, height=440, subtitle=f"${lt['total']:.2f}T on {lt['date']:%Y-%m-%d}, up ${lt['total'] - yr_ago['total']:.2f}T "
+                               f"in a year. {lt['public'] / lt['total']:.0%} is held by the public.")
+
+# COMMAND ----------
+
+auc = q(f"""
+    SELECT CAST(auction_date AS DATE) AS date, security_term AS term, bid_to_cover_ratio AS btc,
+           try_cast(indirect_bidder_accepted AS DOUBLE) * 100
+             / NULLIF(try_cast(comp_accepted AS DOUBLE), 0) AS indirect_pct
+    FROM {T('treasury_auctions_detail')}
+    WHERE security_type IN ('Note', 'Bond') AND security_term IN ('2-Year', '10-Year', '30-Year')
+      AND inflation_index_security = 'No' AND floating_rate = 'No' AND bid_to_cover_ratio > 0
+    ORDER BY date""")
+auc["date"] = pd.to_datetime(auc["date"])
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                    subplot_titles=("Bid-to-cover ratio (dollars bid per dollar sold)",
+                                    "Indirect bidders' share of competitive awards (%)"))
+for i, term in enumerate(["2-Year", "10-Year", "30-Year"]):
+    d = auc[auc["term"] == term]
+    fig.add_scatter(x=d["date"], y=d["btc"].rolling(6, min_periods=3).mean(), name=f"{term} (6-auction mean)",
+                    line=dict(color=PALETTE[i]), legendgroup=term, row=1, col=1)
+    fig.add_scatter(x=d["date"], y=d["indirect_pct"].rolling(6, min_periods=3).mean(), name=term,
+                    line=dict(color=PALETTE[i]), legendgroup=term, showlegend=False, row=2, col=1)
+fig.update_layout(title="Demand at Treasury coupon auctions (new issues, excluding TIPS and FRNs)",
+                  hovermode="x unified")
+show(fig, height=560, subtitle="Indirect bidders bid through a dealer and include foreign central banks; "
+                               "a falling share is read as weaker overseas demand.")
+
+# COMMAND ----------
+
+fdic = q(f"""SELECT try_cast(substr(CAST(faildate AS VARCHAR), 1, 4) AS INT) AS yr,
+                    CASE WHEN savr IN ('FSLIC', 'RTC') THEN 'Savings and loans (FSLIC, RTC)'
+                         ELSE 'Banks (FDIC insurance funds)' END AS fund,
+                    count(*) AS n
+             FROM {T('fdic_failures')} GROUP BY 1, 2""").dropna()
+fw = fdic.pivot_table(index="yr", columns="fund", values="n", fill_value=0).sort_index()
+fig = go.Figure()
+for i, col in enumerate(["Banks (FDIC insurance funds)", "Savings and loans (FSLIC, RTC)"]):
+    if col in fw:
+        fig.add_bar(x=fw.index, y=fw[col], name=col, marker_color=PALETTE[i],
+                    hovertemplate=f"%{{x}}: %{{y}} {col.split(' (')[0].lower()}<extra></extra>")
+fig.update_layout(title="Bank failures and assisted rescues per year since 1934", barmode="stack", bargap=0.15,
+                  yaxis_title="institutions", hovermode="x unified")
+tot = fw.sum(axis=1)
+show(fig, height=440, subtitle=f"{int(tot.sum()):,} institutions. Peak: {int(tot.max()):,} in {tot.idxmax()} (the savings and "
+                               f"loan crisis). 2008-2012: {int(tot.loc[2008:2012].sum()):,}.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 12. Insiders and settlement fails
+# MAGIC Open-market insider purchases and sales from Form 4 filings (scraped daily from Finviz's
+# MAGIC rolling page, so history starts August 2026), and the SEC's fails-to-deliver files.
+
+# COMMAND ----------
+
+ins = q(f"""SELECT ticker, owner, relationship, date, "transaction" AS side, value FROM {T('finviz_insider')}
+            WHERE "transaction" IN ('Buy', 'Sale') AND value > 0""")
+ins["date"] = pd.to_datetime(ins["date"], format="%b %d '%y", errors="coerce")
+ins = ins.dropna(subset=["date"])
+ins = ins[ins["date"] >= "2026-07-27"]  # Finviz's page is a rolling window; collection began 2026-08-02
+ins["week"] = ins["date"].dt.to_period("W").dt.start_time
+wk = ins.groupby(["week", "side"])["value"].sum().unstack(fill_value=0) / 1e6
+top_buys = ins[ins["side"] == "Buy"].groupby("ticker")["value"].sum().nlargest(12).sort_values() / 1e6
+fig = make_subplots(rows=1, cols=2, column_widths=[0.62, 0.38], horizontal_spacing=0.1,
+                    subplot_titles=("Weekly dollar value, sales shown below zero ($M)", "Largest insider buying ($M)"))
+fig.add_bar(x=wk.index, y=wk.get("Buy", 0), name="purchases", marker_color=POS, row=1, col=1)
+fig.add_bar(x=wk.index, y=-wk.get("Sale", 0), name="sales", marker_color=NEG, row=1, col=1)
+fig.add_bar(x=top_buys.values, y=top_buys.index, orientation="h", marker_color=POS, showlegend=False,
+            hovertemplate="%{y}: $%{x:,.1f}M<extra></extra>", row=1, col=2)
+fig.update_layout(title="Insider trading from Form 4 filings", barmode="relative", bargap=0.15)
+ratio = wk.get("Sale", pd.Series(0)).sum() / max(wk.get("Buy", pd.Series(0)).sum(), 1e-9)
+show(fig, height=460, subtitle=f"{len(ins):,} transactions. Insiders sold ${ratio:,.1f} for every $1 they bought; "
+                               "selling is routine (pay, diversification), so buying is the usual signal.")
+
+# COMMAND ----------
+
+ftd_daily = q(f"""
+    SELECT strptime(CAST(settlement_date AS VARCHAR), '%Y%m%d')::DATE AS date,
+           sum(shares_failed * price) / 1e9 AS usd_bn, count(DISTINCT symbol) AS symbols
+    FROM {T('sec_ftd')} WHERE price > 0 AND shares_failed > 0 GROUP BY 1 ORDER BY 1""")
+ftd_top = q(f"""
+    SELECT symbol, any_value(description) AS description, sum(shares_failed * price) / 1e6 AS usd_m
+    FROM {T('sec_ftd')} WHERE price > 0 AND shares_failed > 0 GROUP BY 1 ORDER BY 3 DESC LIMIT 15""")
+ftd_top["avg_m"] = ftd_top["usd_m"] / len(ftd_daily)
+ftd_top = ftd_top.sort_values("avg_m")
+fig = make_subplots(rows=1, cols=2, column_widths=[0.6, 0.4], horizontal_spacing=0.12,
+                    subplot_titles=("Value of shares failing to settle, per day ($B)",
+                                    "Largest average daily fails ($M)"))
+fig.add_bar(x=ftd_daily["date"], y=ftd_daily["usd_bn"], marker_color=PALETTE[0], showlegend=False,
+            customdata=ftd_daily["symbols"],
+            hovertemplate="%{x|%Y-%m-%d}: $%{y:.2f}B across %{customdata:,} securities<extra></extra>", row=1, col=1)
+fig.add_bar(x=ftd_top["avg_m"], y=ftd_top["symbol"], orientation="h", marker_color=PALETTE[0], showlegend=False,
+            customdata=ftd_top["description"], hovertemplate="%{y} (%{customdata}): $%{x:,.1f}M<extra></extra>",
+            row=1, col=2)
+fig.update_layout(title="SEC fails-to-deliver: trades that missed settlement", bargap=0.1)
+show(fig, height=460, subtitle=f"{len(ftd_daily)} settlement days, {ftd_daily['date'].min()} to "
+                               f"{ftd_daily['date'].max()}. Valued at the prior close in the SEC file; "
+                               "ETFs dominate because creation and redemption settles in size.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13. Strategy research: TradingView strategies against a random-timing null
+# MAGIC 781 community strategies written in Pine Script passed an automated screen; 35 have been
+# MAGIC translated to Python and scored so far, under a protocol written before any results existed.
+# MAGIC
+# MAGIC * **Data and split.** Split-adjusted daily prices, a $5 price floor, costs that grow with
+# MAGIC   trade size. Development data is everything through 2017 plus 75% of symbols; the rest is a
+# MAGIC   holdout, opened at most once per strategy.
+# MAGIC * **The test.** Each strategy's real trades are compared with 200 copies whose positions are
+# MAGIC   shifted to random points in time (a circular shift), which keeps time in the market and trade
+# MAGIC   length the same. A low `pnl_p` means the timing itself earned money; it does not by itself
+# MAGIC   mean the strategy made money, so a profit check runs alongside it.
+# MAGIC * **Many tests at once.** Benjamini-Hochberg at q = 0.10 controls the share of false
+# MAGIC   discoveries across every strategy tested.
+# MAGIC
+# MAGIC These results are **provisional**: the campaign is not closed, and BH at m = 35 is a preview
+# MAGIC of the final correction. The price table holds only companies that survived to today, which
+# MAGIC probably flatters strategies that buy after big falls. Two entries ("combined sha strategy" and
+# MAGIC "smoothed heiken ashi strategy") are one mechanism published twice, so their rows match. The registry that holds these numbers
+# MAGIC is local, so `export_strategy_results.py` writes the small CSV this section reads.
+
+# COMMAND ----------
+
+RAW_BASE = "https://raw.githubusercontent.com/Zanderl1987/financial-data-pipeline/master/notebooks/databricks/data/"
+
+
+def repo_file(name: str) -> bytes:
+    """A file from this notebook's data/ folder: the Git folder copy if present, else GitHub raw."""
+    for p in (os.path.join("data", name), os.path.join("notebooks", "databricks", "data", name)):
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                return f.read()
+    with urllib.request.urlopen(RAW_BASE + name, timeout=30) as r:
+        return r.read()
+
+
+tv_meta = json.loads(repo_file("tv_catalog_meta.json"))
+tvc = pd.read_csv(io.BytesIO(repo_file("tv_catalog_v2.csv"))).sort_values("pnl_p").reset_index(drop=True)
+m_tests, q_fdr = len(tvc), tv_meta["bh_q"]
+tvc["rank"] = np.arange(1, m_tests + 1)
+tvc["bh_line"] = q_fdr * tvc["rank"] / m_tests
+passing = tvc.index[tvc["pnl_p"] <= tvc["bh_line"]]
+k_pass = int(passing.max()) + 1 if len(passing) else 0  # BH step-up: everything up to the largest passing rank
+tvc["bh_pass"] = tvc["rank"] <= k_pass
+VERDICTS = {"candidate": POS, "beat the null, lost money": PALETTE[1],
+            "beat the null, exposure mismatch": PALETTE[3], "no timing edge": NEUTRAL}
+tvc["verdict"] = np.select(
+    [tvc["bh_pass"] & (tvc["exposure_mismatch"] > 0), tvc["bh_pass"] & (tvc["total_pnl_net"] <= 0), tvc["bh_pass"]],
+    ["beat the null, exposure mismatch", "beat the null, lost money", "candidate"], default="no timing edge")
+cands = tvc[tvc["verdict"] == "candidate"]
+p_floor = 1 / (tv_meta["n_perm"] + 1)
+tiles([
+    ("Admitted by the screen", f"{tv_meta['admitted']:,}", "Pine strategies"),
+    ("Scored", f"{m_tests}", f"{m_tests / tv_meta['admitted']:.0%} of admitted"),
+    ("Pass BH at q = 0.10", f"{k_pass}", f"of {m_tests}, timing beats the null"),
+    ("Candidates", f"{len(cands)}", "also profitable, exposure matched"),
+    ("Holdouts still unopened", f"{int((~cands['holdout_spent']).sum())}", "among the candidates"),
+])
+
+# COMMAND ----------
+
+fig = go.Figure()
+fig.add_scatter(x=tvc["rank"], y=tvc["bh_line"], mode="lines", name=f"BH line: q x rank / {m_tests}",
+                line=dict(color=INK2, dash="dash", width=1.5), hoverinfo="skip")
+for v, color in VERDICTS.items():
+    d = tvc[tvc["verdict"] == v]
+    fig.add_scatter(x=d["rank"], y=d["pnl_p"], mode="markers", name=v,
+                    marker=dict(color=color, size=10, line=dict(color=SURFACE, width=1)), text=d["strategy"],
+                    hovertemplate="<b>%{text}</b><br>rank %{x}, p = %{y:.4f}<extra></extra>")
+fig.add_hline(y=p_floor, line=dict(color=AXIS, dash="dot", width=1),
+              annotation_text=f"smallest p that {tv_meta['n_perm']} shifts can give",
+              annotation_position="bottom right", annotation_font=dict(color=INK2, size=11))
+fig.update_yaxes(type="log", title="pnl_p (log scale)")
+fig.update_xaxes(title="rank, smallest p first")
+fig.update_layout(title="Benjamini-Hochberg: every p-value at or under the dashed line's last crossing passes")
+show(fig, height=480, subtitle=f"{k_pass} pass. Ties at the floor mean more permutations could separate them further.")
+
+# COMMAND ----------
+
+fig = go.Figure()
+for v, color in VERDICTS.items():
+    d = tvc[tvc["verdict"] == v]
+    fig.add_scatter(x=d["profit_factor"], y=d["pnl_p"], mode="markers", name=v,
+                    marker=dict(color=color, size=np.clip(np.log10(d["n_trades"]) * 4, 6, 26),
+                                line=dict(color=SURFACE, width=1)),
+                    text=d["strategy"], customdata=np.c_[d["total_pnl_net"] / 1e6, d["n_trades"], d["sharpe"]],
+                    hovertemplate="<b>%{text}</b><br>profit factor %{x:.2f}, p = %{y:.4f}<br>net P&L $%{customdata[0]:,.1f}M"
+                                  " on %{customdata[1]:,.0f} trades, Sharpe %{customdata[2]:.3f}<extra></extra>")
+for r in tvc[tvc["bh_pass"] | (tvc["profit_factor"] > 1.5)].itertuples():
+    fig.add_annotation(x=np.log10(r.profit_factor), y=np.log10(r.pnl_p), text=r.strategy, showarrow=False,
+                       yshift=12, font=dict(size=10, color=INK2))
+fig.add_vline(x=1, line=dict(color=AXIS, width=1), annotation_text="break-even after costs",
+              annotation_font=dict(color=INK2, size=11))
+fig.update_xaxes(type="log", title="profit factor (gross wins / gross losses, log scale)")
+fig.update_yaxes(type="log", autorange="reversed", title="pnl_p (log scale, stronger timing is higher)")
+fig.update_layout(title="Making money and having an edge are different questions")
+show(fig, height=560, subtitle="Top right: profitable with timing that beats random. Bottom right: profitable only because "
+                               "the market rose while it held positions. Marker size grows with trade count.")
+
+# COMMAND ----------
+
+sens = tvc[tvc[["pnl_p", "pnl_p_5bps", "pnl_p_20bps"]].min(axis=1) < 0.5].sort_values("pnl_p", ascending=False)
+fig = go.Figure()
+for col, lab, color in [("pnl_p_5bps", "5 bps a side", PALETTE[2]), ("pnl_p", "primary (size-based costs)", INK),
+                        ("pnl_p_20bps", "20 bps a side", PALETTE[1])]:
+    fig.add_scatter(x=sens[col], y=sens["strategy"], mode="markers", name=lab,
+                    marker=dict(color=color, size=11 if col == "pnl_p" else 9,
+                                symbol="diamond" if col == "pnl_p" else "circle"),
+                    hovertemplate=f"%{{y}}: p = %{{x:.4f}} at {lab}<extra></extra>")
+fig.update_xaxes(type="log", title="pnl_p (log scale)")
+fig.update_layout(title="Does the edge survive higher trading costs?", yaxis_title=None, margin=dict(l=240))
+show(fig, height=max(360, 30 * len(sens) + 160),
+     subtitle="Strategies with p under 0.5 at any cost level. A strategy whose p jumps at 20 bps "
+              "trades too often for its edge to pay for itself.")
+print(f"Exported {tv_meta['exported_at']} from results through {tv_meta['last_result_at'][:10]}; "
+      f"development split {tv_meta['dev_split']}.")
+table(tvc[["rank", "strategy", "verdict", "pnl_p", "profit_factor", "sharpe", "total_pnl_net", "n_trades",
+           "median_hold", "null_exposure_ratio", "holdout_spent"]], 40)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 14. Lakehouse engineering: bronze, silver, gold
+# MAGIC Section 2 overwrites three tables on every run. This section builds a small pipeline the way a
+# MAGIC production one is built, using SPY closes and four CBOE volatility indexes:
+# MAGIC
+# MAGIC * **Bronze**: data exactly as delivered, append-only, tagged with a batch id and arrival time.
+# MAGIC   The second delivery overlaps the first by 40 trading days, as this repo's own incremental
+# MAGIC   pipelines do, so bronze holds duplicates on purpose.
+# MAGIC * **Silver**: one row per series and date, checked and typed. New deliveries arrive by
+# MAGIC   `MERGE`, which inserts new rows, updates rows whose value changed, and does nothing on a
+# MAGIC   rerun (idempotent).
+# MAGIC * **Gold**: one row per trading day of model-ready features plus the label section 15
+# MAGIC   predicts: SPY's realized volatility over the next 21 trading days.
+# MAGIC
+# MAGIC On Databricks (with `write_delta` = yes) the layers are Delta tables in `workspace.fdp_showcase`
+# MAGIC with liquid clustering, a CHECK constraint that rejects bad rows, and time travel to see exactly
+# MAGIC what a MERGE changed. Elsewhere the same SQL runs on DuckDB and the Delta-only steps are skipped.
+
+# COMMAND ----------
+
+LAYERS = ["bronze_market", "silver_market", "gold_vol_features"]
+VOL_SERIES = ["VIX", "VIX3M", "VVIX", "SKEW"]
+
+
+def lname(t: str) -> str:
+    return f"{FQ}.{t}" if WRITE_DELTA else t
+
+
+def layer_sql(sql: str) -> pd.DataFrame:
+    """Like lake_sql, but the layer tables are also available as {bronze_market} etc."""
+    sql = sql.format(**{k: lname(k) for k in list(LAKE) + LAYERS})
+    return spark.sql(sql).toPandas() if WRITE_DELTA else con.execute(sql).df()  # noqa: F821
+
+
+def write_layer(name: str, pdf: pd.DataFrame, mode: str):
+    if WRITE_DELTA:
+        w = spark.createDataFrame(pdf).write.mode(mode)  # noqa: F821
+        if mode == "overwrite":
+            w = w.option("overwriteSchema", "true")
+        w.saveAsTable(lname(name))
+    else:
+        con.register("_incoming", pdf)
+        con.execute(f"CREATE OR REPLACE TABLE {name} AS SELECT * FROM _incoming" if mode == "overwrite"
+                    else f"INSERT INTO {name} SELECT * FROM _incoming")
+        con.unregister("_incoming")
+
+
+def count(t: str, where: str = "TRUE") -> int:
+    return int(layer_sql(f"SELECT count(*) AS n FROM {{{t}}} WHERE {where}")["n"].iloc[0])
+
+
+spy_src = etf_daily.loc[etf_daily["symbol"] == "SPY", ["date", "close"]].assign(series="SPY", source_table="prices")
+vol_src = (vix[vix["index_name"].isin(VOL_SERIES)].rename(columns={"index_name": "series"})
+           .assign(source_table="cboe_volatility"))
+delivery = pd.concat([spy_src, vol_src])[["series", "date", "close", "source_table"]].rename(columns={"close": "value"})
+delivery["date"] = pd.to_datetime(delivery["date"])
+spy_days = np.sort(delivery.loc[delivery["series"] == "SPY", "date"].unique())
+cutoff, overlap_start = spy_days[-21], spy_days[-60]
+
+
+def batch(frame: pd.DataFrame, batch_id: int) -> pd.DataFrame:
+    return frame.assign(batch_id=batch_id, _ingested_at=pd.Timestamp.now(tz="UTC").tz_localize(None))
+
+
+batch1 = batch(delivery[delivery["date"] <= cutoff], 1)              # history up to three weeks ago
+batch2 = batch(delivery[delivery["date"] >= overlap_start], 2)       # the latest 60 days, 40 of them again
+write_layer("bronze_market", batch1, "overwrite")
+
+DEDUP_SQL = """
+  SELECT series, CAST(date AS DATE) AS date, CAST(value AS DOUBLE) AS value, source_table, batch_id
+  FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY series, date ORDER BY _ingested_at DESC) AS rn
+        FROM {{bronze_market}} WHERE {where}) b
+  WHERE rn = 1
+"""
+cluster = "CLUSTER BY (series, date)" if WRITE_DELTA else ""
+layer_sql(f"CREATE OR REPLACE TABLE {{silver_market}} {cluster} AS "
+          + DEDUP_SQL.format(where="batch_id = 1 AND value > 0"))
+if WRITE_DELTA:
+    sil = lname("silver_market")
+    spark.sql(f"ALTER TABLE {sil} DROP CONSTRAINT IF EXISTS value_positive")  # noqa: F821
+    spark.sql(f"ALTER TABLE {sil} ADD CONSTRAINT value_positive CHECK (value > 0)")  # noqa: F821
+    try:
+        spark.sql(f"INSERT INTO {sil} VALUES ('SPY', DATE'1900-01-01', -1.0, 'bad_feed', 0)")  # noqa: F821
+        print("WARNING: the CHECK constraint did not reject a negative value")
+    except Exception as e:  # the expected outcome: Delta refuses the write
+        print("CHECK constraint rejected a bad row as intended:", str(e).splitlines()[0][:160])
+    v_before = int(spark.sql(f"DESCRIBE HISTORY {sil} LIMIT 1").collect()[0]["version"])  # noqa: F821
+
+write_layer("bronze_market", batch2, "append")
+print(f"bronze: {count('bronze_market'):,} rows in 2 deliveries, "
+      f"{count('bronze_market') - len(delivery):,} of them duplicates by design")
+
+# COMMAND ----------
+
+MERGE_SQL = """
+MERGE INTO {silver_market} AS t
+USING (""" + DEDUP_SQL.format(where="batch_id = 2 AND value > 0") + """) AS s
+ON t.series = s.series AND t.date = s.date
+WHEN MATCHED AND t.value <> s.value THEN
+  UPDATE SET value = s.value, source_table = s.source_table, batch_id = s.batch_id
+WHEN NOT MATCHED THEN
+  INSERT (series, date, value, source_table, batch_id)
+  VALUES (s.series, s.date, s.value, s.source_table, s.batch_id)
+"""
+
+merge_log = []
+for attempt in ("first MERGE of delivery 2", "same MERGE again (rerun)"):
+    rows_before, b2_before = count("silver_market"), count("silver_market", "batch_id = 2")
+    native = layer_sql(MERGE_SQL)
+    inserted = count("silver_market") - rows_before
+    updated = count("silver_market", "batch_id = 2") - b2_before - inserted
+    merge_log.append({"step": attempt, "inserted": inserted, "updated": updated,
+                      "silver rows after": count("silver_market")})
+    if WRITE_DELTA:
+        print(f"{attempt}: Delta reports", native.to_dict("records")[0])
+table(pd.DataFrame(merge_log))
+dups = layer_sql("SELECT count(*) AS n FROM (SELECT series, date FROM {silver_market} "
+                 "GROUP BY series, date HAVING count(*) > 1) d")["n"].iloc[0]
+print(f"silver duplicate (series, date) keys: {dups}")
+
+if WRITE_DELTA:
+    hist = spark.sql(f"DESCRIBE HISTORY {sil}").toPandas()  # noqa: F821
+    hist = hist[hist["version"] >= v_before][["version", "timestamp", "operation", "operationMetrics"]]
+    hist["inserted"] = hist["operationMetrics"].map(lambda m: (m or {}).get("numTargetRowsInserted"))
+    hist["updated"] = hist["operationMetrics"].map(lambda m: (m or {}).get("numTargetRowsUpdated"))
+    print("Delta history of the silver table since the MERGEs began:")
+    table(hist.drop(columns="operationMetrics"))
+    changed = spark.sql(f"""SELECT series, min(date) AS first_date, max(date) AS last_date, count(*) AS rows
+                            FROM (SELECT * FROM {sil} EXCEPT SELECT * FROM {sil} VERSION AS OF {v_before})
+                            GROUP BY series ORDER BY series""").toPandas()  # noqa: F821
+    print(f"Time travel: rows in silver now that were not in version {v_before}, before the MERGEs:")
+    table(changed)
+
+# COMMAND ----------
+
+GOLD_SQL = """
+CREATE OR REPLACE TABLE {gold_vol_features} CLUSTERING AS
+WITH px AS (
+  SELECT date, value AS close FROM {silver_market} WHERE series = 'SPY'
+), r AS (
+  SELECT date, LN(close / LAG(close) OVER (ORDER BY date)) AS lr FROM px
+), rc AS (
+  SELECT date, CASE WHEN ABS(lr) > 0.35 THEN 0 ELSE lr END AS lr FROM r WHERE lr IS NOT NULL
+), feat AS (
+  SELECT date,
+         STDDEV_SAMP(lr) OVER (ORDER BY date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) * SQRT(252) * 100 AS rv_5d,
+         STDDEV_SAMP(lr) OVER (ORDER BY date ROWS BETWEEN 20 PRECEDING AND CURRENT ROW) * SQRT(252) * 100 AS rv_21d,
+         STDDEV_SAMP(lr) OVER (ORDER BY date ROWS BETWEEN 62 PRECEDING AND CURRENT ROW) * SQRT(252) * 100 AS rv_63d,
+         SUM(lr) OVER (ORDER BY date ROWS BETWEEN 20 PRECEDING AND CURRENT ROW) * 100 AS ret_21d,
+         STDDEV_SAMP(lr) OVER (ORDER BY date ROWS BETWEEN 1 FOLLOWING AND 21 FOLLOWING) * SQRT(252) * 100 AS fwd,
+         COUNT(lr) OVER (ORDER BY date ROWS BETWEEN 1 FOLLOWING AND 21 FOLLOWING) AS n_fwd
+  FROM rc
+), idx AS (
+  SELECT date,
+         MAX(CASE WHEN series = 'VIX' THEN value END) AS vix,
+         MAX(CASE WHEN series = 'VIX3M' THEN value END) AS vix3m,
+         MAX(CASE WHEN series = 'VVIX' THEN value END) AS vvix,
+         MAX(CASE WHEN series = 'SKEW' THEN value END) AS skew_idx
+  FROM {silver_market} WHERE series <> 'SPY' GROUP BY date
+)
+SELECT f.date, f.rv_5d, f.rv_21d, f.rv_63d, f.ret_21d,
+       i.vix, i.vix3m, i.vvix, i.skew_idx, i.vix / i.vix3m AS vix_term_ratio,
+       y.y_10yr - y.y_3mo AS term_spread,
+       CASE WHEN f.n_fwd = 21 THEN f.fwd END AS label_rv_fwd_21d
+FROM feat f
+LEFT JOIN idx i ON f.date = i.date
+LEFT JOIN {yield_curve} y ON f.date = CAST(y.date AS DATE)
+"""
+layer_sql(GOLD_SQL.replace("CLUSTERING", "CLUSTER BY (date)" if WRITE_DELTA else ""))
+if WRITE_DELTA:
+    spark.sql(f"OPTIMIZE {lname('gold_vol_features')}")  # noqa: F821
+    gold_version = int(spark.sql(f"DESCRIBE HISTORY {lname('gold_vol_features')} LIMIT 1")  # noqa: F821
+                       .collect()[0]["version"])
+    detail = pd.concat([spark.sql(f"DESCRIBE DETAIL {lname(t)}").toPandas()  # noqa: F821
+                        .assign(layer=t)[["layer", "numFiles", "sizeInBytes", "clusteringColumns"]] for t in LAYERS])
+    table(detail)
+else:
+    gold_version = None
+print({t: f"{count(t):,} rows" for t in LAYERS})
+print("Every feature uses data up to and including its own date; only the label looks forward.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 15. Machine learning with MLflow: forecasting next month's SPY volatility
+# MAGIC **Question:** how volatile will SPY be over the next 21 trading days? Volatility clusters, so it
+# MAGIC is far more predictable than returns, and the options market prices its own forecast (the VIX).
+# MAGIC
+# MAGIC **Method.** Features and label come from the gold table. Five forecasters, fixed before any
+# MAGIC test year was scored: two that need no fitting (last month's realized volatility, and the VIX
+# MAGIC itself), the HAR regression on daily, weekly and monthly realized volatility that is the
+# MAGIC standard benchmark, HAR plus the VIX, and gradient-boosted trees on all ten features.
+# MAGIC Walk-forward: for each year from 2014, fit on every earlier day and predict that year. The last
+# MAGIC 21 training rows before each test year are dropped, because their labels overlap the test year.
+# MAGIC
+# MAGIC On Databricks every run is logged to an MLflow experiment (parameters, per-year errors, the
+# MAGIC gold table's Delta version), and the forecaster with the lowest walk-forward error is refit on
+# MAGIC all data and registered in Unity Catalog as `workspace.fdp_showcase.spy_vol_forecaster` with
+# MAGIC the alias `champion`. Picking the best of three on the same walk-forward makes its reported
+# MAGIC error slightly optimistic.
+
+# COMMAND ----------
+
+from sklearn.compose import ColumnTransformer  # noqa: E402
+from sklearn.ensemble import HistGradientBoostingRegressor  # noqa: E402
+from sklearn.inspection import permutation_importance  # noqa: E402
+from sklearn.linear_model import LinearRegression  # noqa: E402
+from sklearn.pipeline import Pipeline  # noqa: E402
+
+gold = layer_sql("SELECT * FROM {gold_vol_features} ORDER BY date")
+gold["date"] = pd.to_datetime(gold["date"])
+FEATURES = ["rv_5d", "rv_21d", "rv_63d", "ret_21d", "vix", "vix3m", "vvix", "skew_idx", "vix_term_ratio",
+            "term_spread"]
+LABEL, HORIZON, TRAIN_START, FIRST_TEST = "label_rv_fwd_21d", 21, "2010-01-01", 2014
+data = gold[gold["date"] >= TRAIN_START].dropna(subset=FEATURES).reset_index(drop=True)
+labeled = data.dropna(subset=[LABEL]).reset_index(drop=True)
+
+vr = labeled[labeled["vix"] > labeled[LABEL]].shape[0] / len(labeled)
+fig = go.Figure()
+fig.add_scattergl(x=labeled["vix"], y=labeled[LABEL], mode="markers", showlegend=False,
+                  marker=dict(color=PALETTE[0], size=5, opacity=0.35),
+                  customdata=labeled["date"].dt.strftime("%Y-%m-%d"),
+                  hovertemplate="%{customdata}: VIX %{x:.1f}, next 21 days realized %{y:.1f}%<extra></extra>")
+mx = float(np.nanpercentile(labeled[["vix", LABEL]].values, 99.5))
+fig.add_scatter(x=[5, mx], y=[5, mx], mode="lines", line=dict(color=INK2, dash="dash", width=1), name="forecast = outcome")
+fig.update_xaxes(title="VIX at the close (market's 30-day implied volatility, %)", range=[5, mx])
+fig.update_yaxes(title="SPY realized volatility over the next 21 trading days (%)", range=[0, mx])
+fig.update_layout(title="The VIX against what actually happened next")
+show(fig, height=520, subtitle=f"{len(labeled):,} days since {TRAIN_START[:4]}. On {vr:.0%} of them the VIX was above the "
+                               "volatility that followed: option buyers pay a premium for protection.")
+
+# COMMAND ----------
+
+
+def pipe(cols, est):
+    return Pipeline([("select", ColumnTransformer([("keep", "passthrough", cols)])), ("model", est)])
+
+
+MODELS = {
+    "HAR regression": lambda: pipe(["rv_5d", "rv_21d", "rv_63d"], LinearRegression()),
+    "HAR + VIX": lambda: pipe(["rv_5d", "rv_21d", "rv_63d", "vix"], LinearRegression()),
+    "gradient boosting": lambda: pipe(FEATURES, HistGradientBoostingRegressor(
+        max_iter=300, learning_rate=0.05, max_leaf_nodes=15, min_samples_leaf=40, l2_regularization=1.0,
+        random_state=0)),
+}
+BASELINES = {"persistence (last 21 days)": "rv_21d", "VIX (implied)": "vix"}
+NAMES = list(BASELINES) + list(MODELS)
+
+test_years = [y for y in sorted(labeled["date"].dt.year.unique()) if y >= FIRST_TEST]
+folds, last_fit = [], {}
+for y in test_years:
+    test = labeled[labeled["date"].dt.year == y]
+    train = labeled[labeled["date"] < test["date"].min()].iloc[:-HORIZON]  # embargo
+    out = test[["date", LABEL]].copy()
+    for name, col in BASELINES.items():
+        out[name] = test[col].to_numpy()
+    for name, make in MODELS.items():
+        est = make().fit(train[FEATURES], train[LABEL])
+        out[name] = est.predict(test[FEATURES])
+        last_fit[name] = est
+    folds.append(out)
+oos = pd.concat(folds, ignore_index=True)
+err = {n: oos[n] - oos[LABEL] for n in NAMES}
+
+
+def rmse(e):
+    return float(np.sqrt(np.mean(e ** 2)))
+
+
+yearly = pd.DataFrame([{"year": int(y), **{n: rmse(g[n] - g[LABEL]) for n in NAMES}}
+                       for y, g in oos.groupby(oos["date"].dt.year)])
+sse_persist = float((err[NAMES[0]] ** 2).sum())
+pooled = pd.DataFrame({
+    "model": NAMES,
+    "rmse": [rmse(err[n]) for n in NAMES],
+    "mae": [float(err[n].abs().mean()) for n in NAMES],
+    "bias": [float(err[n].mean()) for n in NAMES],
+    "r2_vs_persistence": [1 - float((err[n] ** 2).sum()) / sse_persist for n in NAMES],
+}).sort_values("rmse").reset_index(drop=True)
+
+
+def dm_test(e_a, e_b, lag=HORIZON):
+    """Diebold-Mariano on squared errors with a Newey-West variance (labels overlap for 21 days).
+    t < 0 means model A has the smaller errors."""
+    d = np.asarray(e_a) ** 2 - np.asarray(e_b) ** 2
+    n, dc = len(d), d - d.mean()
+    gamma = [float(np.dot(dc[k:], dc[:n - k]) / n) for k in range(lag + 1)]
+    var = gamma[0] + 2 * sum((1 - k / (lag + 1)) * gamma[k] for k in range(1, lag + 1))
+    t = d.mean() / math.sqrt(var / n)
+    return t, math.erfc(abs(t) / math.sqrt(2))
+
+
+dm_rows = []
+for a, b in [("HAR + VIX", "persistence (last 21 days)"), ("HAR + VIX", "HAR regression"),
+             ("gradient boosting", "HAR + VIX")]:
+    t, p = dm_test(err[a], err[b])
+    dm_rows.append({"model A": a, "model B": b, "DM t (negative = A better)": round(t, 2), "p": round(p, 4)})
+print(f"Walk-forward, out of sample: {len(oos):,} days in {test_years[0]}-{test_years[-1]}")
+table(pooled.round(3))
+table(pd.DataFrame(dm_rows))
+
+# COMMAND ----------
+
+fig = go.Figure()
+for i, n in enumerate(NAMES):
+    fig.add_scatter(x=yearly["year"], y=yearly[n], name=n, mode="lines+markers",
+                    line=dict(color=PALETTE[i], width=2.4 if n in MODELS else 1.6,
+                              dash=None if n in MODELS else "dot"),
+                    hovertemplate=f"{n} %{{x}}: RMSE %{{y:.2f}} vol points<extra></extra>")
+fig.update_xaxes(title="test year", dtick=1)
+fig.update_yaxes(title="RMSE (annualized volatility points)")
+fig.update_layout(title="Out-of-sample error by year (lower is better)", hovermode="x unified")
+best = pooled.iloc[0]
+show(fig, height=460, subtitle=f"Lowest pooled error: {best['model']} (RMSE {best['rmse']:.2f}, "
+                               f"{best['r2_vs_persistence']:.0%} less squared error than persistence). "
+                               "Dotted lines need no fitting.")
+
+recent = oos[oos["date"] >= oos["date"].max() - pd.DateOffset(years=3)]
+fig = go.Figure()
+fig.add_scatter(x=recent["date"], y=recent[LABEL], name="actual (next 21 days)", line=dict(color=INK, width=2))
+for i, n in enumerate(["VIX (implied)", "HAR + VIX", "gradient boosting"]):
+    fig.add_scatter(x=recent["date"], y=recent[n], name=n, line=dict(color=PALETTE[NAMES.index(n)], width=1.4))
+fig.update_yaxes(title="annualized volatility %")
+fig.update_layout(title="Forecasts against outcomes, last three test years", hovermode="x unified")
+show(fig, height=460, subtitle="Each point is the forecast made that day for the following 21 trading days.")
+
+# COMMAND ----------
+
+gb_last, last_test = last_fit["gradient boosting"], labeled[labeled["date"].dt.year == test_years[-1]]
+pi = permutation_importance(gb_last, last_test[FEATURES], last_test[LABEL], n_repeats=10, random_state=0,
+                            scoring="neg_root_mean_squared_error")
+imp = pd.Series(pi.importances_mean, index=FEATURES).sort_values()
+fig = go.Figure(go.Bar(x=imp.values, y=imp.index, orientation="h", marker_color=PALETTE[0],
+                       error_x=dict(type="data", array=pd.Series(pi.importances_std, index=FEATURES)[imp.index].values,
+                                    color=MUTED, thickness=1),
+                       hovertemplate="%{y}: +%{x:.2f} RMSE when shuffled<extra></extra>"))
+fig.update_xaxes(title="increase in RMSE when the feature is shuffled (vol points)")
+fig.update_layout(title=f"What the gradient-boosted model relies on ({test_years[-1]} test year)")
+show(fig, height=440, subtitle="Permutation importance on held-out data. Correlated features (the three realized "
+                               "volatilities, VIX and VIX3M) share credit, so each one alone looks smaller.")
+
+# COMMAND ----------
+
+champion = pooled[pooled["model"].isin(list(MODELS))].iloc[0]["model"]
+final_model = MODELS[champion]().fit(labeled[FEATURES], labeled[LABEL])
+UC_MODEL = f"{CATALOG}.{SCHEMA}.spy_vol_forecaster"
+try:
+    import mlflow
+    from mlflow.models import infer_signature
+except ImportError:
+    mlflow = None
+registered_version = None
+
+if mlflow is not None and ON_DATABRICKS:
+    mlflow.autolog(disable=True)  # one run per fold would bury the experiment
+    user = spark.sql("SELECT current_user()").first()[0]  # noqa: F821
+    mlflow.set_experiment(f"/Users/{user}/fdp_spy_vol_forecast")
+    mlflow.set_registry_uri("databricks-uc")
+    with mlflow.start_run(run_name=f"walk-forward {test_years[0]}-{test_years[-1]}") as parent:
+        mlflow.log_params({"label": LABEL, "horizon_days": HORIZON, "embargo_rows": HORIZON,
+                           "train_start": TRAIN_START, "test_years": f"{test_years[0]}-{test_years[-1]}",
+                           "features": ",".join(FEATURES), "source_table": lname("gold_vol_features"),
+                           "source_table_delta_version": gold_version, "champion": champion})
+        mlflow.log_text(pooled.to_csv(index=False), "oos_pooled.csv")
+        mlflow.log_text(yearly.to_csv(index=False), "oos_by_year.csv")
+        mlflow.log_text(pd.DataFrame(dm_rows).to_csv(index=False), "diebold_mariano.csv")
+        for r in pooled.itertuples():
+            with mlflow.start_run(run_name=r.model, nested=True):
+                mlflow.log_param("model", r.model)
+                mlflow.log_metrics({"oos_rmse": r.rmse, "oos_mae": r.mae, "oos_bias": r.bias,
+                                    "oos_r2_vs_persistence": r.r2_vs_persistence})
+                for yr_, v in zip(yearly["year"], yearly[r.model]):
+                    mlflow.log_metric("oos_rmse_by_year", float(v), step=int(yr_))
+        X_all = labeled[FEATURES]
+        try:
+            info = mlflow.sklearn.log_model(final_model, "model", input_example=X_all.head(5),
+                                            signature=infer_signature(X_all, final_model.predict(X_all)),
+                                            registered_model_name=UC_MODEL)
+            registered_version = getattr(info, "registered_model_version", None) or max(
+                int(v.version) for v in mlflow.MlflowClient().search_model_versions(f"name='{UC_MODEL}'"))
+            mlflow.MlflowClient().set_registered_model_alias(UC_MODEL, "champion", registered_version)
+            print(f"registered {UC_MODEL} version {registered_version} as @champion ({champion})")
+        except Exception as e:  # registration depends on workspace permissions; the runs above are kept
+            print(f"model logged to run {parent.info.run_id} but not registered: {type(e).__name__}: {e}")
+    print(f"MLflow experiment: /Users/{user}/fdp_spy_vol_forecast, parent run {parent.info.run_id}")
+else:
+    print("MLflow tracking runs on Databricks only; the evaluation above is unaffected.")
+
+# COMMAND ----------
+
+if registered_version is not None:
+    served = mlflow.pyfunc.load_model(f"models:/{UC_MODEL}@champion")
+    source = f"{UC_MODEL}@champion (version {registered_version})"
+else:
+    served, source = final_model, f"in-memory {champion} model"
+now_row = data.iloc[[-1]]
+forecast = float(np.asarray(served.predict(now_row[FEATURES])).ravel()[0])
+tiles([
+    ("Forecast, next 21 trading days", f"{forecast:.1f}%", f"SPY annualized volatility, from {now_row['date'].iloc[0]:%Y-%m-%d}"),
+    ("VIX that day", f"{now_row['vix'].iloc[0]:.1f}", "the options market's 30-day forecast"),
+    ("Realized, last 21 days", f"{now_row['rv_21d'].iloc[0]:.1f}%", "the persistence forecast"),
+    ("Walk-forward RMSE", f"{pooled.set_index('model').loc[champion, 'rmse']:.2f}", f"{champion}, vol points"),
+])
+print(f"Scored with {source}.")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Notes
 # MAGIC * Every number above is computed when the notebook runs, from the dataset as it stands on
-# MAGIC   Hugging Face, so rerunning it tomorrow shows tomorrow's data.
+# MAGIC   Hugging Face, so rerunning it tomorrow shows tomorrow's data. Section 13 is the exception:
+# MAGIC   it reads a CSV exported from the local evaluation registry.
 # MAGIC * `prices` stores unadjusted closes. Section 2 treats single-day moves over 35% as splits and
 # MAGIC   removes them, and section 3 is price return without dividends.
 # MAGIC * Fund-holding sectors come from the S&P 500 reference table, so funds outside large US stocks
 # MAGIC   are mostly "Unclassified".
 # MAGIC * The Delta tables in `workspace.fdp_showcase` are overwritten on each run; their history
-# MAGIC   (`DESCRIBE HISTORY`) keeps every version.
+# MAGIC   (`DESCRIBE HISTORY`) keeps every version. Section 14's bronze layer is reset at the start of
+# MAGIC   each run so the two-delivery walkthrough is the same every time.
+# MAGIC * Some sources lag: the CFTC table and EIA storage are refreshed less often than prices, and
+# MAGIC   each chart's subtitle states the latest date it shows.
+# MAGIC * To refresh section 13 after more strategies are scored, run
+# MAGIC   `python notebooks/databricks/export_strategy_results.py` from the repo root and commit the
+# MAGIC   two files in `notebooks/databricks/data/`.

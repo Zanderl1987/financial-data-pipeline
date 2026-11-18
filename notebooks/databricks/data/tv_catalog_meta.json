@@ -1,0 +1,11 @@
+{
+  "admitted": 781,
+  "tested": 35,
+  "dev_split": "..2017-12-31 (+75% symbols full history)",
+  "universe_hash": "877c104fd076",
+  "last_result_at": "2026-11-03T01:07:33.771149+00:00",
+  "exported_at": "2026-11-18T04:41:33+00:00",
+  "primary_endpoint": "pnl_p: circular-shift null on net P&L, sqrt-law cost model; pnl_p_5bps / pnl_p_20bps are flat-cost sensitivity checks",
+  "n_perm": 200,
+  "bh_q": 0.1
+}

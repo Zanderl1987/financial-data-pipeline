@@ -1,0 +1,36 @@
+strategy,slug,n_trades,win_rate,profit_factor,sharpe,median_hold,total_pnl_net,pnl_p,pnl_p_5bps,pnl_p_20bps,null_exposure_ratio,exposure_mismatch,holdout_spent
+joey stochrsi atr,joey_stochrsi_atr,348287.0,52.6,1.107,0.037,6.0,10076705.44,0.005,0.005,0.005,0.8948,0.0,False
+rsi bb inside strategy,rsi_bb_inside_strategy,116077.0,61.4,1.05,0.014,13.0,1786985.45,0.005,0.005,0.005,0.8891,0.0,True
+tradleware hodl,tradleware_hodl,1808.0,65.1,9.34,0.356,2159.0,24014948.6,0.005,0.005,0.005,0.6953,1.0,False
+bollinger bands simple,bollinger_bands_simple,437065.0,59.9,0.994,-0.002,9.0,-739582.52,0.005,0.005,0.005,0.8928,0.0,True
+capitulation stretch reversion,capitulation_stretch_reversion,32793.0,60.9,1.209,0.063,3.0,979331.13,0.005,0.005,0.005,1.059,0.0,False
+mrr mean reversion range,mrr_mean_reversion_range,39940.0,45.6,0.89,-0.032,2.0,-767266.08,0.0199,0.0199,0.1194,1.0459,0.0,False
+ineficient market 123 pattern,ineficient_market_123_pattern,24287.0,59.5,0.933,-0.022,2.0,-280788.3,0.1592,0.5124,0.8159,0.9601,0.0,False
+gap filling strategy,ghocsiv7_gap_filling_strategy,1124388.0,47.1,0.849,-0.052,2.0,-23258022.49,0.2587,0.005,1.0,0.8934,0.0,False
+ultimate prop firm artillery,ultimate_prop_firm_artillery,296490.0,50.7,0.926,-0.026,3.0,-4498408.66,0.2786,1.0,1.0,0.9398,0.0,False
+tomukas sweep reclaim scalein,tomukas_sweep_reclaim_scalein,94147.0,53.0,0.88,-0.024,2.0,-1717053.9,0.9154,0.995,1.0,0.9848,0.0,False
+bist30 sp500 atr momentum rider,bist30_sp500_atr_momentum_rider,64370.0,68.2,6.104,0.527,33.0,33077250.91,0.9453,0.9502,0.9701,0.9849,0.0,False
+vegas channel tunnel v11,vegas_channel_tunnel_v11,109366.0,40.1,1.224,0.068,16.0,8802103.9,0.9801,1.0,1.0,0.9308,0.0,False
+ut bot 1 0 10,ut_bot_1_0_10,711666.0,36.1,0.869,-0.045,10.0,-30017031.82,1.0,1.0,1.0,0.8909,0.0,False
+ucgxklvt ma crossover rsi,ucgxklvt_ma_crossover_rsi,234604.0,42.9,0.937,-0.024,3.0,-2695915.3,1.0,1.0,1.0,0.8945,0.0,False
+optimized doji breakout short,optimized_doji_breakout_short,489810.0,43.2,0.769,-0.082,2.0,-17031165.79,1.0,1.0,1.0,0.8997,0.0,True
+supertrend entry tp123,supertrend_entry_tp123,32286.0,39.8,0.712,-0.112,3.0,-3375298.4,1.0,0.995,1.0,0.9425,0.0,False
+smoothed heiken ashi strategy,smoothed_heiken_ashi_strategy,270317.0,35.2,0.904,-0.029,14.0,-9089490.76,1.0,1.0,1.0,0.8848,0.0,False
+rsi divergence ema filter,rsi_divergence_ema_filter,33853.0,37.7,0.969,-0.01,29.0,-524148.58,1.0,1.0,1.0,0.9751,0.0,False
+bvol early entry,ras16l2w_bvol_early_entry,35756.0,39.5,1.145,0.042,29.0,2256881.01,1.0,1.0,1.0,0.9465,0.0,False
+optimized keltner channels nifty,optimized_keltner_channels_nifty,89492.0,36.0,1.055,0.014,67.0,3998750.86,1.0,1.0,1.0,0.9101,0.0,False
+hyperliquid ready webhook template,8iayxxss_hyperliquid_ready_webhook_template,165977.0,37.9,0.902,-0.037,8.0,-5513201.05,1.0,1.0,1.0,0.9123,0.0,False
+ymepyslq nnfx btc ssl qqe,ymepyslq_nnfx_btc_ssl_qqe,657139.0,38.4,0.82,-0.064,3.0,-23080098.85,1.0,1.0,1.0,0.8995,0.0,False
+stop loss and take profit in example,ihvpg6ts_stop_loss_and_take_profit_in_example,397023.0,45.4,0.832,-0.061,2.0,-9956736.56,1.0,1.0,1.0,0.9,0.0,False
+hybrid breakout vcp,hybrid_breakout_vcp,12652.0,47.4,1.114,0.049,19.0,620952.73,1.0,1.0,1.0,1.352,1.0,False
+high activity penny stock,high_activity_penny_stock,14277.0,34.3,0.672,-0.133,3.0,-1778256.75,1.0,0.9055,0.9552,0.9372,0.0,False
+fvg bos confirmation,fvg_bos_confirmation,825051.0,44.5,0.879,-0.042,3.0,-23735475.6,1.0,1.0,1.0,0.9117,0.0,False
+fractal memory strategy,fractal_memory_strategy,101357.0,53.4,0.927,-0.026,9.0,-2684302.5,1.0,1.0,1.0,0.9193,0.0,False
+ema cross 9 21,ema_cross_9_21,2140110.0,49.5,0.865,-0.043,2.0,-43837653.58,1.0,0.6219,1.0,0.8921,0.0,False
+dual bollinger band cross,dual_bollinger_band_cross,633345.0,38.8,0.964,-0.011,6.0,-4836080.79,1.0,1.0,1.0,0.8871,0.0,False
+donchian atr trail btc,donchian_atr_trail_btc,211912.0,41.3,1.071,0.022,12.0,4805107.16,1.0,1.0,1.0,0.8938,0.0,False
+combined sha strategy multi ma vwap,bqc4p98t_combined_sha_strategy_multi_ma_vwap,270317.0,35.2,0.904,-0.029,14.0,-9089490.76,1.0,1.0,1.0,0.8848,0.0,False
+bps v17 strong trend filter,bps_v17_strong_trend_filter,159650.0,43.6,1.044,0.015,5.0,1523088.84,1.0,1.0,1.0,0.8826,0.0,False
+apex fusion confluence,apex_fusion_confluence,206291.0,41.5,0.994,-0.002,7.0,-369409.29,1.0,1.0,1.0,0.9296,0.0,False
+kama adaptive strategy,kama_adaptive_strategy,337948.0,35.7,1.085,0.023,10.0,8155897.09,1.0,1.0,1.0,0.8973,0.0,False
+ssl channel qqe strategy,zy1xmx8s_ssl_channel_qqe_strategy,365985.0,35.4,0.85,-0.048,9.0,-15959659.36,1.0,1.0,1.0,0.8866,0.0,False
