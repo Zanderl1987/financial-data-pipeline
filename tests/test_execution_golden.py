@@ -162,6 +162,49 @@ def _build_all(monkeypatch) -> dict:
 
 # --------------------------------------------------------------- the tests
 
+# Floats may differ from the snapshot by at most this much. The snapshot was
+# taken from the pre-refactor code, and the refactored code lands within
+# ~1.4e-17 of it (last-bit rounding from a different order of float operations),
+# so a bare `==` has failed since the commit that created it. 1e-12 is far above
+# that noise and far below any real change: a 0.01% cost shift on one day is 1e-4.
+# Do NOT widen this to make a failure pass, and do not regenerate the snapshot:
+# its whole value is that it was taken before the refactor.
+ABS_TOL = 1e-12
+
+
+def _diff(actual, expected, path="") -> "str | None":
+    """First place `actual` departs from `expected`, or None. Numbers within
+    ABS_TOL, everything else (keys, lengths, strings, NaN/inf tags) exact."""
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict) or set(actual) != set(expected):
+            return f"{path}: keys differ"
+        for k in expected:
+            d = _diff(actual[k], expected[k], f"{path}.{k}")
+            if d:
+                return d
+        return None
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return f"{path}: length differs"
+        for i, (a, e) in enumerate(zip(actual, expected)):
+            d = _diff(a, e, f"{path}[{i}]")
+            if d:
+                return d
+        return None
+    if (isinstance(expected, (int, float)) and not isinstance(expected, bool)
+            and isinstance(actual, (int, float)) and not isinstance(actual, bool)):
+        return None if abs(actual - expected) <= ABS_TOL else f"{path}: {actual!r} != {expected!r}"
+    return None if actual == expected else f"{path}: {actual!r} != {expected!r}"
+
+
+def test_tolerance_still_catches_a_real_change():
+    """The tolerance must not be wide enough to hide a change that matters."""
+    assert _diff({"r": [0.01, 0.02]}, {"r": [0.01, 0.02 + 1e-17]}) is None
+    assert _diff({"r": [0.01, 0.02]}, {"r": [0.01, 0.0201]}) is not None
+    assert _diff({"r": [0.01]}, {"r": [0.01, 0.02]}) is not None
+    assert _diff({"m": "__nan__"}, {"m": 0.0}) is not None
+
+
 def _load_golden() -> dict:
     with open(GOLDEN_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -180,7 +223,8 @@ def test_backtest_matches_golden(monkeypatch, case):
         pytest.skip("regenerating golden file")
     expected = _load_golden()["backtest"][case]
     actual = json.loads(json.dumps(_run_backtest_case(monkeypatch, BACKTEST_CASES[case])))
-    assert actual == expected, f"backtest case '{case}' changed"
+    d = _diff(actual, expected)
+    assert d is None, f"backtest case '{case}' changed at {d}"
 
 
 @pytest.mark.parametrize("case", sorted(SCENARIO_CASES))
@@ -189,7 +233,8 @@ def test_scenario_matches_golden(monkeypatch, case):
         pytest.skip("regenerating golden file")
     expected = _load_golden()["scenario"][case]
     actual = json.loads(json.dumps(_run_scenario_case(monkeypatch, SCENARIO_CASES[case])))
-    assert actual == expected, f"scenario case '{case}' changed"
+    d = _diff(actual, expected)
+    assert d is None, f"scenario case '{case}' changed at {d}"
 
 
 def test_cost_cases_actually_differ_from_baseline():

@@ -154,35 +154,36 @@ class TestValidateTable:
         assert all(isinstance(c, v.CheckResult) for c in result.checks)
 
 
+@pytest.fixture(scope="class")
+def summary():
+    """validate_all() reads every table on disk (~28s). These checks are all
+    read-only, so they share one run instead of paying for six."""
+    return v.validate_all()
+
+
 class TestValidateAll:
-    def test_returns_dataframe(self):
-        summary = v.validate_all()
+    def test_returns_dataframe(self, summary):
         assert isinstance(summary, pd.DataFrame)
 
-    def test_has_expected_columns(self):
-        summary = v.validate_all()
+    def test_has_expected_columns(self, summary):
         for col in ("table", "status", "errors", "warnings", "rows", "latest_file"):
             assert col in summary.columns, f"Missing column: {col}"
 
-    def test_covers_all_catalog_tables(self):
-        summary = v.validate_all()
+    def test_covers_all_catalog_tables(self, summary):
         in_summary = set(summary["table"])
         for table in q.CATALOG:
             assert table in in_summary, f"{table} missing from validate_all() output"
 
-    def test_status_values_are_valid(self):
-        summary = v.validate_all()
+    def test_status_values_are_valid(self, summary):
         valid = {"PASS", "FAIL", "NO DATA"}
         bad = set(summary["status"]) - valid
         assert not bad, f"Unexpected status values: {bad}"
 
-    def test_no_data_tables_have_zero_rows(self):
-        summary = v.validate_all()
+    def test_no_data_tables_have_zero_rows(self, summary):
         no_data = summary[summary["status"] == "NO DATA"]
         assert (no_data["rows"] == 0).all()
 
-    def test_no_data_tables_have_empty_latest_file(self):
-        summary = v.validate_all()
+    def test_no_data_tables_have_empty_latest_file(self, summary):
         no_data = summary[summary["status"] == "NO DATA"]
         assert (no_data["latest_file"] == "").all()
 

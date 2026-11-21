@@ -20,6 +20,7 @@ reliable today; cross-source comparisons need a sector-name mapping first.
 
 import os
 import sys
+import duckdb
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,15 +32,19 @@ _HOLDINGS_TABLES = ("fund_holdings", "etf_holdings")
 def _latest_holdings(fund_ticker: str) -> pd.DataFrame:
     """Latest-snapshot holdings for a fund, checking fund_holdings then
     etf_holdings (whichever actually has data for this ticker)."""
+    # Filter in DuckDB. Loading the whole table and filtering in pandas took
+    # 90-180s per call once fund_holdings passed 23M rows.
     for table in _HOLDINGS_TABLES:
-        df = q.load(table)
-        if df.empty or "fund_ticker" not in df.columns:
-            continue
-        fund_df = df[df["fund_ticker"] == fund_ticker]
-        if fund_df.empty:
-            continue
-        latest_date = fund_df["snapshot_date"].max()
-        return fund_df[fund_df["snapshot_date"] == latest_date].copy()
+        try:
+            df = q._con().execute(
+                f"SELECT * FROM {table} WHERE fund_ticker = $t AND snapshot_date = "
+                f"(SELECT MAX(snapshot_date) FROM {table} WHERE fund_ticker = $t)",
+                {"t": fund_ticker},
+            ).df()
+        except (duckdb.CatalogException, duckdb.BinderException):
+            continue  # no files on disk yet, or no fund_ticker/snapshot_date column
+        if not df.empty:
+            return df
     return pd.DataFrame()
 
 

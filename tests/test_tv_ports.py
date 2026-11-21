@@ -349,29 +349,48 @@ class TestRegistry:
 
 # ---------------------------------------------------------- every-port smoke
 
-def _smoke_frame(n: int = 500, seed: int = 7) -> pd.DataFrame:
-    """Generic random-walk OHLCV frame, long enough to clear a 200-bar SMA
-    warmup. Not engineered to fire any particular port's signal -- this only
-    checks that every registered port runs cleanly and returns
-    engine-shaped output, not that it trades on this data."""
+def _smoke_frame(n: int = 2500, seed: int = 7) -> pd.DataFrame:
+    """Generic ~10-year daily OHLCV frame (2015 onward), not engineered for any
+    one port. It has the features real bars have and the old frame lacked:
+    an overnight gap (open != prior close), a separate fat-tailed session move
+    (so an up bar can sit inside a down run), and lognormal volume. With the
+    old open == prior close frame, gap and capitulation ports could never
+    fire, so a port broken into silence looked the same as a healthy one."""
     rng = np.random.default_rng(seed)
-    close = 100 * np.cumprod(1 + rng.normal(0.0003, 0.02, n))
-    prev = np.concatenate(([close[0]], close[:-1]))
-    spread = rng.uniform(0.002, 0.02, n)
-    high = np.maximum(close, prev) * (1 + spread)
-    low = np.minimum(close, prev) * (1 - spread)
-    volume = rng.uniform(0.5e6, 1.5e6, n)
+    gap = rng.standard_t(4, n) * 0.006
+    body = rng.standard_t(4, n) * 0.012 + 0.0003
+    open_ = np.empty(n)
+    close = np.empty(n)
+    prev = 100.0
+    for i in range(n):
+        open_[i] = prev * (1 + gap[i])
+        close[i] = open_[i] * (1 + body[i])
+        prev = close[i]
+    high = np.maximum(open_, close) * (1 + rng.uniform(0.001, 0.012, n))
+    low = np.minimum(open_, close) * (1 - rng.uniform(0.001, 0.012, n))
+    volume = rng.lognormal(13.8, 0.4, n)
     return pd.DataFrame(
-        {"open": prev, "high": high, "low": low, "close": close, "volume": volume},
+        {"open": open_, "high": high, "low": low, "close": close, "volume": volume},
         index=pd.date_range("2015-01-01", periods=n, freq="B"))
 
 
 class TestEveryPortSmoke:
     """Every registered port, run once against a generic frame: no crash,
-    boolean Series aligned to the frame's index, and the engine accepts the
-    resulting TradeRule without error. Catches wiring bugs (wrong dtype,
-    misaligned index, an unregistered helper) that a single hand-picked
-    scenario per port would not necessarily exercise."""
+    boolean Series aligned to the frame's index, the engine accepts the
+    resulting TradeRule, and the port actually trades.
+
+    The last check is the one that matters most. Two ports
+    (smoothed_heiken_ashi_strategy, cf98642; bqc4p98t, 8ef9a03) shipped
+    emitting zero signals on real data -- a NaN warmup poisoned a recursion --
+    and passed every shape check here, because an all-False boolean Series is
+    perfectly well-formed. If a new port legitimately cannot fire on this
+    frame, show that on real data before excusing it; don't weaken the check."""
+
+    def test_every_port_trades(self):
+        df = _smoke_frame()
+        silent = [info.slug for info in all_ports()
+                  if trades.simulate(load_rule(info.slug), {"SYN": df}).empty]
+        assert not silent, f"ports that never trade on the smoke frame: {silent}"
 
     def test_all_ports_run_clean(self):
         df = _smoke_frame()

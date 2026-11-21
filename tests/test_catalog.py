@@ -470,7 +470,26 @@ class TestCatalogPaths:
 
 class TestPilotIcebergViews:
     """Pilot tables should be backed by iceberg_scan when an Iceberg mirror
-    exists, and fall back to the curated parquet otherwise."""
+    exists, and fall back to the curated parquet otherwise.
+
+    The fixture shrinks the catalog to `prices` on a temp raw store. Without
+    it, every q.reload() here registered all ~230 tables against the real
+    storage/ tree (30-50s per test), the fallback test passed or failed by
+    what happened to be on disk, and the test's fake views were left behind
+    in the shared connection for whatever test ran next."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_catalog(self, monkeypatch, tmp_path):
+        import pandas as pd
+        raw = tmp_path / "raw" / "prices" / "year=2024" / "month=01"
+        raw.mkdir(parents=True)
+        pd.DataFrame({"symbol": ["AAPL"], "date": ["2024-01-02"],
+                      "close": [100.0]}).to_parquet(raw / "prices_x.parquet", index=False)
+        glob_path = (tmp_path / "raw" / "prices").as_posix() + "/**/*.parquet"
+        monkeypatch.setattr(q, "CATALOG", {"prices": glob_path})
+        monkeypatch.setattr(q, "ANALYTICS_VIEWS", {})
+        monkeypatch.setattr(q, "_CURATED_ROOT", str(tmp_path / "no_curated"))
+        monkeypatch.setattr(q, "_CON", None)  # monkeypatch restores the real one after
 
     def test_pilot_tables_defined(self):
         assert q.PILOT_ICEBERG_TABLES == {
@@ -540,16 +559,16 @@ class TestPilotIcebergViews:
 
     def test_curated_fallback_when_no_iceberg(self, monkeypatch, tmp_path):
         monkeypatch.setattr(q, "_pilot_iceberg_metadata", lambda t: None)
-        # point curated root at an empty temp dir so the fallback is the raw glob
-        monkeypatch.setattr(q, "_CURATED_ROOT", tmp_path)
+        # curated root is an empty temp dir (fixture), so the fallback is the raw glob
         q.reload()
         con = q._con()
         sql = con.execute(
             "SELECT sql FROM duckdb_views() WHERE view_name='prices'"
         ).fetchone()
-        # prices' raw glob exists in storage/raw -> view registered via parquet
+        # the fixture's raw prices file exists -> view registered via parquet
         assert sql is not None
         assert "iceberg_scan" not in sql[0]
+        assert q.sql("SELECT COUNT(*) AS n FROM prices").iloc[0]["n"] == 1
 
 
 class TestNoOrphanedTables:
@@ -738,20 +757,36 @@ class TestDocumentedScriptsAreTracked:
 
 
 class TestDiscoveryHelpers:
-    def test_tables_runs_without_error(self):
-        df = q.tables()
-        assert df is not None
-        assert "table" in df.columns
-        assert "rows" in df.columns
-    def test_tables_returns_all_catalog_entries(self):
-        df = q.tables()
-        registered = set(df["table"].tolist())
-        # Tables may include analytics views; check against both catalogs
-        assert registered.issubset(set(q.CATALOG.keys()) | set(q.ANALYTICS_VIEWS.keys()))
+    @pytest.fixture
+    def tiny_catalog(self, monkeypatch, tmp_path):
+        """Two tables on a temp store: `prices` with 2 known rows, `macro` with
+        no files. The real store took ~50s per tables() call and only allowed
+        "it returned something" checks, since its contents change daily."""
+        import pandas as pd
+        raw = tmp_path / "raw" / "prices" / "year=2024" / "month=01"
+        raw.mkdir(parents=True)
+        pd.DataFrame({"symbol": ["AAPL", "AAPL"],
+                      "date": pd.to_datetime(["2024-01-02", "2024-01-05"]).date,
+                      "close": [100.0, 101.0]}).to_parquet(raw / "prices_x.parquet", index=False)
+        root = (tmp_path / "raw").as_posix()
+        monkeypatch.setattr(q, "CATALOG", {"prices": f"{root}/prices/**/*.parquet",
+                                           "macro": f"{root}/macro/**/*.parquet"})
+        monkeypatch.setattr(q, "ANALYTICS_VIEWS", {})
+        monkeypatch.setattr(q, "PILOT_ICEBERG_TABLES", set())
+        monkeypatch.setattr(q, "_CURATED_ROOT", str(tmp_path / "no_curated"))
+        monkeypatch.setattr(q, "_CON", None)  # monkeypatch restores the real one after
 
-    def test_date_range_runs_without_error(self):
+    def test_tables_lists_every_entry_with_its_row_count(self, tiny_catalog):
+        df = q.tables().set_index("table")
+        assert set(df.index) == {"prices", "macro"}
+        assert df.loc["prices", "rows"] == "2"
+        assert df.loc["macro", "rows"] == "no data"
+        assert (df["type"] == "base").all()
+
+    def test_date_range_reports_min_and_max_and_skips_empty(self, tiny_catalog):
         df = q.date_range()
-        assert df is not None  # may be empty if no data files
+        assert df.to_dict("records") == [
+            {"table": "prices", "min_date": "2024-01-02", "max_date": "2024-01-05"}]
 
     def test_reload_does_not_raise(self):
         q.reload()   # should silently reset and re-register views

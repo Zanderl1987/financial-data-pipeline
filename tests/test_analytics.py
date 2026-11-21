@@ -419,3 +419,51 @@ class TestIvSummaryBehaviour:
         result = mod.iv_summary("Y")
         assert isinstance(result, pd.DataFrame)
         assert result.empty
+
+
+class TestLatestHoldings:
+    """analytics.portfolio._latest_holdings, on a temp two-table store. It must
+    return only the newest snapshot of the asked-for fund, and look in
+    etf_holdings when fund_holdings has never held that fund."""
+
+    @pytest.fixture
+    def store(self, monkeypatch, tmp_path):
+        import query as q
+
+        def write(table, rows):
+            d = tmp_path / table / "year=2026" / "month=11"
+            d.mkdir(parents=True)
+            pd.DataFrame(rows, columns=["fund_ticker", "snapshot_date",
+                                        "holding_ticker", "weight_pct"]
+                         ).to_parquet(d / f"{table}_x.parquet", index=False)
+
+        write("fund_holdings", [
+            ("IWM", "2026-11-01", "OLD1", 1.0),
+            ("IWM", "2026-11-14", "NEW1", 2.0),
+            ("IWM", "2026-11-14", "NEW2", 3.0),
+            ("SPY", "2026-11-20", "AAPL", 7.0),   # a newer date for a different fund
+        ])
+        write("etf_holdings", [
+            ("ARKK", "2026-10-01", "TSLA", 9.0),
+            ("IWM", "2026-12-01", "ETF_ONLY", 1.0),  # fund_holdings answers first
+        ])
+        root = tmp_path.as_posix()
+        monkeypatch.setattr(q, "CATALOG", {t: f"{root}/{t}/**/*.parquet"
+                                           for t in ("fund_holdings", "etf_holdings")})
+        monkeypatch.setattr(q, "ANALYTICS_VIEWS", {})
+        monkeypatch.setattr(q, "PILOT_ICEBERG_TABLES", set())
+        monkeypatch.setattr(q, "_CURATED_ROOT", str(tmp_path / "no_curated"))
+        monkeypatch.setattr(q, "_CON", None)  # monkeypatch restores the real one after
+
+    def test_newest_snapshot_of_that_fund_only(self, store):
+        from analytics.portfolio import _latest_holdings
+        df = _latest_holdings("IWM")
+        assert sorted(df["holding_ticker"]) == ["NEW1", "NEW2"]
+
+    def test_falls_back_to_etf_holdings(self, store):
+        from analytics.portfolio import _latest_holdings
+        assert _latest_holdings("ARKK")["holding_ticker"].tolist() == ["TSLA"]
+
+    def test_unknown_fund_is_empty(self, store):
+        from analytics.portfolio import _latest_holdings
+        assert _latest_holdings("ZZZZ").empty
