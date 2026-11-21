@@ -44,7 +44,7 @@ Add-Content (Join-Path $reportDir "summary_log.txt") "$stamp | $status | $summar
 # --- coverage_audit.py: separate pass/fail signal, does not affect $flag above ---
 cmd /c "`"$py`" coverage_audit.py --fail-on-gap > `"$covReport`" 2>&1"
 $covExit = $LASTEXITCODE
-$gapCount = (Select-String -Path $covReport -Pattern "^\d+ CONFIRMED GAP" | Select-Object -Last 1).Line
+$gapCount = (Select-String -Path $covReport -Pattern "^(\d+ CONFIRMED GAP|No confirmed gaps)" | Select-Object -Last 1).Line
 if (-not $gapCount) { $gapCount = "no gap-count line - coverage_audit.py crashed? (exit=$covExit)" }
 
 if ($covExit -eq 0) {
