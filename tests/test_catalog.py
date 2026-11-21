@@ -125,6 +125,10 @@ EXPECTED_TABLES = [
     # USDA NASS
     "usda_crops",
     "usda_fertilizers",
+    "earnings_announcements",
+    "beef_cutout",
+    "beef_primal_values",
+    "cattle_cash_weekly",
     # EIA energy
     "eia_petroleum_stocks",
     "eia_natgas_storage",

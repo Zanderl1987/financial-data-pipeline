@@ -420,6 +420,40 @@ SCHEMAS: dict[str, dict] = {
         "critical_nn": ["commodity", "date", "value"],
         "date_col":    "date",
     },
+    # ── SEC 8-K Item 2.02 earnings announcement dates ─────────────────────────
+    "earnings_announcements": {
+        "required":    ["symbol", "cik", "filer_cik", "accession_number", "filing_date",
+                        "accepted_at", "session", "fetched_at"],
+        "critical_nn": ["symbol", "cik", "accession_number", "filing_date", "accepted_at",
+                        "session"],
+        "date_col":    "filing_date",
+    },
+    # ── USDA AMS LMR beef ($/cwt) ─────────────────────────────────────────────
+    # Cutout has never been below ~$100/cwt since 2001 (record high ~$475 in 2020);
+    # cash fed cattle has run ~$65-$260. Ranges are wide on purpose: they catch a
+    # unit change ($/lb, cents) or a parse error, not a market move.
+    "beef_cutout": {
+        "required":    ["date", "choice_600_900", "select_600_900", "published_at", "fetched_at"],
+        "critical_nn": ["date", "choice_600_900", "published_at"],
+        "date_col":    "date",
+        "positive_cols": ["choice_600_900", "select_600_900"],
+        "value_ranges": {"choice_600_900": (50, 1000), "select_600_900": (50, 1000)},
+    },
+    "beef_primal_values": {
+        "required":    ["date", "primal", "choice_600_900", "select_600_900", "published_at",
+                        "fetched_at"],
+        "critical_nn": ["date", "primal", "published_at"],
+        "date_col":    "date",
+        "positive_cols": ["choice_600_900", "select_600_900"],
+    },
+    "cattle_cash_weekly": {
+        "required":    ["report_date", "class", "selling_basis", "grade", "weighted_avg_price",
+                        "published_at", "fetched_at"],
+        "critical_nn": ["report_date", "class", "selling_basis", "grade", "published_at"],
+        "date_col":    "report_date",
+        "positive_cols": ["weighted_avg_price"],
+        "value_ranges": {"weighted_avg_price": (20, 1000)},
+    },
     # ── CoinGecko cryptocurrency ──────────────────────────────────────────────
     "crypto_market": {
         "required":    ["coin_id", "symbol", "name", "price_usd", "fetched_at"],

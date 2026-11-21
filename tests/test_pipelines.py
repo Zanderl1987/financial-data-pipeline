@@ -117,6 +117,8 @@ PIPELINE_MODULES = [
     "insider_sentiment_pipeline",
     "indeed_hiringlab_pipeline",
     "usda_pipeline",
+    "usda_beef_pipeline",
+    "sec_earnings_dates_pipeline",
     "fao_pipeline",
     "plastics_pipeline",
     "cfpb_complaints_pipeline",

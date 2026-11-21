@@ -189,6 +189,13 @@ KEYS: dict[str, list[str]] = {
     # further split by sub-domain (e.g. corn-for-fuel-alcohol dry vs wet mill)
     "usda_crops":             ["commodity", "description", "date", "period", "domaincat_desc"],
     "usda_fertilizers":       ["commodity", "description", "date", "period", "domaincat_desc"],
+    # SEC 8-K Item 2.02 -- one row per ticker per filing
+    "earnings_announcements": ["symbol", "accession_number"],
+    # USDA AMS LMR beef -- newest fetch wins, which is how a corrected
+    # (re-published) report replaces the original
+    "beef_cutout":            ["date"],
+    "beef_primal_values":     ["date", "primal"],
+    "cattle_cash_weekly":     ["report_date", "class", "selling_basis", "grade"],
     # Equity / ETF prices — one bar per symbol per day
     "prices":                 ["symbol", "date"],
     "tiingo_prices":          ["symbol", "date"],

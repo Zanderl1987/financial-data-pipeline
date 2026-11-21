@@ -11,7 +11,7 @@ holding period, stop loss / take profit) with win rates and an equity curve.
 
 Built-in event generators cover the questions this repo's data can answer:
 
-  earnings_events()    — EPS beats/misses (earnings_calendar)
+  earnings_events()    — earnings dates (SEC 8-K 2.02) + EPS beats/misses where known
   filing_events()      — SEC filings by form type (sec_filings)
   drawdown_events()    — market fell X% over N days (any price series)
   price_move_events()  — any asset moved X% in N days (e.g. oil surge)
@@ -765,33 +765,53 @@ def scenario(
 
 # ------------------------------------------------------- event generators
 
+_EARNINGS_COLS = ["symbol", "date", "session", "eps_estimate", "eps_actual",
+                  "surprise_pct", "source"]
+_AV_SESSION = {"pre-market": "pre", "post-market": "post"}
+
+
 def earnings_events(
     symbols: "list[str] | str | None" = None,
     beat: "bool | None" = None,
     min_surprise_pct: "float | None" = None,
     start: "str | None" = None,
+    require_surprise: bool = False,
 ) -> pd.DataFrame:
     """
-    Earnings reports with real historical dates + EPS surprises. Primary
-    source is alpha_vantage_earnings (deep per-symbol history back to the
-    1990s, quota-gated coverage that grows slowly via
-    alpha_vantage_fundamentals_pipeline.py's rotating symbol subset — see
-    CLAUDE.md/memory for why that pacing is currently stalled).
-    finnhub_earnings_history (Finnhub's /stock/earnings, NOT the
-    earnings_calendar table) supplements it: real historical actual/estimate/
-    surprise with real dates, just shallow (~4 most recent quarters/symbol,
-    a verified free-tier API ceiling — confirmed 2026-08-02 that neither a
-    higher `limit` nor an explicit `from`/`to` range unlocks more). Rows are
-    unioned and deduped on (symbol, date), preferring alpha_vantage_earnings
-    where both cover the same report. earnings_calendar (Finnhub) is still
-    NOT used — verified live 2026-07-29 that its free tier only returns a
-    rolling ~2-month forward window and never has real historical actuals.
+    Earnings announcements with real historical dates, plus EPS surprise where
+    a source has it.
+
+    Surprise sources: alpha_vantage_earnings (deep per-symbol history back to
+    the 1990s, but quota-gated -- ~31 symbols) and finnhub_earnings_history
+    (~4 most recent quarters/symbol, a verified free-tier ceiling). Unioned and
+    deduped on (symbol, date), preferring alpha_vantage_earnings.
+    earnings_calendar (Finnhub) is NOT used: its free tier only returns a
+    rolling ~2-month forward window with no historical actuals.
+
+    Dates for everything else come from earnings_announcements (SEC 8-K Item
+    2.02, today's R3000+S&P500, 2004+). An 8-K within one day of a report that
+    already has a surprise row is the same announcement and is dropped (its
+    session is kept if the surprise row has none). The remaining 8-Ks are
+    events with NaN surprise. Their date is the EDGAR acceptance date in New
+    York time: `filing_date` rolls to the next business day for anything
+    accepted after 17:30 ET, which would put an evening release a day late.
+
+    session: "pre" (before the open -- that day's open reacts), "intraday", or
+    "post" (after the close -- the next trading day reacts). From AV's
+    reportTime where present, else from the 8-K acceptance time, which is when
+    the SEC received the filing and so can be later than the press release
+    (an "intraday" 8-K is often a pre-market release filed after 09:30).
+    NaN for Finnhub rows with no matching 8-K. With session unknown, use
+    entry_lag=1 in event_study/scenario.
 
     beat=True keeps beats, False keeps misses; min_surprise_pct filters by
-    |EPS surprise %|. Columns: symbol, date, eps_estimate, eps_actual,
-    surprise_pct. Note: use entry_lag=1 in event_study/scenario — report
-    timing (BMO/AMC) isn't reliable enough to trade the same close.
+    |EPS surprise %|; any of those, or require_surprise=True, drops rows
+    without a surprise -- which is every 8-K-only row.
+
+    Columns: symbol, date, session, eps_estimate, eps_actual, surprise_pct,
+    source ("alpha_vantage" | "finnhub" | "sec_8k").
     """
+    frames = []
     av = q.load("alpha_vantage_earnings")
     if not av.empty:
         av = av[av["report_type"] == "quarterly"].copy()
@@ -802,7 +822,10 @@ def earnings_events(
             "reportedEPS": "eps_actual",
             "surprisePercentage": "surprise_pct",
         })
-        av = av[["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
+        av["session"] = (av["reportTime"].map(_AV_SESSION) if "reportTime" in av.columns
+                         else pd.NA)
+        av["source"] = "alpha_vantage"
+        frames.append(av[_EARNINGS_COLS])
 
     fh = q.load("finnhub_earnings_history")
     if not fh.empty:
@@ -812,33 +835,72 @@ def earnings_events(
             "actual": "eps_actual",
             "surprisePercent": "surprise_pct",
         })
-        fh = fh[["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
+        fh["session"] = pd.NA
+        fh["source"] = "finnhub"
+        frames.append(fh[_EARNINGS_COLS])
 
-    df = pd.concat([av, fh], ignore_index=True) if not av.empty or not fh.empty else pd.DataFrame(
-        columns=["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"])
-    if df.empty:
-        return df
-
+    eps = (pd.concat(frames, ignore_index=True) if frames
+           else pd.DataFrame(columns=_EARNINGS_COLS))
     for col in ("eps_estimate", "eps_actual", "surprise_pct"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date", "eps_actual", "eps_estimate", "surprise_pct"])
+        eps[col] = pd.to_numeric(eps[col], errors="coerce")
+    eps["date"] = pd.to_datetime(eps["date"], errors="coerce")
+    eps = eps.dropna(subset=["date", "eps_actual", "eps_estimate", "surprise_pct"])
     # AV rows were concatenated first, so keep='first' prefers AV over Finnhub
     # for any (symbol, date) both sources report.
-    df = df.drop_duplicates(subset=["symbol", "date"], keep="first")
+    eps = eps.drop_duplicates(subset=["symbol", "date"], keep="first")
+
+    sec = q.load("earnings_announcements")
+    if not sec.empty:
+        sec = pd.DataFrame({
+            "symbol": sec["symbol"],
+            "date": pd.to_datetime(sec["accepted_et"].astype("string").str[:10], errors="coerce"),
+            "session": sec["session"],
+            "source": "sec_8k",
+        }).dropna(subset=["date"]).drop_duplicates(["symbol", "date"])
+        eps, sec = _merge_sec_dates(eps.reset_index(drop=True), sec.reset_index(drop=True))
+        df = pd.concat([eps, sec], ignore_index=True)
+    else:
+        df = eps
+    if df.empty:
+        return pd.DataFrame(columns=_EARNINGS_COLS)
+
     if symbols is not None:
         symbols = [symbols] if isinstance(symbols, str) else list(symbols)
         df = df[df["symbol"].isin(symbols)]
     if start is not None:
         df = df[df["date"] >= pd.Timestamp(start)]
+    if require_surprise:
+        df = df[df["surprise_pct"].notna()]
     if beat is True:
         df = df[df["surprise_pct"] > 0]
     elif beat is False:
         df = df[df["surprise_pct"] < 0]
     if min_surprise_pct is not None:
         df = df[df["surprise_pct"].abs() >= min_surprise_pct]
-    return (df[["symbol", "date", "eps_estimate", "eps_actual", "surprise_pct"]]
-            .sort_values("date").reset_index(drop=True))
+    return df[_EARNINGS_COLS].sort_values(["date", "symbol"]).reset_index(drop=True)
+
+
+def _merge_sec_dates(eps: pd.DataFrame, sec: pd.DataFrame) -> "tuple[pd.DataFrame, pd.DataFrame]":
+    """Split 8-K dates into ones that duplicate a surprise row (same symbol,
+    within one calendar day) and new events. A duplicate is dropped, and it
+    fills the surprise row's session when that is missing. Returns
+    (eps with sessions filled, 8-K rows that are new events)."""
+    eps = eps.copy()
+    eps["session"] = eps["session"].astype("object")
+    m = eps[["symbol", "date"]].reset_index().merge(
+        sec[["symbol", "date", "session"]].reset_index(), on="symbol",
+        suffixes=("_eps", "_sec"))
+    m = m[(m["date_eps"] - m["date_sec"]).abs() <= pd.Timedelta(days=1)]
+    matched_sec = set(m["index_sec"])
+    nearest = (m.assign(gap=(m["date_eps"] - m["date_sec"]).abs())
+                .sort_values("gap").drop_duplicates("index_eps"))
+    fill = nearest.set_index("index_eps")["session"]
+    missing = eps["session"].isna() & eps.index.isin(fill.index)
+    eps.loc[missing, "session"] = fill.reindex(eps.index[missing]).to_numpy()
+    new = sec[~sec.index.isin(matched_sec)].copy()
+    for col in ("eps_estimate", "eps_actual", "surprise_pct"):
+        new[col] = float("nan")
+    return eps, new[_EARNINGS_COLS]
 
 
 def filing_events(

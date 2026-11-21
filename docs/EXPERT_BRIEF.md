@@ -38,6 +38,20 @@ places:**
    event-study engine is the most differentiated analytics in the repo and it is starved:
    `earnings_calendar` holds ±6 weeks. Until this lands, earnings event studies — the
    obvious first real research product — are impossible.
+   **Status 2026-11-21:** dates DONE for the whole universe — `earnings_announcements`
+   (`sec_earnings_dates_pipeline.py`) holds every 8-K Item 2.02 filing for today's
+   R3000+S&P500 since 2004, with the pre/intraday/post session from the EDGAR acceptance
+   time. Still missing: EPS surprise beyond the 31 alpha_vantage_earnings names (needs
+   consensus estimates; no free deep source), and delisted firms (survivorship).
+   `event_backtest.earnings_events()` now returns these 8-K dates (NaN surprise, `source`
+   = "sec_8k") alongside the AV/Finnhub surprise rows, plus a pre/intraday/post `session`;
+   surprise filters or `require_surprise=True` give the old surprise-only set. This took
+   the strike-intro study's universe from earnings dates for 25 of 100 symbols to 99.
+   Checked against alpha_vantage_earnings: 92% of its 2,789 report dates match an 8-K
+   2.02 filing on the same day. Nearly all misses were companies whose history sits under
+   a pre-reorganization CIK (Exxon, Disney, Alphabet, now in `PREDECESSOR_CIKS`). About
+   10% of companies listed before 2004 still start after 2008 for this reason; adding
+   their old CIKs is open work.
 4. **Factor evaluation pass.** All 9 signal factors are now live (short_pressure and
    sentiment activated 2026-07-06). Run each through `backtest.py` over the deepest
    available window; record quantile spreads, hit rates, turnover; prune or down-weight

@@ -149,6 +149,8 @@ CATALOG: dict[str, str] = {
     "cot":                     _glob("cot/**/*.parquet"),
     # ── Finnhub events ──────────────────────────────────────────────────────
     "earnings_calendar":       _glob("finnhub/earnings_calendar/**/*.parquet"),
+    # SEC 8-K Item 2.02 filings: earnings announcement dates + session, 2004+
+    "earnings_announcements":  _glob("sec_earnings/**/earnings_announcements_*.parquet"),
     "insider_transactions":    _glob("finnhub/insider_transactions/**/*.parquet"),
     "ipo_calendar":            _glob("finnhub/ipo_calendar/**/*.parquet"),
     # ── Sector ETFs ─────────────────────────────────────────────────────────
@@ -186,6 +188,10 @@ CATALOG: dict[str, str] = {
     # ── USDA NASS crop production + fertilizer prices ─────────────────────────
     "usda_crops":              _glob("usda/crops/**/*.parquet"),
     "usda_fertilizers":        _glob("usda/fertilizers/**/*.parquet"),
+    # ── USDA AMS LMR beef: wholesale cutout, primals, cash fed cattle ─────────
+    "beef_cutout":             _glob("usda_ams/beef_cutout/**/beef_cutout_*.parquet"),
+    "beef_primal_values":      _glob("usda_ams/beef_primal/**/beef_primal_values_*.parquet"),
+    "cattle_cash_weekly":      _glob("usda_ams/cattle_cash/**/cattle_cash_weekly_*.parquet"),
     # ── US Census international trade (HS chapters) ───────────────────────────
     # ── EIA petroleum inventories, natural gas storage, crude production ──────
     "eia_petroleum_stocks":    _glob("eia/petroleum_stocks/**/*.parquet"),

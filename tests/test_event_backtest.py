@@ -275,21 +275,77 @@ class TestEventGenerators:
 class TestEarningsEvents:
     """earnings_events() — unions alpha_vantage_earnings + finnhub_earnings_history."""
 
-    def _patch_sources(self, monkeypatch, av=None, fh=None):
+    def _patch_sources(self, monkeypatch, av=None, fh=None, sec=None):
         av_cols = ["ticker", "report_type", "reportedDate", "estimatedEPS",
-                   "reportedEPS", "surprisePercentage"]
+                   "reportedEPS", "surprisePercentage", "reportTime"]
         fh_cols = ["symbol", "period", "estimate", "actual", "surprisePercent"]
+        sec_cols = ["symbol", "filing_date", "accepted_et", "session"]
+        av = [r + [None] * (len(av_cols) - len(r)) for r in av] if av else av
         av_df = pd.DataFrame(av, columns=av_cols) if av else pd.DataFrame(columns=av_cols)
         fh_df = pd.DataFrame(fh, columns=fh_cols) if fh else pd.DataFrame(columns=fh_cols)
+        sec_df = pd.DataFrame(sec, columns=sec_cols) if sec else pd.DataFrame()
 
         def fake_load(table, *a, **k):
             if table == "alpha_vantage_earnings":
                 return av_df
             if table == "finnhub_earnings_history":
                 return fh_df
+            if table == "earnings_announcements":
+                return sec_df
             return pd.DataFrame()
 
         monkeypatch.setattr(eb.q, "load", fake_load)
+
+    def test_8k_dates_add_events_without_surprise(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            av=[["AAPL", "quarterly", "2024-01-25", 2.10, 2.18, 3.8, "post-market"]],
+            sec=[["AAPL", "2024-01-25", "2024-01-25 16:30:12", "post"],    # same report as AV
+                 ["ZION", "2024-01-22", "2024-01-22 16:05:00", "post"]],   # no surprise source
+        )
+        ev = eb.earnings_events().set_index("symbol")
+        assert sorted(ev.index) == ["AAPL", "ZION"]
+        assert ev.loc["AAPL", "source"] == "alpha_vantage"
+        assert ev.loc["ZION", "source"] == "sec_8k"
+        assert pd.isna(ev.loc["ZION", "surprise_pct"])
+
+    def test_8k_date_is_the_new_york_acceptance_date_not_filing_date(self, monkeypatch):
+        # accepted 18:05 ET on the 29th; EDGAR stamps filing_date as the 30th
+        self._patch_sources(monkeypatch,
+                            sec=[["XYZ", "2024-01-30", "2024-01-29 18:05:00", "post"]])
+        ev = eb.earnings_events()
+        assert ev["date"].iloc[0] == pd.Timestamp("2024-01-29")
+
+    def test_8k_one_day_off_is_the_same_announcement(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            fh=[["MSFT", "2024-01-30", 2.78, 2.93, 5.4]],               # no time of day
+            sec=[["MSFT", "2024-01-31", "2024-01-31 07:00:00", "pre"],  # one day later
+                 ["MSFT", "2024-02-02", "2024-02-02 16:10:00", "post"]],  # three days: separate
+        )
+        ev = eb.earnings_events()
+        assert list(ev["source"]) == ["finnhub", "sec_8k"]
+        assert ev["session"].iloc[0] == "pre"          # filled from the matching 8-K
+
+    def test_av_session_from_report_time_wins_over_8k(self, monkeypatch):
+        # a pre-market release whose 8-K was accepted after the open
+        self._patch_sources(
+            monkeypatch,
+            av=[["JPM", "quarterly", "2024-01-12", 3.97, 3.04, -23.4, "pre-market"]],
+            sec=[["JPM", "2024-01-12", "2024-01-12 09:45:00", "intraday"]],
+        )
+        assert eb.earnings_events()["session"].tolist() == ["pre"]
+
+    def test_surprise_filters_drop_8k_only_rows(self, monkeypatch):
+        self._patch_sources(
+            monkeypatch,
+            fh=[["A", "2024-01-25", 1.00, 1.10, 10.0]],
+            sec=[["B", "2024-01-25", "2024-01-25 16:05:00", "post"]],
+        )
+        assert list(eb.earnings_events(beat=True)["symbol"]) == ["A"]
+        assert list(eb.earnings_events(min_surprise_pct=1)["symbol"]) == ["A"]
+        assert list(eb.earnings_events(require_surprise=True)["symbol"]) == ["A"]
+        assert sorted(eb.earnings_events()["symbol"]) == ["A", "B"]
 
     def test_unions_both_sources(self, monkeypatch):
         self._patch_sources(
