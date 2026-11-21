@@ -57,10 +57,13 @@ def test_each_ticker_of_a_cik_gets_a_row():
 
 
 def test_backfill_reads_predecessor_ciks_under_the_current_cik(monkeypatch):
-    old = _block([("old1", "2012-05-08", "2012-05-08T20:15:00.000Z", "8-K", "2.02,9.01")])
+    old = _block([("old1", "2012-05-08", "2012-05-08T20:15:00.000Z", "8-K", "2.02,9.01"),
+                  # filed by the old CIK after the successor took over: not DIS's release
+                  ("old2", "2020-02-04", "2020-02-04T21:00:00.000Z", "8-K", "2.02")])
     new = _block([("new1", "2026-11-17", "2026-11-17T21:05:00.000Z", "8-K", "2.02,9.01")])
     pages = {"CIK0001744489.json": {"filings": {"recent": new, "files": []}},
              "CIK0001001039.json": {"filings": {"recent": old, "files": []}}}
+    monkeypatch.setattr(se, "PREDECESSOR_CIKS", {1744489: [(1001039, "2019-05-08")]})
     asked = []
     monkeypatch.setattr(se, "_get_json", lambda session, name: asked.append(name) or pages[name])
     raw = se.company_filings(None, 1744489, full_history=True)
@@ -125,3 +128,17 @@ def test_backfill_writes_as_it_goes(monkeypatch, tmp_path):
         se.run(universe, [1, 2, 3, 4, 5], True, "backfill", "2026-11-21T00:00:00", None)
     written = pd.concat(pd.read_parquet(p) for p in tmp_path.rglob("*.parquet"))
     assert sorted(written["symbol"].unique()) == ["A", "B", "C", "D"]
+
+
+def test_predecessor_map_is_well_formed():
+    """Hand-built map: catch a typo'd date, a self-reference, or one old CIK
+    claimed by two companies."""
+    import datetime
+    seen = {}
+    for cur, olds in se.PREDECESSOR_CIKS.items():
+        ends = [datetime.date.fromisoformat(end) for _, end in olds]
+        assert ends == sorted(ends, reverse=True), f"{cur}: chain not newest-first"
+        for old, _ in olds:
+            assert old != cur
+            assert old not in seen, f"{old} claimed by {seen.get(old)} and {cur}"
+            seen[old] = cur

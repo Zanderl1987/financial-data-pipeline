@@ -49,9 +49,9 @@ places:**
    the strike-intro study's universe from earnings dates for 25 of 100 symbols to 99.
    Checked against alpha_vantage_earnings: 92% of its 2,789 report dates match an 8-K
    2.02 filing on the same day. Nearly all misses were companies whose history sits under
-   a pre-reorganization CIK (Exxon, Disney, Alphabet, now in `PREDECESSOR_CIKS`). About
-   10% of companies listed before 2004 still start after 2008 for this reason; adding
-   their old CIKs is open work.
+   a pre-reorganization CIK. `PREDECESSOR_CIKS` now maps 46 old CIKs for 42 companies
+   (searched and hand-reviewed 2026-11-21; method and exclusions in its comment). Still
+   unmapped by design: spin-offs, buyouts/bankruptcies, and HR/CZR (merger partner's CIK).
 4. **Factor evaluation pass.** All 9 signal factors are now live (short_pressure and
    sentiment activated 2026-07-06). Run each through `backtest.py` over the deepest
    available window; record quantile spreads, hit rates, turnover; prune or down-weight

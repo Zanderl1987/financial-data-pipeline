@@ -33,11 +33,8 @@ Caveats:
   - One CIK can trade under several tickers (GOOG/GOOGL); each ticker gets a row.
   - A holding-company reorganization gives a company a NEW CIK, and its earlier
     filings stay under the old one (Disney 2019, Alphabet 2015, Exxon 2026).
-    SEC publishes no predecessor map, so PREDECESSOR_CIKS is hand-checked; each
-    entry was confirmed against the old CIK's submissions JSON. As of
-    2026-11-21 about 10% of companies listed before 2004 (113 of 1,142, an upper
-    bound: recycled tickers inflate it) still have no 8-K 2.02 before 2008 --
-    candidates for more entries, found by comparing first filing vs first price.
+    SEC publishes no predecessor map, so PREDECESSOR_CIKS is built and checked
+    by hand -- see its comment for how.
 
 CLI:
   python sec_earnings_dates_pipeline.py              # 8-K filers of the last 10 days
@@ -73,12 +70,74 @@ INCREMENTAL_DAYS = 10
 MAX_FAIL_SHARE = 0.10
 NY = ZoneInfo("America/New_York")
 
-# current CIK -> CIKs the same company filed under before a reorganization.
-# Add only after checking the old CIK's submissions JSON (name, formerNames, 8-Ks).
-PREDECESSOR_CIKS: dict[int, list[int]] = {
-    2115436: [34088],     # Exxon Mobil: new holding company 2026; old EXXON MOBIL CORP
-    1744489: [1001039],   # Walt Disney: new holding company 2019; old TWDC Enterprises 18 (WALT DISNEY CO/)
-    1652044: [1288776],   # Alphabet: formed 2015; old GOOGLE INC.
+# current CIK -> [(old CIK, end)]: the same company's earlier filer, used for
+# filings dated before `end` (the next filer's first Item 2.02 8-K). The end
+# date matters: an old CIK can live on as a subsidiary and keep filing (Duke
+# Energy Carolinas), and those later filings are not this company's releases.
+#
+# Built 2026-11-21. Candidates: the 129 companies with prices before mid-2004
+# but no Item 2.02 8-K until 2006 or later. A predecessor had to (1) have carried
+# a matching name (punctuation, legal suffixes and spaces ignored; SEC's
+# cik-lookup-data.txt has every name each CIK has used) or be named in this
+# company's 8-K12B/8-K12G3 as the issuer it succeeded, (2) have 4+ Item 2.02
+# 8-Ks of its own, starting first, and (3) stop within 200 days before the
+# successor's first. Exxon, Disney and Alphabet were known answers going in;
+# all three were found. Every accepted match was then read by hand:
+#   - FUN maps to CEDAR FAIR, not to old Six Flags (the name match): the 2024
+#     merger kept Cedar Fair's ticker, so FUN's earlier prices are Cedar Fair's.
+#   - DUK was added by hand: old Duke Energy Corp kept filing a few 8-Ks as a
+#     subsidiary after 2006, which broke rule (3).
+#   - Left out on purpose -- the old entity is not the same equity or ticker:
+#     spin-offs whose parent lives on (AA/Howmet, CR/Crane NXT, FAF/CoreLogic),
+#     buyouts and bankruptcies (old GM, Bright Horizons 2008, Swift), and
+#     unrelated names (SELLAS/Phio, Del Monte/Big Heart, People/Match).
+#   - Not fixable here: HR and CZR, where the merger partner's CIK took the
+#     name and ticker, so the CIK's own pre-merger filings are another ticker's.
+# The other ~80 late starters had no predecessor: later IPOs/spin-offs under a
+# recycled ticker, or companies that didn't use Item 2.02 at first.
+PREDECESSOR_CIKS: dict[int, list[tuple[int, str]]] = {
+    1748824: [(1611702, "2019-08-01")],  # AAMI: BrightSphere Investment Group 
+    1467373: [(1134538, "2009-10-01")],  # ACN: ACCENTURE LTD
+    1520262: [(874663, "2011-11-03")],  # ALKS: ALKERMES INC
+    1841666: [(6769, "2021-05-06")],  # APA: APACHE CORP
+    1674862: [(1305014, "2016-11-08"), (7694, "2005-07-25")],  # ASH: ASHLAND LLC <- ASHLAND INC
+    1701605: [(808362, "2017-07-28")],  # BKR: Baker Hughes Holdings LLC
+    2012383: [(1364742, "2024-10-11"), (1060021, "2006-10-30")],  # BLK: BlackRock Finance, Inc. <- BlackRock Holdco 2, Inc.
+    1390777: [(9626, "2007-07-20")],  # BNY: BANK OF NEW YORK CO INC
+    1490906: [(1074433, "2011-02-09")],  # CFFN: CAPITOL FEDERAL FINANCIAL
+    1739940: [(701221, "2019-05-02")],  # CI: Cigna Holding Co
+    1958086: [(1000229, "2023-07-26")],  # CLB: CORE LABORATORIES N V
+    2115119: [(1723596, "2026-07-30")],  # CLBK: Columbia Financial, Inc.
+    1915657: [(48039, "2022-05-09")],  # DINO: HollyFrontier Corp
+    1744489: [(1001039, "2019-05-08")],  # DIS: TWDC Enterprises 18 Corp.
+    2119322: [(1438231, "2026-08-13"), (1089443, "2008-11-20")],  # DMRC: Old Digimarc CORP <- DIGIMARC CORP
+    1326160: [(30371, "2006-05-02")],  # DUK: DUKE ENERGY CORP (now Duke Ene
+    1551182: [(31277, "2013-02-05")],  # ETN: EATON CORP
+    1999001: [(811532, "2024-08-08")],  # FUN: CEDAR FAIR L P
+    1652044: [(1288776, "2015-10-22")],  # GOOGL: GOOGLE INC.
+    1408075: [(886239, "2008-05-09")],  # GPK: GRAPHIC PACKAGING CORP
+    1405495: [(354913, "2007-08-08")],  # IDCC: INTERDIGITAL INC.
+    1707925: [(884905, "2019-05-10")],  # LIN: LINDE INC
+    2052959: [(2006191, "2025-05-22")],  # LION: Lionsgate Studios Holding Corp
+    1613103: [(64670, "2015-05-19")],  # MDT: MEDTRONIC INC
+    1835632: [(1058057, "2021-06-07")],  # MRVL: MARVELL TECHNOLOGY GROUP LTD
+    2152623: [(1593538, "2026-11-04")],  # NAVI: Navient LLC
+    1587987: [(1094019, "2014-11-14")],  # NEWT: NEWTEK BUSINESS SERVICES, INC.
+    2104052: [(45876, "2026-08-11")],  # NVRI: ENVIRI LLC
+    1341439: [(777676, "2006-03-20")],  # ORCL: Oracle Systems
+    1466593: [(75129, "2009-08-04")],  # OTTR: OTTER TAIL CORP
+    2082866: [(1115055, "2026-01-21")],  # PNFP: PINNACLE FINANCIAL PARTNERS IN
+    1585364: [(820096, "2014-02-06")],  # PRGO: PERRIGO CO
+    1393311: [(318380, "2007-08-03")],  # PSA: PUBLIC STORAGE INC /CA
+    1906324: [(353569, "2022-08-04")],  # QDEL: QUIDEL CORP /DE/
+    1708055: [(1105472, "2018-03-01")],  # RBBN: Sonus, Inc.
+    1451505: [(1083269, "2009-02-17")],  # RIG: TRANSOCEAN INTERNATIONAL Ltd
+    1757898: [(1624899, "2019-05-13"), (815065, "2016-02-09")],  # STE: STERIS Ltd <- STERIS CORP
+    1692115: [(92416, "2017-02-27")],  # SWX: SOUTHWEST GAS CORP
+    1466258: [(1160497, "2009-07-24")],  # TT: INGERSOLL RAND CO LTD
+    1396009: [(103973, "2008-02-14")],  # VMC: Legacy Vulcan Corp.
+    2115436: [(34088, "2026-07-31")],  # XOM: EXXON MOBIL CORP
+    1770450: [(108772, "2019-10-29")],  # XRX: XEROX CORP
 }
 
 
@@ -133,13 +192,16 @@ def earnings_filings(block: dict) -> pd.DataFrame:
     return df[(df["form"] == "8-K") & items.apply(lambda xs: "2.02" in xs)]
 
 
-def _filer_filings(session: requests.Session, filer: int, full_history: bool) -> pd.DataFrame:
+def _filer_filings(session: requests.Session, filer: int, full_history: bool,
+                   before: "str | None" = None) -> pd.DataFrame:
     j = _get_json(session, f"CIK{filer:010d}.json")
     frames = [earnings_filings(j.get("filings", {}).get("recent", {}))]
     if full_history:
         for page in j.get("filings", {}).get("files", []):
             frames.append(earnings_filings(_get_json(session, page["name"])))
     df = pd.concat(frames, ignore_index=True)
+    if before is not None:
+        df = df[df["filingDate"] < before]
     df["filer_cik"] = filer
     return df
 
@@ -148,8 +210,11 @@ def company_filings(session: requests.Session, cik: int, full_history: bool) -> 
     """Item 2.02 8-Ks of the company now registered as `cik`, including those filed
     under its predecessor CIKs. Predecessors are read in full only on a backfill:
     they have stopped filing, so an incremental run has nothing new to find there."""
-    filers = [cik] + (PREDECESSOR_CIKS.get(cik, []) if full_history else [])
-    df = pd.concat([_filer_filings(session, f, full_history) for f in filers], ignore_index=True)
+    frames = [_filer_filings(session, cik, full_history)]
+    if full_history:
+        frames += [_filer_filings(session, old, True, before=end)
+                   for old, end in PREDECESSOR_CIKS.get(cik, [])]
+    df = pd.concat(frames, ignore_index=True)
     df["cik"] = cik
     return df
 
