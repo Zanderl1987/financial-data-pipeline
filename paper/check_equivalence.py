@@ -17,6 +17,7 @@ from paper.sim import simulate_account
 from paper.strategies import STRATEGIES
 
 END = "2026-09-11"
+NOTIONAL = 10_000.0
 
 
 def _classify(row, bad_syms, joey_sig, joey_slug, joey_px=None):
@@ -100,13 +101,17 @@ def main(n_symbols: int = 100, seed: int = 0, out_csv: str | None = None):
     for slug, spec in STRATEGIES.items():
         rule, _ = stage3.load_rule_for(slug)
         rule = stage3.with_price_floor(rule)
-        camp = simulate(rule, cache, config=stage3.cost_config(10.0))
+        camp = simulate(rule, cache, notional=NOTIONAL, config=stage3.cost_config(10.0))
         n_camp_all = len(camp)
         camp = camp[camp["exit_date"] <= end].copy()
         # Parity run: slot_usd huge so the whole-share skip (close > $1000, a
         # production rule the engine lacks) cannot hide timing differences.
         sim = simulate_account(frames, spec, start_equity=1e6, slots=None,
                                slot_usd=1e12, start=start, end=END).trades
+        sim_usd = simulate_account(frames, spec, start_equity=1e6, slots=None,
+                                   slot_usd=NOTIONAL, start=start, end=END).trades
+        sim_ret = (sim_usd["net_pnl"] / (sim_usd["shares"] * sim_usd["entry_price"])
+                   * 100.0)
         sim_prod = simulate_account(frames, spec, start_equity=1e6, slots=None,
                                     start=start, end=END).trades
         c = camp.rename(columns={"entry_signal_date": "c_sig",
@@ -131,6 +136,15 @@ def main(n_symbols: int = 100, seed: int = 0, out_csv: str | None = None):
         print(f"\n=== {slug} ===")
         print(f"campaign trades (all/in-window): {n_camp_all}/{len(c)}")
         print(f"sim trades: {len(s)}  (production slot_usd=1000: {len(sim_prod)})")
+        print(f"P&L at ${NOTIONAL:,.0f}/trade, net of costs (campaign cost_config(10.0) "
+              f"vs sim 1bp + sqrt-law, whole shares):")
+        print(f"  campaign: n={len(camp)}  total net P&L ${camp['pnl_dollars'].sum():,.0f}"
+              f"  avg return/trade {camp['pnl_pct'].mean():.3f}%")
+        print(f"  sim     : n={len(sim_usd)}  total net P&L ${sim_usd['net_pnl'].sum():,.0f}"
+              f"  avg return/trade {sim_ret.mean():.3f}%")
+        print(f"  sim borrow fees included above: ${sim_usd['borrow_usd'].sum():,.0f}"
+              f" (campaign config charges none unless set); sim trades with close"
+              f" > ${NOTIONAL:,.0f} skipped: {len(camp) - len(sim_usd)}")
         key = ["symbol", "side", "entry_date"]
         c_keys = set(map(tuple, c[key].to_numpy()))
         p_keys = set(map(tuple, sim_prod[key].to_numpy()))
