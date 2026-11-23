@@ -25,14 +25,21 @@ def test_status_after_63_days():
 
 
 def test_missed_days():
-    days = [date(2026, 12, d) for d in (1, 2, 3, 4, 7)]
+    days = [date(2026, 12, d) for d in (1, 2, 3, 4, 7, 8, 9, 10)]
     rows = [{"date": "2026-12-01", "account": "a", "status": "ok"},
             {"date": "2026-12-02", "account": "a", "status": "stale_data"},
             {"date": "2026-12-03", "account": "a", "status": "stopped"},
             {"date": "2026-12-04", "account": "a", "status": "dry_run"},
             {"date": "2026-12-07", "account": "b", "status": "ok"},
-            {"date": "2026-12-07", "account": "a", "status": "error"}]
-    assert dd.missed_days(days, rows, "a") == [date(2026, 12, 4), date(2026, 12, 7)]
+            {"date": "2026-12-07", "account": "a", "status": "error"},
+            {"date": "2026-12-08", "account": "a", "status": "stale_data"},
+            {"date": "2026-12-08", "account": "a", "status": "ok"},   # later run traded
+            {"date": "2026-12-09", "account": "a", "status": "stale_data"},
+            {"date": "2026-12-09", "account": "a", "status": "missed_cutoff"}]
+    assert dd.missed_days(days, rows, "a") == [
+        (date(2026, 12, 2), "stale_data"), (date(2026, 12, 4), "dry_run"),
+        (date(2026, 12, 7), "error"), (date(2026, 12, 9), "missed_cutoff"),
+        (date(2026, 12, 10), "no record")]
 
 
 def test_verdict():

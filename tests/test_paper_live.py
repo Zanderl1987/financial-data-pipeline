@@ -28,6 +28,8 @@ class FakeBroker:
     open_day = True
     lots = []
     stop_accounts = set()
+    clock_calls = 0
+    late_after_first = False
 
     def __init__(self, key, secret):
         self.key, self.secret = key, secret
@@ -35,6 +37,9 @@ class FakeBroker:
         FakeBroker.instances.append(self)
 
     def clock(self):
+        FakeBroker.clock_calls += 1
+        if FakeBroker.late_after_first and FakeBroker.clock_calls > 1:
+            return datetime(2026, 11, 23, 15, 41, tzinfo=NY), self.open_day
         return datetime(2026, 11, 23, self.hour, self.minute, tzinfo=NY), self.open_day
 
     def close_et(self, d):
@@ -81,6 +86,8 @@ def env(monkeypatch):
     FakeBroker.hour, FakeBroker.minute, FakeBroker.open_day = 10, 0, True
     FakeBroker.lots = []
     FakeBroker.stop_accounts = set()
+    FakeBroker.clock_calls = 0
+    FakeBroker.late_after_first = False
     for a in ACCOUNTS:
         monkeypatch.setenv(a.env_key, SECRET)
         monkeypatch.setenv(a.env_secret, SECRET)
@@ -258,3 +265,44 @@ def test_stop_latch_comes_from_order_history(monkeypatch):
     rc, _, _ = _run()
     assert rc == 0
     assert seen == {a.key: a.key == latched.key for a in ACCOUNTS}
+
+
+def test_past_cutoff_before_submit_places_nothing(capsys):
+    """Fetch finished after the cls cutoff: nothing is submitted and the day is
+    recorded as missed_cutoff, not as a quiet traded day."""
+    FakeBroker.late_after_first = True
+    rc, log, _ = _run()
+    assert rc == 1
+    assert all(not b.submitted for b in FakeBroker.instances)
+    assert {r["status"] for r in log.records} == {"missed_cutoff"}
+    assert all(r["n_orders"] == 0 for r in log.records)
+    assert "joey_5k: missed_cutoff, 0 orders" in capsys.readouterr().out
+
+
+def test_cutoff_recheck_uses_close_minus_20_on_half_days(monkeypatch):
+    # 13:00 close: cutoff 12:40; a 12:45 re-check is too late
+    monkeypatch.setattr(FakeBroker, "close_et",
+                        lambda self, d: datetime(2026, 11, 23, 13, 0, tzinfo=NY))
+    calls = iter([datetime(2026, 11, 23, 10, 0, tzinfo=NY)]
+                 + [datetime(2026, 11, 23, 12, 45, tzinfo=NY)] * 20)
+    monkeypatch.setattr(FakeBroker, "clock", lambda self: (next(calls), True))
+    rc, log, _ = _run()
+    assert {r["status"] for r in log.records} == {"missed_cutoff"}
+
+
+def test_every_submit_failing_is_an_error():
+    FakeBroker.reject_symbols = {"AAA", "BBB"}
+    rc, log, _ = _run()
+    assert rc == 1
+    assert {r["status"] for r in log.records} == {"error"}
+    assert all(r["n_orders"] == 0 for r in log.records)
+    assert all(sum(n.startswith("submit_failed:") for n in r["notes"]) == 2
+               for r in log.records)
+
+
+def test_no_orders_needs_no_clock_recheck(monkeypatch):
+    FakeBroker.late_after_first = True
+    monkeypatch.setattr(live, "decide_orders",
+                        lambda acct, *a, **k: Decision(orders=[], notes=[]))
+    rc, log, _ = _run()
+    assert rc == 0 and {r["status"] for r in log.records} == {"ok"}

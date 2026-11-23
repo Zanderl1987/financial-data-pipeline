@@ -178,7 +178,12 @@ for a in ACCOUNTS:
     row = {"account": a.key, "return": f"{ret:+.2%}"}
     if launch:
         row["status"] = dd.account_status(idx, ret, band, stopped)
-        row["missed days"] = len(dd.missed_days(days, log_rows, a.key))
+        missed = dd.missed_days(days, log_rows, a.key)
+        row["missed days"] = len(missed)
+        if missed:
+            with st.expander(f"Missed days ({len(missed)})"):
+                st.dataframe(pd.DataFrame(missed, columns=["date", "reason"]),
+                             use_container_width=True, hide_index=True)
         veq = dd.verdict_equity(days, d["hist_t"], d["hist_e"], d["lots"])
         if veq is not None:
             fret = (veq - a.start_equity) / a.start_equity

@@ -11,7 +11,9 @@ from paper.accounts import LOSS_LIMIT_USD
 from paper.decide import accrued_borrow_fee
 
 HORIZON = 63
-TRADED = ("ok", "stale_data", "stopped")
+# A day counts as done only if a run decided and placed (or had nothing to
+# place): stale_data, error, missed_cutoff and dry_run days are MISSED.
+TRADED = ("ok", "stopped")
 
 
 def load_ranges(path: str | Path | None = None) -> dict:
@@ -46,10 +48,20 @@ def verdict(final_ret: float, band_63: tuple[float, float], stopped: bool) -> st
 
 
 def missed_days(trading_days: list[date], log_rows: list[dict],
-                account: str) -> list[date]:
-    done = {str(r.get("date"))[:10] for r in log_rows
-            if r.get("account") == account and r.get("status") in TRADED}
-    return [d for d in trading_days if d.isoformat() not in done]
+                account: str) -> list[tuple[date, str]]:
+    """(day, reason) for each trading day with no "ok"/"stopped" record for
+    the account. Reason = the status of that day's last record (stale_data,
+    error, missed_cutoff, dry_run, ...), or "no record"."""
+    done, last = set(), {}
+    for r in log_rows:
+        if r.get("account") != account:
+            continue
+        day = str(r.get("date"))[:10]
+        last[day] = str(r.get("status"))
+        if r.get("status") in TRADED:
+            done.add(day)
+    return [(d, last.get(d.isoformat(), "no record")) for d in trading_days
+            if d.isoformat() not in done]
 
 
 def trade_costs(fills: pd.DataFrame, closes: pd.DataFrame) -> pd.DataFrame:

@@ -22,12 +22,17 @@ WINDOW_END = time(15, 40)
 MAX_NOTES = 50
 
 
-def _in_window(now_et: datetime, close_et: datetime | None) -> bool:
+def _cutoff(now_et: datetime, close_et: datetime | None) -> datetime:
+    """Last moment to submit cls orders: 15:40, or 20 min before an early close."""
     end = datetime.combine(now_et.date(), WINDOW_END, tzinfo=now_et.tzinfo)
     if close_et is not None:
         end = min(end, close_et - timedelta(minutes=20))
+    return end
+
+
+def _in_window(now_et: datetime, close_et: datetime | None) -> bool:
     start = datetime.combine(now_et.date(), WINDOW_START, tzinfo=now_et.tzinfo)
-    return start <= now_et <= end
+    return start <= now_et <= _cutoff(now_et, close_et)
 
 
 def _creds(spec):
@@ -92,13 +97,24 @@ def run(today: date | None = None, dry_run: bool = False, broker_factory=Broker,
                     status, n_orders = "dry_run", len(dec.orders)
                 else:
                     status = dec.status
-                    for intent in dec.orders:
-                        try:
-                            broker.submit(intent)
-                            n_orders += 1
-                        except Exception as e:
-                            notes.append(
-                                f"submit_failed:{intent.symbol}:{type(e).__name__}")
+                    # the fetch can take long: re-check the clock right before
+                    # submitting; past the cutoff, place nothing (a missed day)
+                    if dec.orders:
+                        now2, _ = broker.clock()
+                        if now2 > _cutoff(now2, close_et):
+                            status = "missed_cutoff"
+                            rc = 1
+                    if status != "missed_cutoff":
+                        for intent in dec.orders:
+                            try:
+                                broker.submit(intent)
+                                n_orders += 1
+                            except Exception as e:
+                                notes.append(
+                                    f"submit_failed:{intent.symbol}:{type(e).__name__}")
+                        if dec.orders and n_orders == 0:
+                            status = "error"     # nothing placed: not a traded day
+                            rc = 1
         except Exception as e:
             status, n_orders, notes = "error", 0, [type(e).__name__]
             rc = 1
