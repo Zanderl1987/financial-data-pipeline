@@ -17,10 +17,10 @@ import pandas as pd
 from paper.data import fetch_daily_bars
 from paper.strategies import STRATEGIES
 
-FETCH_START = date(2021, 9, 11)
-FETCH_END = date(2026, 9, 12)          # yfinance end is exclusive: last bar 2026-09-11
-SIG_START = pd.Timestamp("2026-03-11")
-SIG_END = pd.Timestamp("2026-09-11")
+FETCH_START = date(2021, 8, 7)
+FETCH_END = date(2026, 8, 8)           # yfinance end is exclusive: last bar 2026-08-07
+SIG_START = pd.Timestamp("2026-02-09")  # window ends at the last date the stored table
+SIG_END = pd.Timestamp("2026-08-07")    # covers the whole universe
 
 
 def signal_rows(frames: dict) -> list[tuple]:
@@ -38,6 +38,11 @@ def signal_rows(frames: dict) -> list[tuple]:
     return rows
 
 
+def symbols_path(out: str) -> str:
+    """Sidecar listing the symbols Yahoo actually served (the CSV alone cannot say)."""
+    return str(out) + ".symbols.txt"
+
+
 def read_universe(path: str) -> list[str]:
     return [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
 
@@ -48,6 +53,7 @@ def main(out: str, universe: str = "paper/universe.txt"):
     frames = fetch_daily_bars(syms, FETCH_START, FETCH_END)
     print(f"symbols fetched: {len(frames)}  missing: {len(syms) - len(frames)}", flush=True)
     rows = signal_rows(frames)
+    Path(symbols_path(out)).write_text("\n".join(sorted(frames)) + "\n", encoding="utf-8")
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["strategy", "symbol", "date", "side"])
