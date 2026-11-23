@@ -26,6 +26,7 @@ class FakeBroker:
     reject_symbols = set()
     hour, minute = 10, 0
     open_day = True
+    lots = []
 
     def __init__(self, key, secret):
         self.key, self.secret = key, secret
@@ -49,7 +50,7 @@ class FakeBroker:
     def fee_inputs(self):
         if self.key in FakeBroker.fail_accounts:
             raise RuntimeError("boom " + SECRET)
-        return EQUITY, []
+        return EQUITY, list(FakeBroker.lots)
 
     def held(self):
         return []
@@ -74,6 +75,7 @@ def env(monkeypatch):
     FakeBroker.fail_accounts = set()
     FakeBroker.reject_symbols = set()
     FakeBroker.hour, FakeBroker.minute, FakeBroker.open_day = 10, 0, True
+    FakeBroker.lots = []
     for a in ACCOUNTS:
         monkeypatch.setenv(a.env_key, SECRET)
         monkeypatch.setenv(a.env_secret, SECRET)
@@ -220,3 +222,18 @@ def test_shared_step_failure_is_contained(capsys, monkeypatch, step):
     assert len(log.records) == 6
     assert all(r["status"] == "error" and r["notes"][0].endswith(":RuntimeError")
                for r in log.records)
+
+
+def test_fee_adjusted_equity_with_symbol_lots(monkeypatch):
+    from datetime import timedelta
+    FakeBroker.lots = [("SSS", 36500.0, TODAY - timedelta(days=10), None)]
+    seen = []
+
+    def spy(acct, *a, **k):
+        seen.append(a[5])  # fee_adj positional arg
+        return Decision(orders=[], notes=[])
+    monkeypatch.setattr(live, "decide_orders", spy)
+    rc, log, _ = _run()
+    assert rc == 0 and len(seen) == 6
+    # 36500 * 270bps/yr * 10/365 = 27.0
+    assert seen[0] == pytest.approx(EQUITY - 27.0)

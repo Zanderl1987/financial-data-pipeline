@@ -131,10 +131,13 @@ class Broker:
         """(order, parsed_client_order_id) for filled orders of ours."""
         return self._filled(self._all_orders(days=days))
 
-    def portfolio_history(self, period: str = "3M"):
+    def portfolio_history(self, start: date, end: date | None = None):
+        """Daily equity history over explicit start/end dates (not a rolling period)."""
         from alpaca.trading.requests import GetPortfolioHistoryRequest
-        return self._c.get_portfolio_history(
-            GetPortfolioHistoryRequest(period=period, timeframe="1D"))
+        kw = dict(timeframe="1D", start=datetime(start.year, start.month, start.day, tzinfo=NY))
+        if end is not None:
+            kw["end"] = datetime(end.year, end.month, end.day, 23, 59, tzinfo=NY)
+        return self._c.get_portfolio_history(GetPortfolioHistoryRequest(**kw))
 
     def positions(self) -> list:
         return list(self._c.get_all_positions())

@@ -108,3 +108,15 @@ def test_scale_band_and_complete_days():
     late = datetime(2026, 12, 2, 16, 30)
     assert dd.complete_days(ds, early) == ds[:1]
     assert dd.complete_days(ds, late) == ds
+
+
+def test_verdict_equity_fee_frozen_after_d63():
+    days = _days(80)
+    he = [5000.0] * 80
+    d = days[0]
+    lots = [("A", 36500.0, days[10], days[70]),    # closed after d63: capped at d63
+            ("B", 36500.0, days[70], days[75]),    # opened after d63: ignored
+            ("C", 36500.0, days[10], None)]        # still open: accrues to d63
+    # A and C each accrue 52 days x 2.7 = 140.4
+    assert dd.verdict_equity(days[:80], days, he, lots) == pytest.approx(5000.0 - 2 * 140.4)
+    assert dd.verdict_equity(days[:63], days, he, lots) == pytest.approx(5000.0 - 2 * 140.4)

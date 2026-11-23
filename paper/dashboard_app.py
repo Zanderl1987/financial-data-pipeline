@@ -68,12 +68,12 @@ def closes_for(symbols: tuple, start: date, end: date) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60)
-def account_data(key: str, secret: str, acct_key: str) -> dict:
+def account_data(key: str, secret: str, acct_key: str, hist_start: date) -> dict:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
     b = Broker(key, secret)
     equity, lots = b.fee_inputs()
-    hist = b.portfolio_history("3M")
+    hist = b.portfolio_history(hist_start)
     pos = b.positions()
     syms = [str(p.symbol) for p in pos]
     last = {}
@@ -125,7 +125,7 @@ for a in ACCOUNTS:
         st.error(f"Missing secrets {a.env_key} / {a.env_secret}.")
         continue
     try:
-        d = account_data(k, s, a.key)
+        d = account_data(k, s, a.key, launch or today - timedelta(days=90))
         days = trading_days(k, s, launch, today) if launch else []
         days = dd.complete_days(days, now_et, cutoff_today(k, s, today)) if days else []
     except Exception as e:

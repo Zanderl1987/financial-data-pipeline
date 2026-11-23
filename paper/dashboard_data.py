@@ -121,7 +121,10 @@ def verdict_equity(days: list[date], hist_t: list[date], hist_e: list[float],
     if not pts:
         return None
     eq = max(pts, key=lambda x: x[0])[1]
-    return eq - accrued_borrow_fee(strip_symbols(lots), d63)
+    # freeze the fee too: drop lots opened after d63, cap closes at d63
+    frozen = [(n, a, None if b is None or b > d63 else b)
+              for _, n, a, b in lots if a <= d63]
+    return eq - accrued_borrow_fee(frozen, d63)
 
 
 def net_position_pnl(positions: list[dict], lots: list, today: date) -> list[dict]:
