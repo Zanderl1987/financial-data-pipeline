@@ -109,7 +109,8 @@ class Broker:
     def recently_exited(self, prev_trading_day: date) -> set[str]:
         out = set()
         for o, p in self._filled(self._all_orders(days=10)):
-            if p["action"] in ("exit", "stop_all") and                     fill_date(o, p) == prev_trading_day:
+            if p["action"] in ("exit", "stop_all") and (
+                    fill_date(o, p) == prev_trading_day):
                 out.add(str(o.symbol))
         return out
 

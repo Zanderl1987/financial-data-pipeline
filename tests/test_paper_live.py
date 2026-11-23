@@ -101,7 +101,7 @@ class Rec:
     def __init__(self):
         self.records = []
 
-    def __call__(self, record, repo=None, token=None, path="runs.jsonl"):
+    def __call__(self, record, repo=None, token=None, path=None):
         self.records.append(record)
 
 

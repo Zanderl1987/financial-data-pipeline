@@ -1,7 +1,6 @@
 """Streamlit dashboard (layout only; logic in dashboard_data). Paper accounts only."""
 from __future__ import annotations
 
-import base64
 import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -29,14 +28,19 @@ def _secret(name):
 
 
 @st.cache_data(ttl=60)
-def runlog_rows(repo: str, token: str) -> list[dict]:
-    r = requests.get(f"https://api.github.com/repos/{repo}/contents/runs.jsonl",
-                     headers={"Authorization": f"Bearer {token}",
-                              "Accept": "application/vnd.github+json"}, timeout=30)
-    if r.status_code == 404:
-        return []
-    r.raise_for_status()
-    return dd.parse_runlog(base64.b64decode(r.json()["content"]).decode("utf-8"))
+def runlog_rows(repo: str, token: str, months: tuple) -> list[dict]:
+    """Rows from runs/YYYY-MM.jsonl for each month. Raw media type, so a file
+    is returned whole whatever its size."""
+    rows = []
+    for m in months:
+        r = requests.get(f"https://api.github.com/repos/{repo}/contents/{dd.log_path(m)}",
+                         headers={"Authorization": f"Bearer {token}",
+                                  "Accept": "application/vnd.github.raw"}, timeout=30)
+        if r.status_code == 404:
+            continue
+        r.raise_for_status()
+        rows += dd.parse_runlog(r.content.decode("utf-8"))
+    return rows
 
 
 @st.cache_data(ttl=60)
@@ -107,7 +111,8 @@ repo, token = _secret("PAPER_LOG_REPO"), _secret("PAPER_LOG_TOKEN")
 log_rows = []
 if repo and token:
     try:
-        log_rows = runlog_rows(repo, token)
+        log_rows = runlog_rows(repo, token, tuple(dd.log_months(
+            launch or datetime.now(NY).date(), datetime.now(NY).date())))
     except Exception as e:
         st.warning(f"Run log unavailable ({type(e).__name__}).")
 else:

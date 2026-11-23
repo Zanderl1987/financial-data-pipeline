@@ -106,7 +106,8 @@ def final_verdict(days: list[date], hist_t: list[date], hist_e: list[float],
     if hit is not None:
         h = min(sum(1 for d in days if d < hit) + 1, HORIZON)
         eq = equity_at(hit, hist_t, hist_e)
-        ret = None if eq is None else             (eq - frozen_fee(lots, hit) - start_equity) / start_equity
+        ret = None if eq is None else (
+            (eq - frozen_fee(lots, hit) - start_equity) / start_equity)
         p5, _, p95 = band_row(band, h)
         return {"verdict": LIMIT_VERDICT, "date": hit, "day": h, "return": ret,
                 "band": (p5, p95),
@@ -173,6 +174,20 @@ def trade_costs(fills: pd.DataFrame, closes: pd.DataFrame) -> pd.DataFrame:
     sign = out["side"].astype(str).str.lower().map({"buy": 1.0, "sell": -1.0})
     out["cost_bps"] = sign * (out["price"] - out["close"]) / out["close"] * 1e4
     return out
+
+
+def log_months(start: date, end: date) -> list[str]:
+    """YYYY-MM of every month from start to end, inclusive."""
+    out, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def log_path(month: str) -> str:
+    """Same layout as paper.runlog.log_path (runs/YYYY-MM.jsonl)."""
+    return f"runs/{month}.jsonl"
 
 
 def parse_runlog(text: str) -> list[dict]:

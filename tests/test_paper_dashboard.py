@@ -209,7 +209,8 @@ def test_nothing_after_day_63_changes_the_verdict():
 
 
 def test_frozen_return_judged_against_day_63_band():
-    assert _fv(63, [5000.0] * 62 + [5000.0 * 1.70])["verdict"] ==         "PASS (flagged: above range)"
+    above = _fv(63, [5000.0] * 62 + [5000.0 * 1.70])
+    assert above["verdict"] == "PASS (flagged: above range)"
     r = _fv(63, [5000.0] * 62 + [5000.0 * 0.40], start=5000.0,
             band={**BAND, "p5": [-0.9] * 63})
     assert r["verdict"] == HIT                  # -60% is past the $1,000 limit
