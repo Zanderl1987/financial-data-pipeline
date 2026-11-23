@@ -1,0 +1,45 @@
+# Daily paper-trading job (six Alpaca paper accounts).
+# SAFETY: orders are submitted ONLY when the repo variable PAPER_LIVE is the
+# string 'true' AND this is not a manual run with dry_run=true. Otherwise the
+# job runs with --dry-run (decides and logs, submits nothing). Merging this file
+# therefore gives scheduled dry runs until PAPER_LIVE is set to 'true'
+# (Settings > Secrets and variables > Actions > Variables).
+name: paper-trade
+on:
+  schedule:
+    - cron: "0 14-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide and log only; submit no orders"
+        type: boolean
+        default: true
+concurrency:
+  group: paper-trade
+  cancel-in-progress: false
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    env:
+      PAPER_LOG_REPO: ${{ secrets.PAPER_LOG_REPO }}
+      PAPER_LOG_TOKEN: ${{ secrets.PAPER_LOG_TOKEN }}
+      DRY_FLAG: ${{ ((github.event_name == 'workflow_dispatch' && inputs.dry_run) || vars.PAPER_LIVE != 'true') && '--dry-run' || '' }}
+      APCA_KEY_JOEY_5K: ${{ secrets.APCA_KEY_JOEY_5K }}
+      APCA_SECRET_JOEY_5K: ${{ secrets.APCA_SECRET_JOEY_5K }}
+      APCA_KEY_CAP_5K: ${{ secrets.APCA_KEY_CAP_5K }}
+      APCA_SECRET_CAP_5K: ${{ secrets.APCA_SECRET_CAP_5K }}
+      APCA_KEY_RSIBB_5K: ${{ secrets.APCA_KEY_RSIBB_5K }}
+      APCA_SECRET_RSIBB_5K: ${{ secrets.APCA_SECRET_RSIBB_5K }}
+      APCA_KEY_JOEY_10K: ${{ secrets.APCA_KEY_JOEY_10K }}
+      APCA_SECRET_JOEY_10K: ${{ secrets.APCA_SECRET_JOEY_10K }}
+      APCA_KEY_CAP_10K: ${{ secrets.APCA_KEY_CAP_10K }}
+      APCA_SECRET_CAP_10K: ${{ secrets.APCA_SECRET_CAP_10K }}
+      APCA_KEY_RSIBB_10K: ${{ secrets.APCA_KEY_RSIBB_10K }}
+      APCA_SECRET_RSIBB_10K: ${{ secrets.APCA_SECRET_RSIBB_10K }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r paper/requirements-job.txt
+      - run: python -m paper.live $DRY_FLAG

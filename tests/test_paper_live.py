@@ -1,0 +1,199 @@
+import sys
+import types
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from paper import live
+from paper.accounts import ACCOUNTS
+from paper.decide import Decision, OrderIntent
+
+NY = ZoneInfo("America/New_York")
+TODAY = date(2026, 11, 23)
+SECRET = "PKTESTSECRET123"
+EQUITY = 5123.45
+
+
+def _intent(sym, acct="joey_5k"):
+    return OrderIntent(sym, "buy", 10, "entry_long", f"pt|{acct}|20261123|entry_long|{sym}|20261120")
+
+
+class FakeBroker:
+    instances = []
+    done_accounts = set()
+    fail_accounts = set()
+    reject_symbols = set()
+    hour, minute = 10, 0
+    open_day = True
+
+    def __init__(self, key, secret):
+        self.key, self.secret = key, secret
+        self.submitted = []
+        FakeBroker.instances.append(self)
+
+    def clock(self):
+        return datetime(2026, 11, 23, self.hour, self.minute, tzinfo=NY), self.open_day
+
+    def close_et(self, d):
+        return datetime(2026, 11, 23, 16, 0, tzinfo=NY)
+
+    def prev_trading_day(self, d):
+        return date(2026, 11, 20)
+
+    def orders_today(self, prefix):
+        if self.key in FakeBroker.done_accounts:
+            return [prefix + "|x"]
+        return []
+
+    def fee_inputs(self):
+        if self.key in FakeBroker.fail_accounts:
+            raise RuntimeError("boom " + SECRET)
+        return EQUITY, []
+
+    def held(self):
+        return []
+
+    def recently_exited(self, prev):
+        return set()
+
+    def shortable(self, s):
+        return True
+
+    def submit(self, intent):
+        if intent.symbol in FakeBroker.reject_symbols:
+            raise ValueError("rejected")
+        self.submitted.append(intent)
+        return "id"
+
+
+@pytest.fixture(autouse=True)
+def env(monkeypatch):
+    FakeBroker.instances = []
+    FakeBroker.done_accounts = set()
+    FakeBroker.fail_accounts = set()
+    FakeBroker.reject_symbols = set()
+    FakeBroker.hour, FakeBroker.minute, FakeBroker.open_day = 10, 0, True
+    for a in ACCOUNTS:
+        monkeypatch.setenv(a.env_key, SECRET)
+        monkeypatch.setenv(a.env_secret, SECRET)
+    monkeypatch.setattr(live, "decide_orders",
+                        lambda acct, *a, **k: Decision(
+                            orders=[_intent("AAA", acct.key), _intent("BBB", acct.key)],
+                            notes=["n1"]))
+
+
+class Rec:
+    def __init__(self):
+        self.records = []
+
+    def __call__(self, record, repo=None, token=None, path="runs.jsonl"):
+        self.records.append(record)
+
+
+class Fetch:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *a, **k):
+        self.calls += 1
+        return {}
+
+
+def _run(**kw):
+    log, fetch = Rec(), Fetch()
+    rc = live.run(today=TODAY, broker_factory=FakeBroker, log=log, fetch=fetch, **kw)
+    return rc, log, fetch
+
+
+def test_second_run_same_day_is_noop():
+    FakeBroker.done_accounts = {SECRET}
+    rc, log, _ = _run()
+    assert rc == 0
+    assert all(not b.submitted for b in FakeBroker.instances)
+    assert log.records == []
+
+
+def test_outside_window_does_nothing():
+    FakeBroker.hour, FakeBroker.minute = 15, 45
+    rc, log, fetch = _run()
+    assert rc == 0 and fetch.calls == 0 and log.records == []
+    assert all(not b.submitted for b in FakeBroker.instances)
+
+
+def test_non_trading_day_does_nothing():
+    FakeBroker.open_day = False
+    rc, log, fetch = _run()
+    assert rc == 0 and fetch.calls == 0 and log.records == []
+
+
+def test_one_account_error_others_continue(monkeypatch):
+    for a in ACCOUNTS:
+        monkeypatch.setenv(a.env_key, a.key)
+    FakeBroker.fail_accounts = {ACCOUNTS[1].key}
+    rc, log, _ = _run()
+    assert rc == 1
+    assert sum(1 for b in FakeBroker.instances if b.submitted) == 5
+    errs = [r for r in log.records if r["status"] == "error"]
+    assert len(errs) == 1 and errs[0]["account"] == ACCOUNTS[1].key
+    assert errs[0]["notes"] == ["RuntimeError"]  # type name only, no message
+
+
+def test_rejected_order_continues():
+    FakeBroker.reject_symbols = {"AAA"}
+    rc, log, _ = _run()
+    assert rc == 0
+    assert all([i.symbol for i in b.submitted] == ["BBB"]
+               for b in FakeBroker.instances if b.submitted)
+    assert any(n.startswith("submit_failed:AAA") for n in log.records[0]["notes"])
+    assert log.records[0]["n_orders"] == 1
+
+
+def test_dry_run_submits_nothing():
+    rc, log, _ = _run(dry_run=True)
+    assert rc == 0
+    assert all(not b.submitted for b in FakeBroker.instances)
+    assert {r["status"] for r in log.records} == {"dry_run"}
+    assert len(log.records) == 6
+
+
+def test_record_fields_exact():
+    _, log, _ = _run(dry_run=True)
+    assert set(log.records[0]) == {"date", "account", "status", "n_orders", "notes", "run_id"}
+
+
+def test_stdout_has_no_secrets(capsys, monkeypatch):
+    FakeBroker.fail_accounts = {SECRET}
+    _run()
+    out = capsys.readouterr().out
+    assert SECRET not in out and "5123.45" not in out
+    assert len([l for l in out.splitlines() if l]) == 6
+
+
+def test_broker_is_paper_only(monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, key, secret, paper=False, **kw):
+            seen.update(key=key, secret=secret, paper=paper, kw=kw)
+
+    mod = types.ModuleType("alpaca.trading.client")
+    mod.TradingClient = FakeClient
+    monkeypatch.setitem(sys.modules, "alpaca.trading.client", mod)
+    from paper.broker import Broker
+    Broker("k", "s")
+    assert seen["paper"] is True and not seen["kw"]
+
+
+def test_broker_rejects_no_endpoint_param():
+    import inspect
+    from paper.broker import Broker
+    assert list(inspect.signature(Broker.__init__).parameters) == ["self", "key", "secret"]
+
+
+def test_workflow_live_gate():
+    from pathlib import Path
+    t = Path(".github/workflows/paper_trade.yml").read_text()
+    assert "vars.PAPER_LIVE" in t and "cancel-in-progress: false" in t
+    assert 'cron: "0 14-21 * * 1-5"' in t
+    assert t.count("secrets.APCA_") == 12
