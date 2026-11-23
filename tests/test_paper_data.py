@@ -60,3 +60,18 @@ def test_batches_and_omits_empty(monkeypatch):
     assert len(calls) == 3
     assert "S5" not in out
     assert len(out) == 449
+
+
+def test_duplicate_dates_dropped_keep_last_and_sorted(monkeypatch):
+    f = _frame(["2026-11-19", "2026-11-18", "2026-11-19", "2026-11-20"])
+    f.iloc[0] = 1.0
+    f.iloc[2] = 2.0                       # the later duplicate of 11-19 wins
+    raw = f.copy()
+    raw.columns = pd.MultiIndex.from_product([["AAA"], COLS])
+    monkeypatch.setattr(pdata.yf, "download", lambda *a, **k: raw)
+    out = pdata.fetch_daily_bars(["AAA", "BBB"], date(2026, 1, 1), TODAY, today=TODAY)
+    df = out["AAA"]
+    assert list(df.index) == list(pd.to_datetime(["2026-11-18", "2026-11-19",
+                                                  "2026-11-20"]))
+    assert df.index.is_unique and df.index.is_monotonic_increasing
+    assert df.loc["2026-11-19", "close"] == 2.0

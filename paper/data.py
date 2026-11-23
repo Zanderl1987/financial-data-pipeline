@@ -34,6 +34,8 @@ def _normalize(df: pd.DataFrame, today: date):
     df.index = idx.normalize()
     df.index.name = "date"
     df = df.dropna(how="all")
+    # a duplicated date makes get_indexer raise downstream: keep the last, sort
+    df = df[~df.index.duplicated(keep="last")].sort_index()
     df = df[df.index < pd.Timestamp(today)]
     return None if df.empty else df
 
