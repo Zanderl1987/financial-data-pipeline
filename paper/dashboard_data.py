@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, time
 from pathlib import Path
 
 import pandas as pd
@@ -92,8 +92,56 @@ def day_index(trading_days: list[date], launch: date | None, today: date) -> int
     return sum(1 for d in trading_days if launch <= d <= today)
 
 
-def fee_adjusted(equity: float, short_lots: list, today: date) -> float:
-    return equity - accrued_borrow_fee(short_lots, today)
+def strip_symbols(lots: list) -> list:
+    """Broker lots (symbol, notional, opened, closed) -> decide's (notional, opened, closed)."""
+    return [(n, a, b) for _, n, a, b in lots]
+
+
+def fee_adjusted(equity: float, lots: list, today: date) -> float:
+    return equity - accrued_borrow_fee(strip_symbols(lots), today)
+
+
+def complete_days(days: list[date], now_et: datetime,
+                  cutoff: time = time(15, 40)) -> list[date]:
+    """Drop today's unfinished day until after the cutoff (NY time)."""
+    if days and days[-1] == now_et.date() and now_et.time() < cutoff:
+        return days[:-1]
+    return days
+
+
+def verdict_equity(days: list[date], hist_t: list[date], hist_e: list[float],
+                   lots: list) -> float | None:
+    """Fee-adjusted equity at the close of the 63rd trading day since launch,
+    frozen: later values are never used. None until that day is complete.
+    `days` = completed trading days since launch."""
+    if len(days) < HORIZON:
+        return None
+    d63 = days[HORIZON - 1]
+    pts = [(t, e) for t, e in zip(hist_t, hist_e) if t <= d63]
+    if not pts:
+        return None
+    eq = max(pts, key=lambda x: x[0])[1]
+    return eq - accrued_borrow_fee(strip_symbols(lots), d63)
+
+
+def net_position_pnl(positions: list[dict], lots: list, today: date) -> list[dict]:
+    """Add pnl_net: shorts net of the accrued borrow fee on their open lot."""
+    out = []
+    for p in positions:
+        q = dict(p)
+        fee = 0.0
+        if str(p.get("side", "")).lower() == "short":
+            open_lots = [(n, a, b) for sym, n, a, b in lots
+                         if sym == p["symbol"] and b is None]
+            fee = accrued_borrow_fee(open_lots, today)
+        q["pnl_net"] = p["pnl"] - fee
+        out.append(q)
+    return out
+
+
+def scale_band(band: dict, start_equity: float, n: int) -> dict:
+    """Fraction band -> dollar band for the first n horizons."""
+    return {k: [start_equity * (1 + v) for v in band[k][:n]] for k in ("p5", "p50", "p95")}
 
 
 def limit_distance(start_equity: float, adj_equity: float,

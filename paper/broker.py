@@ -94,7 +94,8 @@ class Broker:
                 out.add(str(o.symbol))
         return out
 
-    def fee_inputs(self) -> tuple[float, list[tuple[float, date, date | None]]]:
+    def fee_inputs(self) -> tuple[float, list[tuple[str, float, date, date | None]]]:
+        """Lots are (symbol, notional, opened, closed_or_None)."""
         equity = float(self._c.get_account().equity)
         lots: list[list] = []
         for o, p in self._filled(self._all_orders()):
@@ -107,7 +108,7 @@ class Broker:
                     if lot[3] == str(o.symbol) and lot[2] is None:
                         lot[2] = fdate
                         break
-        return equity, [(n, a, b) for n, a, b, _ in lots]
+        return equity, [(sym, n, a, b) for n, a, b, sym in lots]
 
     def held(self) -> list[Held]:
         entries: dict[str, tuple] = {}
@@ -121,6 +122,22 @@ class Broker:
             out.append(Held(sym, _val(pos.side), int(abs(float(pos.qty))),
                             float(pos.avg_entry_price), sig, opened))
         return out
+
+    # ---- public read helpers (dashboard) ---------------------------------
+    def calendar_days(self, start: date, end: date) -> list[date]:
+        return [c.date for c in self._calendar(start, end)]
+
+    def filled_orders(self, days: int = 60) -> list[tuple]:
+        """(order, parsed_client_order_id) for filled orders of ours."""
+        return self._filled(self._all_orders(days=days))
+
+    def portfolio_history(self, period: str = "3M"):
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        return self._c.get_portfolio_history(
+            GetPortfolioHistoryRequest(period=period, timeframe="1D"))
+
+    def positions(self) -> list:
+        return list(self._c.get_all_positions())
 
     def shortable(self, symbol: str) -> bool:
         a = self._c.get_asset(symbol)

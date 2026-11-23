@@ -81,7 +81,7 @@ def run(today: date | None = None, dry_run: bool = False, broker_factory=Broker,
                 status, skip = "already_done", True
             else:
                 equity, lots = broker.fee_inputs()
-                fee_adj = equity - accrued_borrow_fee(lots, today)
+                fee_adj = equity - accrued_borrow_fee([(n, a, b) for _, n, a, b in lots], today)
                 dec = decide_orders(
                     acct, STRATEGIES[acct.slug], frames, broker.held(), today,
                     prev, fee_adj, broker.shortable,

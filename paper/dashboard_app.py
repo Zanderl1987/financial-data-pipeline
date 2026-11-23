@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import base64
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -16,7 +16,6 @@ import streamlit as st
 from paper import dashboard_data as dd
 from paper.accounts import ACCOUNTS, LOSS_LIMIT_USD
 from paper.broker import NY, Broker
-from paper.decide import parse_client_order_id
 
 st.set_page_config(page_title="Paper trading", layout="centered")
 RANGES = dd.load_ranges()["accounts"]
@@ -42,7 +41,17 @@ def runlog_rows(repo: str, token: str) -> list[dict]:
 
 @st.cache_data(ttl=60)
 def trading_days(key: str, secret: str, start: date, end: date) -> list[date]:
-    return [c.date for c in Broker(key, secret)._calendar(start, end)]
+    return Broker(key, secret).calendar_days(start, end)
+
+
+@st.cache_data(ttl=300)
+def cutoff_today(key: str, secret: str, d: date) -> time:
+    """20 minutes before today's close (handles half days); default 15:40."""
+    try:
+        c = Broker(key, secret).close_et(d)
+        return (c - timedelta(minutes=20)).time() if c else time(15, 40)
+    except Exception:
+        return time(15, 40)
 
 
 @st.cache_data(ttl=3600)
@@ -62,12 +71,10 @@ def closes_for(symbols: tuple, start: date, end: date) -> pd.DataFrame:
 def account_data(key: str, secret: str, acct_key: str) -> dict:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
-    from alpaca.trading.requests import GetPortfolioHistoryRequest
     b = Broker(key, secret)
     equity, lots = b.fee_inputs()
-    hist = b._c.get_portfolio_history(
-        GetPortfolioHistoryRequest(period="3M", timeframe="1D"))
-    pos = b._c.get_all_positions()
+    hist = b.portfolio_history("3M")
+    pos = b.positions()
     syms = [str(p.symbol) for p in pos]
     last = {}
     if syms:
@@ -76,10 +83,7 @@ def account_data(key: str, secret: str, acct_key: str) -> dict:
             StockLatestTradeRequest(symbol_or_symbols=syms, feed="iex"))
         last = {s: float(v.price) for s, v in t.items()}
     orders = []
-    for o in b._all_orders(days=60):
-        p = parse_client_order_id(str(o.client_order_id))
-        if p is None or o.filled_at is None:
-            continue
+    for o, p in b.filled_orders(days=60):
         orders.append({"symbol": str(o.symbol),
                        "side": str(getattr(o.side, "value", o.side)).lower(),
                        "date": o.filled_at.astimezone(NY).date(),
@@ -111,7 +115,8 @@ if launch is None:
     st.info("Not launched: PAPER_LAUNCH_DATE secret is not set. "
             "No verdicts or missed days yet.")
 
-today = date.today()
+now_et = datetime.now(NY)
+today = now_et.date()
 summary = []
 for a in ACCOUNTS:
     st.subheader(f"{a.key}  ({a.slug})")
@@ -122,6 +127,7 @@ for a in ACCOUNTS:
     try:
         d = account_data(k, s, a.key)
         days = trading_days(k, s, launch, today) if launch else []
+        days = dd.complete_days(days, now_et, cutoff_today(k, s, today)) if days else []
     except Exception as e:
         st.error(f"Could not load account ({type(e).__name__}).")
         continue
@@ -139,8 +145,7 @@ for a in ACCOUNTS:
     fig = go.Figure()
     if launch and days:
         xs = days[:63]
-        for ky in ("p5", "p50", "p95"):
-            ys = [a.start_equity * (1 + v) for v in band[ky][:len(xs)]]
+        for ky, ys in dd.scale_band(band, a.start_equity, len(xs)).items():
             fig.add_scatter(x=xs, y=ys, name=ky, line=dict(dash="dot", width=1))
     fig.add_scatter(x=d["hist_t"], y=d["hist_e"], name="equity (raw)")
     fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
@@ -148,9 +153,9 @@ for a in ACCOUNTS:
     st.plotly_chart(fig, use_container_width=True)
 
     if d["positions"]:
-        st.caption("Open positions (shorts: borrow fee is in the equity above)")
-        st.dataframe(pd.DataFrame(d["positions"]), use_container_width=True,
-                     hide_index=True)
+        st.caption("Open positions (pnl_net: shorts net of accrued borrow fee)")
+        st.dataframe(pd.DataFrame(dd.net_position_pnl(d["positions"], d["lots"], today)),
+                     use_container_width=True, hide_index=True)
     else:
         st.caption("No open positions.")
 
@@ -174,8 +179,10 @@ for a in ACCOUNTS:
     if launch:
         row["status"] = dd.account_status(idx, ret, band, stopped)
         row["missed days"] = len(dd.missed_days(days, log_rows, a.key))
-        if idx >= dd.HORIZON:
-            row["verdict"] = dd.verdict(ret, (band["p5"][62], band["p95"][62]), stopped)
+        veq = dd.verdict_equity(days, d["hist_t"], d["hist_e"], d["lots"])
+        if veq is not None:
+            fret = (veq - a.start_equity) / a.start_equity
+            row["verdict"] = dd.verdict(fret, (band["p5"][62], band["p95"][62]), stopped)
     else:
         row["status"] = "not launched"
     summary.append(row)
