@@ -23,6 +23,24 @@ def agreement(a: set, b: set) -> float:
     return 1.0 if not u else len(a & b) / len(u)
 
 
+MIN_COMMON_FRAC = 0.90
+
+
+def gate_verdict(n_universe: int, n_common: int,
+                 per_strategy: dict) -> tuple:
+    """per_strategy: slug -> (agreement, n_signals_in_union). Returns (ok, failures)."""
+    fails = []
+    if n_universe <= 0 or n_common < MIN_COMMON_FRAC * n_universe:
+        fails.append(f"common symbols {n_common}/{n_universe} below "
+                     f"{MIN_COMMON_FRAC:.0%} of the universe")
+    for slug, (ag, n) in per_strategy.items():
+        if n < 1:
+            fails.append(f"{slug}: no signals in the union")
+        if ag < THRESHOLD:
+            fails.append(f"{slug}: agreement {ag:.4f} below {THRESHOLD}")
+    return (not fails), fails
+
+
 def _load_csv(path: str) -> dict[str, set]:
     out = {slug: set() for slug in STRATEGIES}
     with open(path, newline="", encoding="utf-8") as f:
@@ -59,7 +77,7 @@ def main(runner_csv: str, universe: str = "paper/universe.txt",
     print(f"missing from runner (excluded, not failures): {len(local_syms - runner_syms)}")
     print(f"missing from local (excluded, not failures): {len(runner_syms - local_syms)}")
     diff_out = diff_out or str(runner_csv) + ".disagreements.csv"
-    ok = True
+    per = {}
     with open(diff_out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["strategy", "where", "symbol", "date", "side"])
@@ -77,7 +95,10 @@ def main(runner_csv: str, universe: str = "paper/universe.txt",
                 print(f"  {d[0]:11s} {d[1]} {d[2]} {d[3]}")
             if len(diffs) > MAX_PRINT:
                 print(f"  ... {len(diffs) - MAX_PRINT} more in {diff_out}")
-            ok &= ag >= THRESHOLD
+            per[slug] = (ag, len(a | b))
+    ok, fails = gate_verdict(len(read_universe(universe)), len(common), per)
+    for f_ in fails:
+        print("FAILED: " + f_)
     print("GATE PASS" if ok else "GATE FAIL")
     return ok
 
