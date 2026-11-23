@@ -141,8 +141,16 @@ def decide_orders(account: AccountSpec, spec: StrategySpec,
         if loc < 0:
             dec.notes.append(f"untracked:{h.symbol}")
             continue
+        # Sticky exits, as in the sim (an exit stays pending until it fills):
+        # exit if the condition fired on ANY bar from sig_i+2 (= entry_i+1)
+        # to the last bar. On a normal day the earlier bars were already
+        # checked and failed; after a missed day or a failed/expired exit
+        # order this turns a lost exit into a late one.
         j = len(df) - 1
-        if j >= loc + 2 and spec.held_exit(df)(j, int(loc), h.avg_entry_price, h.side):
+        loc = int(loc)
+        fn = spec.held_exit(df) if j >= loc + 2 else None
+        if fn is not None and any(fn(k, loc, h.avg_entry_price, h.side)
+                                  for k in range(loc + 2, j + 1)):
             exits.append(OrderIntent(h.symbol, _closing_side(h.side), h.qty, "exit",
                                      cid("exit", h.symbol, h.sig_date)))
     dec.orders.extend(exits)

@@ -203,3 +203,104 @@ def test_exactly_five_percent_stale_is_ok():
     f = {f"S{i}": frame() for i in range(19)}
     f["OLD"] = frame(end=PREV - timedelta(days=7))
     assert run(f).status == "ok"
+
+
+# ---- I2: exits are sticky (a lost exit becomes a late exit, as in the sim) ----
+
+def _spec_fires_on(bars_from_end):
+    """held_exit true only on bars n-1-b for b in bars_from_end."""
+    def held_exit(df):
+        hits = {len(df) - 1 - b for b in bars_from_end}
+        return lambda j, sig_i, ep, side: j in hits
+    return StrategySpec("fake", _entries, held_exit)
+
+
+def test_exit_fired_on_missed_bar_exits_today():
+    f = {"A": frame()}
+    held = [Held("A", "long", 5, 50, sig_back(f["A"], 4))]
+    d = run(f, held, spec=_spec_fires_on({1}))       # fired on bar j-1 only
+    assert [(o.action, o.symbol, o.qty) for o in d.orders] == [("exit", "A", 5)]
+
+
+def test_catch_up_never_looks_before_entry_bar_plus_one():
+    f = {"A": frame()}
+    held = [Held("A", "long", 5, 50, sig_back(f["A"], 4))]
+    # bar sig_i+1 (the entry fill bar) = 3 bars before the last bar
+    assert run(f, held, spec=_spec_fires_on({3})).orders == []
+    assert [o.action for o in run(f, held, spec=_spec_fires_on({2})).orders] == ["exit"]
+
+
+def _replay_vs_sim(skip_days=(), max_hold=7):
+    """Run decide_orders day by day (fills at that day's close) and the sim
+    over the same frames; return (replay trades, sim trades, frames)."""
+    import numpy as np
+    from paper.sim import simulate_account
+    rng = np.random.default_rng(7)
+    n, syms = 90, [f"S{i}" for i in range(9)]
+    idx = pd.bdate_range("2026-01-05", periods=n)
+    frames = {}
+    for s in syms:
+        c = rng.uniform(10, 60, n)
+        frames[s] = pd.DataFrame({
+            "open": c, "high": c, "low": c, "close": c,
+            "volume": rng.uniform(1e5, 1e6, n),
+            "sig_long": rng.random(n) < 0.08, "sig_short": rng.random(n) < 0.05,
+            "xf": rng.random(n) < 0.15}, index=idx)
+
+    def held_exit(df):
+        xf = df["xf"].to_numpy(bool)
+        return lambda j, sig_i, ep, side: bool(xf[j]) or (j - sig_i) >= max_hold
+    spec = StrategySpec("fake", _entries, held_exit)
+
+    sim = simulate_account(frames, spec, start_equity=5000.0, slots=ACC5.slots,
+                           start=str(idx[0].date()), end=str(idx[-1].date()))
+    sim_tr = sorted((r.symbol, r.sig_date.date(), r.entry_date.date(),
+                     r.exit_date.date()) for r in sim.trades.itertuples())
+
+    held, recent, trades = [], set(), []
+    for k in range(1, n):
+        if k in skip_days:
+            recent = set()
+            continue
+        today, prev = idx[k].date(), idx[k - 1].date()
+        vis = {s: df.iloc[:k] for s, df in frames.items()}
+        dec = decide_orders(ACC5, spec, vis, list(held), today, prev, 5000.0,
+                            lambda s: True, recent, len(vis))
+        assert dec.status == "ok"
+        recent = set()
+        for o in dec.orders:
+            px = float(frames[o.symbol]["close"].iloc[k])
+            if o.action == "exit":
+                h = next(h for h in held if h.symbol == o.symbol)
+                held.remove(h)
+                trades.append((h.symbol, h.sig_date, h.opened, today))
+                recent.add(o.symbol)
+            else:
+                held.append(Held(o.symbol, "long" if o.side == "buy" else "short",
+                                 o.qty, px, prev, today))
+    return sorted(trades), sim_tr, frames
+
+
+def test_daily_replay_matches_sim_on_normal_path():
+    for max_hold in (7, 30):
+        replay, sim, _ = _replay_vs_sim(max_hold=max_hold)
+        assert len(sim) > 30          # the scenario really exercises the rules
+        assert replay == sim
+
+
+def test_missed_day_exit_fills_one_day_late_not_lost():
+    """rsi_bb-style one-bar exit: the exit bar is followed by a bar on which
+    the condition is false. Skipping the run that would have exited must give
+    an exit on the next run, not a position held until the next signal."""
+    replay, _, frames = _replay_vs_sim(max_hold=30)
+    idx = pd.bdate_range("2026-01-05", periods=90)
+    pos = {d: i for i, d in enumerate(idx.date)}
+    for sym, sig, opened, exited in replay:
+        k = pos[exited]                     # exit filled at bar k, fired on k-1
+        if k + 1 < 90 and not frames[sym]["xf"].iloc[k] and k - pos[sig] < 30:
+            break
+    else:
+        raise AssertionError("no one-bar exit in the scenario")
+    late, _, _ = _replay_vs_sim(skip_days={k}, max_hold=30)
+    got = next(t for t in late if t[0] == sym and t[1] == sig)
+    assert got[3] == idx[k + 1].date()
