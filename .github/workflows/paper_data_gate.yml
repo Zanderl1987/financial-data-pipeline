@@ -1,0 +1,22 @@
+name: paper-data-gate
+on:
+  workflow_dispatch:
+  push:
+    branches: [paper-trading]
+    paths:
+      - "paper/gate_signals.py"
+      - ".github/workflows/paper_data_gate.yml"
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r paper/requirements-job.txt
+      - run: python -m paper.gate_signals --out gate_signals.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate_signals
+          path: gate_signals.csv

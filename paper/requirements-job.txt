@@ -1,0 +1,13 @@
+# Daily paper-trading job + data gate on GitHub Actions (Python 3.11).
+# Pins match requirements.txt where they overlap. Import chain: paper.* ->
+# analytics.technical -> query (duckdb), evaluation/event_backtest (scipy, pyarrow).
+pandas==3.0.3
+numpy==1.26.4
+pyarrow==24.0.0
+duckdb==1.5.4
+scipy==1.10.1
+requests==2.31.0
+yfinance==1.5.1
+# 0.44.0 released 2026-08-11 (checked on PyPI); 0.45.0 is too new.
+alpaca-py==0.44.0
+pytest==9.1.1
