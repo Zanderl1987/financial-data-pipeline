@@ -303,6 +303,49 @@ Get-ScheduledTask | Where-Object { $_.TaskName -like "ClaudeAuto*" -or $_.TaskNa
   ForEach-Object { "{0}  {1}" -f $_.TaskName, $_.Actions[0].Execute }   # all should be pythonw.exe
 ```
 
+## Paper-trading forward test (GitHub Actions + Streamlit, runs in the cloud)
+
+Set up 2026-11-23. Six Alpaca **paper** accounts (no real money) trade three TV-catalog
+candidates (joey_stochrsi_atr, capitulation_stretch_reversion, rsi_bb_inside_strategy),
+each at $5,000 (Alpaca login A) and $10,000 (login B). Design and pass bar:
+`docs/superpowers/specs/2026-11-23-paper-trading-design.md` (section 5).
+Nothing here runs on the laptop.
+
+**What runs, where**
+- `.github/workflows/paper_trade.yml`: hourly on weekdays (`0 14-21 * * 1-5` UTC) from the
+  default branch. `python -m paper.live` acts once per trading day between 09:35 and 15:40 New York time
+  (close minus 20 min on half days). It downloads yfinance daily bars, decides entries and exits,
+  and sends market-on-close orders. Later runs that day see the orders already placed and do nothing.
+  Actions logs carry one status line per account. They never show keys or dollar values (the repo is public).
+- **Orders go out only when the repo variable `PAPER_LIVE` is `true`.** Any other value, or a manual run
+  with `dry_run` ticked, decides and logs but submits nothing.
+- Run log: the private repo named by `PAPER_LOG_REPO`, with one file per month, `runs/YYYY-MM.jsonl`
+  (one row per account per run), written through the GitHub contents API.
+- Dashboard: Streamlit Community Cloud app, main file `paper/dashboard_app.py`, viewable only
+  by Zander. It reads the Alpaca accounts and the run log live.
+- `.github/workflows/paper_data_gate.yml`: a one-off check that yfinance prices on a GitHub
+  runner give the same signals as the local store. Check its artifact with `python -m paper.check_data_gate`.
+
+**Secrets** (fdp: Settings > Secrets and variables > Actions; the same names go in the
+Streamlit app's secrets, plus `PAPER_LAUNCH_DATE`)
+- `APCA_KEY_<KEY>` / `APCA_SECRET_<KEY>` for KEY in `JOEY_5K CAP_5K RSIBB_5K` (login A) and
+  `JOEY_10K CAP_10K RSIBB_10K` (login B)
+- `PAPER_LOG_REPO` (`owner/paper-trading-log`), `PAPER_LOG_TOKEN` (fine-grained, Contents
+  read/write on that repo only)
+- Variable (not secret): `PAPER_LIVE`
+
+**Stopping it**
+- Pause all orders: set `PAPER_LIVE` to anything but `true`. Runs continue as dry runs.
+- Stop everything: `gh workflow disable paper-trade` (re-enable with `gh workflow enable paper-trade`).
+- An account down $1,000 stops itself and closes its positions ("hit your loss limit"). Once it trips,
+  it stays stopped.
+
+**Manual runs**
+```powershell
+gh workflow run paper-trade -f dry_run=true     # decide + log only
+gh run list --workflow paper-trade --limit 5    # recent runs
+```
+
 ## Managing
 
 ```powershell
