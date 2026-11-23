@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -11,6 +12,8 @@ from paper.accounts import LOSS_LIMIT_USD
 from paper.decide import accrued_borrow_fee
 
 HORIZON = 63
+NY = ZoneInfo("America/New_York")
+LIMIT_VERDICT = "HIT YOUR LOSS LIMIT"
 # A day counts as done only if a run decided and placed (or had nothing to
 # place): stale_data, error, missed_cutoff and dry_run days are MISSED.
 TRADED = ("ok", "stopped")
@@ -28,8 +31,10 @@ def band_row(band: dict, day_index: int) -> tuple[float, float, float]:
 
 
 def account_status(day_index: int, ret: float, band: dict, stopped: bool) -> str:
+    """Card status while running. `stopped` = the job's latch (a stop_all order
+    exists), not the live distance to the limit."""
     if stopped:
-        return "stopped"
+        return "stopped (hit your loss limit)"
     p5, _, p95 = band_row(band, day_index)
     if ret < p5:
         return "behind"
@@ -38,13 +43,107 @@ def account_status(day_index: int, ret: float, band: dict, stopped: bool) -> str
     return "on track"
 
 
-def verdict(final_ret: float, band_63: tuple[float, float], stopped: bool) -> str:
+def verdict(final_ret: float, band_63: tuple[float, float]) -> str:
+    """Band verdict on the frozen day-63 return (loss-limit hits are judged
+    first, by final_verdict)."""
     lo, hi = band_63
-    if stopped or final_ret < lo:
+    if final_ret < lo:
         return "FAIL"
     if final_ret > hi:
         return "PASS (flagged: above range)"
     return "PASS"
+
+
+def band_position(ret: float, lo: float, hi: float) -> str:
+    if ret < lo:
+        return "below range"
+    if ret > hi:
+        return "above range"
+    return "inside range"
+
+
+def frozen_fee(lots: list, day: date) -> float:
+    """Borrow fee accrued as of `day`: lots opened later are ignored, closes
+    after `day` are capped at `day`."""
+    frozen = [(n, a, None if b is None or b > day else b)
+              for _, n, a, b in lots if a <= day]
+    return accrued_borrow_fee(frozen, day)
+
+
+def equity_at(day: date, hist_t: list[date], hist_e: list[float]) -> float | None:
+    pts = [(t, e) for t, e in zip(hist_t, hist_e) if t <= day]
+    return max(pts, key=lambda x: x[0])[1] if pts else None
+
+
+def loss_limit_hit(days: list[date], hist_t: list[date], hist_e: list[float],
+                   lots: list, start_equity: float, stop_dates: list[date],
+                   limit: float = LOSS_LIMIT_USD) -> date | None:
+    """First date the account hit its loss limit within the 63-day test:
+    a completed close (days[:63]) with fee-adjusted equity <= start - limit, or
+    a stop_all order dated on/before day 63 (any date while day 63 is still
+    ahead). None if neither."""
+    window = days[:HORIZON]
+    inwin = set(window)
+    floor = start_equity - limit
+    breaches = sorted(t for t, e in zip(hist_t, hist_e)
+                      if t in inwin and e - frozen_fee(lots, t) <= floor)
+    stops = sorted(stop_dates)
+    if len(days) >= HORIZON:
+        stops = [s for s in stops if s <= days[HORIZON - 1]]
+    cands = breaches[:1] + stops[:1]
+    return min(cands) if cands else None
+
+
+def final_verdict(days: list[date], hist_t: list[date], hist_e: list[float],
+                  lots: list, start_equity: float, band: dict,
+                  stop_dates: list[date]) -> dict | None:
+    """Spec 5 outcome. (a) loss limit hit by day 63 -> HIT YOUR LOSS LIMIT,
+    with where the return stood against the band that day; (b) otherwise the
+    frozen day-63 fee-adjusted return against the day-63 band. Nothing after
+    day 63 changes it. None while pending. `days` = completed trading days
+    since launch."""
+    hit = loss_limit_hit(days, hist_t, hist_e, lots, start_equity, stop_dates)
+    if hit is not None:
+        h = min(sum(1 for d in days if d < hit) + 1, HORIZON)
+        eq = equity_at(hit, hist_t, hist_e)
+        ret = None if eq is None else             (eq - frozen_fee(lots, hit) - start_equity) / start_equity
+        p5, _, p95 = band_row(band, h)
+        return {"verdict": LIMIT_VERDICT, "date": hit, "day": h, "return": ret,
+                "band": (p5, p95),
+                "vs_band": None if ret is None else band_position(ret, p5, p95)}
+    veq = verdict_equity(days, hist_t, hist_e, lots)
+    if veq is None:
+        return None
+    ret = (veq - start_equity) / start_equity
+    p5, p95 = band["p5"][HORIZON - 1], band["p95"][HORIZON - 1]
+    return {"verdict": verdict(ret, (p5, p95)), "date": days[HORIZON - 1],
+            "day": HORIZON, "return": ret, "band": (p5, p95),
+            "vs_band": band_position(ret, p5, p95)}
+
+
+def describe_verdict(v: dict | None) -> str:
+    if not v:
+        return ""
+    lo, hi = v["band"]
+    ret = "return n/a" if v["return"] is None else f"{v['return']:+.2%}"
+    where = f", {v['vs_band']}" if v["vs_band"] else ""
+    return f"day {v['day']} ({v['date']:%Y-%m-%d}): {ret}{where} [{lo:+.2%}, {hi:+.2%}]"
+
+
+def history_dates(timestamps: list[int]) -> list[date]:
+    """Alpaca 1D portfolio-history timestamps -> New York trading dates.
+    Converted to America/New_York explicitly. A daily point is labeled at the
+    start of its day: midnight New York, or midnight UTC (19:00/20:00 New York
+    the evening before). No daily label for day D falls in New York's evening,
+    so an evening time is read as the next day's UTC-midnight label."""
+    out = []
+    for t in timestamps:
+        dt = datetime.fromtimestamp(int(t), timezone.utc).astimezone(NY)
+        d = dt.date()
+        if dt.hour >= 18:
+            d += timedelta(days=1)
+        out.append(d)
+    return out
 
 
 def missed_days(trading_days: list[date], log_rows: list[dict],
@@ -129,14 +228,10 @@ def verdict_equity(days: list[date], hist_t: list[date], hist_e: list[float],
     if len(days) < HORIZON:
         return None
     d63 = days[HORIZON - 1]
-    pts = [(t, e) for t, e in zip(hist_t, hist_e) if t <= d63]
-    if not pts:
+    eq = equity_at(d63, hist_t, hist_e)
+    if eq is None:
         return None
-    eq = max(pts, key=lambda x: x[0])[1]
-    # freeze the fee too: drop lots opened after d63, cap closes at d63
-    frozen = [(n, a, None if b is None or b > d63 else b)
-              for _, n, a, b in lots if a <= d63]
-    return eq - accrued_borrow_fee(frozen, d63)
+    return eq - frozen_fee(lots, d63)
 
 
 def net_position_pnl(positions: list[dict], lots: list, today: date) -> list[dict]:

@@ -15,7 +15,7 @@ def test_status_bands():
     assert dd.account_status(5, -0.06, BAND, False) == "behind"
     assert dd.account_status(5, 0.0, BAND, False) == "on track"
     assert dd.account_status(5, 0.06, BAND, False) == "above"
-    assert dd.account_status(5, 0.0, BAND, True) == "stopped"
+    assert dd.account_status(5, 0.0, BAND, True) == "stopped (hit your loss limit)"
 
 
 def test_status_after_63_days():
@@ -43,10 +43,9 @@ def test_missed_days():
 
 
 def test_verdict():
-    assert dd.verdict(-0.7, (-0.63, 0.63), False) == "FAIL"
-    assert dd.verdict(0.0, (-0.63, 0.63), False) == "PASS"
-    assert dd.verdict(0.7, (-0.63, 0.63), False) == "PASS (flagged: above range)"
-    assert dd.verdict(0.0, (-0.63, 0.63), True) == "FAIL"
+    assert dd.verdict(-0.7, (-0.63, 0.63)) == "FAIL"
+    assert dd.verdict(0.0, (-0.63, 0.63)) == "PASS"
+    assert dd.verdict(0.7, (-0.63, 0.63)) == "PASS (flagged: above range)"
 
 
 def test_trade_cost_sign():
@@ -140,3 +139,121 @@ def test_dashboard_import_chain_needs_no_analytics_stack():
     r = subprocess.run([sys.executable, "-c", code], cwd=root,
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
+
+
+# ---- I4: verdict order per spec 5 (loss limit is its own outcome) ----------
+
+HIT = "HIT YOUR LOSS LIMIT"
+
+
+def _fv(n_days, he, start=5000.0, lots=(), stops=(), band=BAND, hist_days=None):
+    days = _days(n_days)
+    ht = hist_days or _days(len(he))
+    return dd.final_verdict(days, ht, he, list(lots), start, band, list(stops))
+
+
+def test_pending_until_day_63_unless_limit_hit():
+    assert _fv(62, [5000.0] * 62) is None
+    r = _fv(63, [5000.0] * 63)
+    assert r["verdict"] == "PASS" and r["day"] == 63 and r["return"] == 0.0
+
+
+def test_close_breach_is_its_own_verdict_and_final():
+    he = [5000.0] * 80
+    he[9] = 4000.0                   # day 10 close at the limit, then recovers
+    for n in (10, 40, 63, 80):
+        r = _fv(n, he)
+        assert r["verdict"] == HIT
+        assert (r["day"], r["date"]) == (10, _days(10)[9])
+        assert r["return"] == pytest.approx(-0.20)
+        assert r["band"] == pytest.approx((-0.10, 0.10))
+        assert r["vs_band"] == "below range"
+
+
+def test_breach_inside_band_reports_where_it_stood():
+    he = [10000.0] * 63
+    he[19] = 9000.0                  # 10k account: -10% on day 20, band p5 = -20%
+    r = _fv(63, he, start=10000.0)
+    assert r["verdict"] == HIT and r["vs_band"] == "inside range"
+
+
+def test_frozen_day_63_close_at_limit_is_hit_not_pass():
+    he = [10000.0] * 62 + [9000.0]   # -10%: inside the 10k band, but the limit
+    assert _fv(63, he, start=10000.0)["verdict"] == HIT
+
+
+def test_breach_counts_borrow_fee():
+    # 36500 short notional accrues 2.7/day; raw 4010 on day 6 (5 days) -> 3996.5
+    he = [5000.0] * 63
+    he[5] = 4010.0
+    lots = [("S", 36500.0, _days(1)[0], None)]
+    r = _fv(63, he, lots=lots)
+    assert r["verdict"] == HIT and r["day"] == 6
+    assert r["return"] == pytest.approx((4010.0 - 13.5 - 5000.0) / 5000.0)
+
+
+def test_stop_order_on_or_before_day_63_is_a_hit():
+    # intraday stop on day 20; no close ever breached
+    he = [5000.0] * 70
+    r = _fv(70, he, stops=[_days(20)[19]])
+    assert r["verdict"] == HIT and r["day"] == 20 and r["return"] == 0.0
+    assert r["vs_band"] == "inside range"
+    # still running (day 30): already final
+    assert _fv(30, he, stops=[_days(20)[19]])["verdict"] == HIT
+
+
+def test_nothing_after_day_63_changes_the_verdict():
+    he = [5000.0] * 63 + [3000.0] * 17          # crash after day 63
+    r = _fv(80, he, stops=[_days(70)[69]])      # and a stop on day 70
+    assert r["verdict"] == "PASS" and r["day"] == 63
+
+
+def test_frozen_return_judged_against_day_63_band():
+    assert _fv(63, [5000.0] * 62 + [5000.0 * 1.70])["verdict"] ==         "PASS (flagged: above range)"
+    r = _fv(63, [5000.0] * 62 + [5000.0 * 0.40], start=5000.0,
+            band={**BAND, "p5": [-0.9] * 63})
+    assert r["verdict"] == HIT                  # -60% is past the $1,000 limit
+    wide = {**BAND, "p5": [-0.01] * 63, "p95": [0.01] * 63}
+    r = _fv(63, [10000.0] * 62 + [9500.0], start=10000.0, band=wide)
+    assert r["verdict"] == "FAIL" and r["vs_band"] == "below range"
+
+
+def test_incomplete_today_point_is_not_a_close():
+    # history has an intraday point for an incomplete day 31 below the limit
+    he = [5000.0] * 30 + [3900.0]
+    assert _fv(30, he) is None
+
+
+def test_describe_verdict():
+    he = [5000.0] * 80
+    he[9] = 4000.0
+    s = dd.describe_verdict(_fv(80, he))
+    assert s == "day 10 (2026-12-10): -20.00%, below range [-10.00%, +10.00%]"
+    assert dd.describe_verdict(None) == ""
+
+
+# ---- M-c: portfolio-history timestamps dated in New York -------------------
+
+def test_history_dates_utc_midnight_and_ny_midnight():
+    from datetime import timezone
+    def ts(*a):
+        return int(datetime(*a, tzinfo=timezone.utc).timestamp())
+    got = dd.history_dates([ts(2026, 12, 1, 0, 0),     # 00:00 UTC = 19:00 ET Nov 30
+                            ts(2026, 12, 2, 5, 0),     # 00:00 EST
+                            ts(2026, 12, 3, 14, 30),   # 09:30 EST
+                            ts(2026, 12, 3, 21, 0),    # 16:00 EST
+                            ts(2026, 6, 1, 4, 0),      # 00:00 EDT
+                            ts(2026, 6, 2, 0, 0)])     # 00:00 UTC = 20:00 EDT Jun 1
+    assert got == [date(2026, 12, 1), date(2026, 12, 2), date(2026, 12, 3),
+                   date(2026, 12, 3), date(2026, 6, 1), date(2026, 6, 2)]
+
+
+def test_day_63_from_utc_midnight_history():
+    from datetime import timezone
+    days = _days(80)
+    ts = [int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
+          for d in days]
+    he = [5000.0 + i for i in range(80)]
+    # dated naively in NY, each point slides back a day and day 64's close
+    # would be read as day 63's
+    assert dd.verdict_equity(days, dd.history_dates(ts), he, []) == 5062.0

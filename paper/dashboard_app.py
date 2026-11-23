@@ -96,7 +96,8 @@ def account_data(key: str, secret: str, acct_key: str, hist_start: date) -> dict
                           "qty": float(p.qty), "entry": float(p.avg_entry_price),
                           "last": last.get(s), "pnl": float(p.unrealized_pl)})
     return {"equity": equity, "lots": lots, "orders": orders, "positions": positions,
-            "hist_t": [datetime.fromtimestamp(t, NY).date() for t in hist.timestamp],
+            "stop_dates": b.stop_dates(),
+            "hist_t": dd.history_dates(hist.timestamp),
             "hist_e": [float(e) for e in hist.equity]}
 
 
@@ -136,8 +137,10 @@ for a in ACCOUNTS:
     ret = (adj - a.start_equity) / a.start_equity
     dist = dd.limit_distance(a.start_equity, adj)
     idx = dd.day_index(days, launch, today)
-    stopped = dist <= 0 or any(
-        r.get("account") == a.key and r.get("status") == "stopped" for r in log_rows)
+    stopped = bool(d["stop_dates"])      # the job's latch, not the live distance
+    if stopped:
+        st.error(f"Stopped: hit the ${LOSS_LIMIT_USD:,.0f} loss limit "
+                 f"(first stop order {d['stop_dates'][0]:%Y-%m-%d}). No new trades.")
     c1, c2 = st.columns(2)
     c1.metric("Equity (net of borrow fee)", f"${adj:,.2f}", f"{ret:+.2%}")
     c2.metric(f"Room before ${LOSS_LIMIT_USD:,.0f} limit", f"${dist:,.2f}")
@@ -184,10 +187,10 @@ for a in ACCOUNTS:
             with st.expander(f"Missed days ({len(missed)})"):
                 st.dataframe(pd.DataFrame(missed, columns=["date", "reason"]),
                              use_container_width=True, hide_index=True)
-        veq = dd.verdict_equity(days, d["hist_t"], d["hist_e"], d["lots"])
-        if veq is not None:
-            fret = (veq - a.start_equity) / a.start_equity
-            row["verdict"] = dd.verdict(fret, (band["p5"][62], band["p95"][62]), stopped)
+        v = dd.final_verdict(days, d["hist_t"], d["hist_e"], d["lots"],
+                             a.start_equity, band, d["stop_dates"])
+        row["verdict"] = v["verdict"] if v else "pending (day 63)"
+        row["verdict detail"] = dd.describe_verdict(v)
     else:
         row["status"] = "not launched"
     summary.append(row)
