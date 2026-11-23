@@ -97,9 +97,14 @@ always mean Alpaca equity minus the accrued 270 bps/yr borrow fee on short posit
 - **Pass, flagged:** return ABOVE that range. Counts as a pass, but the account is
   flagged "investigate before trusting": beating the backtest by that much is also a
   sign paper and backtest don't match.
-- **Fail:** return below that range, OR the account is down **$1,000** from its start
-  (20% of $5k, 10% of $10k). Hitting $1,000 stops that account's trading immediately
-  and marks it failed; the other five continue.
+- **Fail:** return below that range.
+- **Hit your loss limit** (separate verdict, Zander 2026-11-23): the account is down
+  **$1,000** from its start (20% of $5k, 10% of $10k). Trading in that account stops
+  immediately; the other five continue. It is reported as its own outcome, not as
+  "strategy failed", because the capital-limited backtest shows a strategy behaving
+  normally hits $1,000 within 63 days fairly often (2010-2026: joey 8% / 23%,
+  capitulation 3% / 13%, rsi_bb_inside 9% / 24% at $5k / $10k). The dashboard also
+  shows where the return stood against the band when the limit was hit.
 - **Costs are tracked, not judged** (Zander 2026-11-23). Realized per-trade cost
   (fill vs. the close the backtest would have used) is shown on the dashboard next to
   the backtest's assumption, but is not part of pass/fail: Alpaca paper fills are
