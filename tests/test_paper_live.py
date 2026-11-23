@@ -197,3 +197,26 @@ def test_workflow_live_gate():
     assert "vars.PAPER_LIVE" in t and "cancel-in-progress: false" in t
     assert 'cron: "0 14-21 * * 1-5"' in t
     assert t.count("secrets.APCA_") == 12
+
+
+@pytest.mark.parametrize("step", ["fetch", "prev"])
+def test_shared_step_failure_is_contained(capsys, monkeypatch, step):
+    log = Rec()
+
+    def boom(*a, **k):
+        raise RuntimeError("token=SECRET123")
+
+    if step == "prev":
+        monkeypatch.setattr(FakeBroker, "prev_trading_day", boom)
+        fetch = Fetch()
+    else:
+        fetch = boom
+    rc = live.run(today=TODAY, broker_factory=FakeBroker, log=log, fetch=fetch)
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert "SECRET123" not in cap.out + cap.err
+    lines = [l for l in cap.out.splitlines() if l]
+    assert lines == [f"{a.key}: error, 0 orders" for a in ACCOUNTS]
+    assert len(log.records) == 6
+    assert all(r["status"] == "error" and r["notes"][0].endswith(":RuntimeError")
+               for r in log.records)

@@ -47,15 +47,31 @@ def run(today: date | None = None, dry_run: bool = False, broker_factory=Broker,
     if not is_open_day or not _in_window(now_et, close_et):
         return 0
     today = today or now_et.date()
-    prev = first.prev_trading_day(today)
-
-    universe = [s.strip() for s in UNIVERSE.read_text().splitlines() if s.strip()]
-    start = today - timedelta(days=5 * 365)
-    frames = fetch(universe, start, today + timedelta(days=1), today=today)
-
     repo = os.environ.get("PAPER_LOG_REPO", "")
     token = os.environ.get("PAPER_LOG_TOKEN", "")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
+
+    step = "prev_trading_day"
+    try:
+        prev = first.prev_trading_day(today)
+        step = "universe"
+        universe = [s.strip() for s in UNIVERSE.read_text().splitlines() if s.strip()]
+        step = "fetch"
+        start = today - timedelta(days=5 * 365)
+        frames = fetch(universe, start, today + timedelta(days=1), today=today)
+    except Exception as e:
+        name = type(e).__name__
+        print(f"{step} error: {name}", file=sys.stderr)
+        for acct in ACCOUNTS:
+            print(f"{acct.key}: error, 0 orders")
+            try:
+                log({"date": f"{today:%Y-%m-%d}", "account": acct.key,
+                     "status": "error", "n_orders": 0,
+                     "notes": [f"{step}:{name}"], "run_id": run_id}, repo, token)
+            except Exception as le:
+                print(f"log write failed: {type(le).__name__}", file=sys.stderr)
+        return 1
+
     rc = 0
     for acct in ACCOUNTS:
         status, n_orders, notes, skip = "error", 0, [], False
