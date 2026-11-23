@@ -27,6 +27,7 @@ class FakeBroker:
     hour, minute = 10, 0
     open_day = True
     lots = []
+    stop_accounts = set()
 
     def __init__(self, key, secret):
         self.key, self.secret = key, secret
@@ -58,6 +59,9 @@ class FakeBroker:
     def recently_exited(self, prev):
         return set()
 
+    def stop_dates(self):
+        return [date(2026, 11, 20)] if self.key in FakeBroker.stop_accounts else []
+
     def shortable(self, s):
         return True
 
@@ -76,6 +80,7 @@ def env(monkeypatch):
     FakeBroker.reject_symbols = set()
     FakeBroker.hour, FakeBroker.minute, FakeBroker.open_day = 10, 0, True
     FakeBroker.lots = []
+    FakeBroker.stop_accounts = set()
     for a in ACCOUNTS:
         monkeypatch.setenv(a.env_key, SECRET)
         monkeypatch.setenv(a.env_secret, SECRET)
@@ -237,3 +242,19 @@ def test_fee_adjusted_equity_with_symbol_lots(monkeypatch):
     assert rc == 0 and len(seen) == 6
     # 36500 * 270bps/yr * 10/365 = 27.0
     assert seen[0] == pytest.approx(EQUITY - 27.0)
+
+
+def test_stop_latch_comes_from_order_history(monkeypatch):
+    latched = ACCOUNTS[2]
+    FakeBroker.stop_accounts = {latched.key}
+    for a in ACCOUNTS:
+        monkeypatch.setenv(a.env_key, a.key)
+    seen = {}
+
+    def spy(acct, *a, **k):
+        seen[acct.key] = k.get("stop_latched")
+        return Decision(orders=[], notes=[])
+    monkeypatch.setattr(live, "decide_orders", spy)
+    rc, _, _ = _run()
+    assert rc == 0
+    assert seen == {a.key: a.key == latched.key for a in ACCOUNTS}

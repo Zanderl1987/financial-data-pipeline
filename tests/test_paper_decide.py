@@ -304,3 +304,30 @@ def test_missed_day_exit_fills_one_day_late_not_lost():
     late, _, _ = _replay_vs_sim(skip_days={k}, max_hold=30)
     got = next(t for t in late if t[0] == sym and t[1] == sig)
     assert got[3] == idx[k + 1].date()
+
+
+# ---- I3: the loss-limit stop is latched -----------------------------------
+
+def test_latched_stop_closes_held_and_never_enters():
+    f = {"A": frame(), "B": frame(long=True), "C": frame(long=True)}
+    held = [Held("A", "long", 3, 50, sig_back(f["A"], 9))]
+    d = decide_orders(ACC5, make_spec(exit_all=False), f, held, TODAY, PREV,
+                      4800.0, lambda s: True, set(), 3, stop_latched=True)
+    assert d.stopped and d.status == "stopped"
+    assert [(o.symbol, o.action, o.side, o.qty) for o in d.orders] == [
+        ("A", "stop_all", "sell", 3)]
+    assert "stop:latched" in d.notes
+
+
+def test_latched_stop_with_nothing_held_places_nothing():
+    f = {"B": frame(long=True)}
+    d = decide_orders(ACC5, make_spec(), f, [], TODAY, PREV, 9999.0,
+                      lambda s: True, set(), 1, stop_latched=True)
+    assert d.stopped and d.status == "stopped" and d.orders == []
+
+
+def test_not_latched_trades_normally():
+    f = {"B": frame(long=True)}
+    d = decide_orders(ACC5, make_spec(), f, [], TODAY, PREV, 4800.0,
+                      lambda s: True, set(), 1, stop_latched=False)
+    assert not d.stopped and [o.action for o in d.orders] == ["entry_long"]

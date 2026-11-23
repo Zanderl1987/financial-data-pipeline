@@ -85,7 +85,8 @@ def run(today: date | None = None, dry_run: bool = False, broker_factory=Broker,
                 dec = decide_orders(
                     acct, STRATEGIES[acct.slug], frames, broker.held(), today,
                     prev, fee_adj, broker.shortable,
-                    broker.recently_exited(prev), len(universe))
+                    broker.recently_exited(prev), len(universe),
+                    stop_latched=bool(broker.stop_dates()))
                 notes = list(dec.notes)
                 if dry_run:
                     status, n_orders = "dry_run", len(dec.orders)

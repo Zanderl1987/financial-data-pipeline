@@ -93,16 +93,20 @@ def decide_orders(account: AccountSpec, spec: StrategySpec,
                   today: date, prev_trading_day: date, fee_adj_equity: float,
                   shortable: Callable[[str], bool],
                   recently_exited: set[str],
-                  n_universe: int) -> Decision:
+                  n_universe: int, stop_latched: bool = False) -> Decision:
+    """stop_latched: a stop_all order of this account already exists (filled
+    or not). The stop is permanent: only close what is still held."""
     dec = Decision()
 
     def cid(action, sym, sig):
         return client_order_id(account.key, today, action, sym, sig or today)
 
-    # 1. loss limit (first, even if data is stale)
-    if fee_adj_equity <= account.start_equity - LOSS_LIMIT_USD:
+    # 1. loss limit (first, even if data is stale); latched once hit
+    breached = fee_adj_equity <= account.start_equity - LOSS_LIMIT_USD
+    if stop_latched or breached:
         dec.stopped = True
         dec.status = "stopped"
+        dec.notes.append("stop:latched" if stop_latched else "stop:equity")
         for h in held:
             dec.orders.append(OrderIntent(
                 h.symbol, _closing_side(h.side), h.qty, "stop_all",
