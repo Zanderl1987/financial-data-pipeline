@@ -120,3 +120,16 @@ def test_verdict_equity_fee_frozen_after_d63():
     # A and C each accrue 52 days x 2.7 = 140.4
     assert dd.verdict_equity(days[:80], days, he, lots) == pytest.approx(5000.0 - 2 * 140.4)
     assert dd.verdict_equity(days[:63], days, he, lots) == pytest.approx(5000.0 - 2 * 140.4)
+
+
+def test_dashboard_import_chain_needs_no_analytics_stack():
+    """Streamlit Cloud installs only paper/requirements.txt: no duckdb, no scipy."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    code = ("import sys; sys.modules['duckdb']=None; sys.modules['scipy']=None; "
+            "import paper.dashboard_data, paper.decide, paper.broker")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, "-c", code], cwd=root,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]

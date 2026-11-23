@@ -8,14 +8,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import pandas as pd
 
 from paper.accounts import (BORROW_FEE_BPS_YR, LOSS_LIMIT_USD, PRICE_FLOOR,
                             SLOT_USD,
                             AccountSpec)
-from paper.strategies import StrategySpec
+if TYPE_CHECKING:  # annotation only: keeps the dashboard off duckdb/scipy
+    from paper.strategies import StrategySpec
 
 STALE_FRACTION = 0.05
 
