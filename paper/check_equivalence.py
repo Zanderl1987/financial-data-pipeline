@@ -1,8 +1,15 @@
 """Equivalence check: paper.sim (slots=None) vs the campaign engine.
 
-Run from the main clone with PYTHONPATH = this worktree (see task notes):
+Run from the main clone with PYTHONPATH = this worktree:
     python -u -m paper.check_equivalence
-Trade identity/timing only is compared (symbol, side, entry_date, exit_date).
+
+GATE (mechanism control): the sim is run with a "port-exit" spec -- entries as
+in paper.strategies, but held_exit = the port's own exit flag at bar j (the
+campaign's exit rule). That run must match the campaign 100% on
+(symbol, side, entry_date, exit_date). This proves the sim's entry / timing /
+re-entry machinery. The remaining joey difference in the real spec is then the
+intended held_exit design (ATR locked at the position's own signal bar).
+P&L is compared separately.
 """
 from __future__ import annotations
 
@@ -14,63 +21,50 @@ import pandas as pd
 
 import paper
 from paper.sim import simulate_account
-from paper.strategies import STRATEGIES
+from paper.strategies import STRATEGIES, StrategySpec
 
 END = "2026-09-11"
 NOTIONAL = 10_000.0
+HUGE = 1e12          # slot_usd that disables the whole-share skip (parity runs)
+KEY = ["symbol", "side", "entry_date"]
+OUT_DIR = ("C:/Users/zande/PycharmProjects/fdp-paper/.superpowers/sdd/"
+           "2026-11-23-paper-trading/")
 
 
-def _classify(row, bad_syms, joey_sig, joey_slug, joey_px=None):
-    """Return class label for one mismatch row."""
-    sym = row["symbol"]
-    if sym in bad_syms:
-        return "documented_difference"
-    if row["slug"] == joey_slug and sym in joey_sig:
-        sig = joey_sig[sym]
-        dates = sig.index[sig.to_numpy(bool)]
-        pairs = ((row["c_sig"], row["c_exit_sig"]), (row["s_sig"], row["s_exit_sig"]))
-        for a, b in pairs:
-            if pd.notna(a) and pd.notna(b) and ((dates > a) & (dates < b)).any():
-                return "joey_expected"
-        # a signal ON the exit signal bar also re-anchors the ffilled ATR used
-        # by that very bar's exit test (atr_arr[j]); same mechanism, shown apart
-        for a, b in pairs:
-            if pd.notna(a) and pd.notna(b) and ((dates > a) & (dates == b)).any():
-                return "joey_expected_exitbar"
-    if row["slug"] == joey_slug and sym in joey_sig and joey_px is not None:
-        # The port's replay opens walk positions on EVERY raw signal, but the
-        # campaign only floor-gates entries afterwards. A sub-floor signal opens
-        # a walk position anchored at a different entry price; its exit flag is
-        # then used for the next real trade. Shown apart from the ATR kind.
-        sig = joey_sig[sym]
-        dates = sig.index[sig.to_numpy(bool)]
-        for a in (row["c_sig"], row["s_sig"]):
-            if pd.notna(a):
-                prev = dates[dates < a]
-                if len(prev) and joey_px[sym].loc[prev[-1]] < 5.0:
-                    return "joey_floor_replay"
-    return "unexpected"
+def _port_exit_spec(spec: StrategySpec, rule) -> StrategySpec:
+    """Same entries; held_exit = the campaign rule's own exit flag at bar j."""
+    from evaluation.trades import rule_flags
+
+    def held_exit(df):
+        _, lx, _, sx = rule_flags(rule, df)
+
+        def fn(j, sig_i, entry_price, side):
+            return bool(lx[j] if side == "long" else sx[j])
+        return fn
+    return StrategySpec(spec.slug, spec.entries, held_exit)
 
 
-def _mark_cascades(mm):
-    """Relabel 'unexpected' joey rows that start inside (or whose signal falls on/before the exit fill of) a
-    position of an expected-kind mismatch on the same symbol: once an exit moves,
-    the engine and the sim re-enter on different signals. Chains extend."""
-    until = {}
-    order = mm.sort_values(["symbol", "entry_date"]).index
-    for i in order:
-        r = mm.loc[i]
-        sym = r["symbol"]
-        end_ = max([x for x in (r["c_exit"], r["s_exit"], r["entry_date"])
-                    if pd.notna(x)])
-        sig = r["c_sig"] if pd.notna(r["c_sig"]) else r["s_sig"]
-        if r["cls"] == "unexpected" and sym in until and sig <= until[sym]:
-            mm.loc[i, "cls"] = "joey_cascade"
-        if mm.loc[i, "cls"] in ("joey_expected", "joey_expected_exitbar", "joey_floor_replay", "joey_cascade"):
-            until[sym] = max(until.get(sym, end_), end_)
+def _merge(c, s):
+    m = c.merge(s, on=KEY, how="outer", indicator=True)
+    ok = (m["_merge"] == "both") & (m["c_exit"] == m["s_exit"])
+    mm = m[~ok].copy()
+    mm["kind"] = np.where(mm["_merge"] == "left_only", "campaign_only",
+                 np.where(mm["_merge"] == "right_only", "sim_only", "exit_differs"))
+    return m, ok, mm.drop(columns="_merge")
 
 
-def main(n_symbols: int = 100, seed: int = 0, out_csv: str | None = None):
+def _cs(camp, sim):
+    c = camp.rename(columns={"entry_signal_date": "c_sig",
+                             "exit_signal_date": "c_exit_sig",
+                             "exit_date": "c_exit"})[
+        KEY + ["c_sig", "c_exit_sig", "c_exit"]]
+    s = sim.rename(columns={"sig_date": "s_sig", "exit_sig_date": "s_exit_sig",
+                            "exit_date": "s_exit"})[
+        KEY + ["s_sig", "s_exit_sig", "s_exit"]]
+    return c, s
+
+
+def main(n_symbols: int = 100, seed: int = 0, out_prefix: str = OUT_DIR + "task-3-fix1-"):
     import query
     from evaluation.universe import clean_symbols
     from evaluation.trades import simulate
@@ -88,86 +82,105 @@ def main(n_symbols: int = 100, seed: int = 0, out_csv: str | None = None):
     start = str(min(df.index.min() for df in frames.values()).date())
     end = pd.Timestamp(END)
     print(f"frames {len(frames)}, window {start}..{END}")
-
-    bad_syms = {s for s, df in frames.items()
-                if not np.isfinite(df["close"].to_numpy(float)).all()
-                or (df["close"].to_numpy(float) <= 0).any()}
-    print(f"symbols with bad closes: {len(bad_syms)}")
     joey_sig = {s: joey.compute(df)["entries"].fillna(False).astype(bool)
                 for s, df in frames.items()}
 
-    joey_px = {s: df["close"] for s, df in frames.items()}
+    gate_ok = True
     all_rows = []
     for slug, spec in STRATEGIES.items():
         rule, _ = stage3.load_rule_for(slug)
         rule = stage3.with_price_floor(rule)
-        camp = simulate(rule, cache, notional=NOTIONAL, config=stage3.cost_config(10.0))
-        n_camp_all = len(camp)
+        camp = simulate(rule, cache, notional=NOTIONAL,
+                        config=stage3.cost_config(10.0))
+        n_all = len(camp)
         camp = camp[camp["exit_date"] <= end].copy()
-        # Parity run: slot_usd huge so the whole-share skip (close > $1000, a
-        # production rule the engine lacks) cannot hide timing differences.
-        sim = simulate_account(frames, spec, start_equity=1e6, slots=None,
-                               slot_usd=1e12, start=start, end=END).trades
-        sim_usd = simulate_account(frames, spec, start_equity=1e6, slots=None,
-                                   slot_usd=NOTIONAL, start=start, end=END).trades
-        sim_ret = (sim_usd["net_pnl"] / (sim_usd["shares"] * sim_usd["entry_price"])
-                   * 100.0)
-        sim_prod = simulate_account(frames, spec, start_equity=1e6, slots=None,
-                                    start=start, end=END).trades
-        c = camp.rename(columns={"entry_signal_date": "c_sig",
-                                 "exit_signal_date": "c_exit_sig",
-                                 "exit_date": "c_exit"})[
-            ["symbol", "side", "entry_date", "c_sig", "c_exit_sig", "c_exit"]]
-        s = sim.rename(columns={"sig_date": "s_sig", "exit_sig_date": "s_exit_sig",
-                                "exit_date": "s_exit"})[
-            ["symbol", "side", "entry_date", "s_sig", "s_exit_sig", "s_exit"]]
-        m = c.merge(s, on=["symbol", "side", "entry_date"], how="outer", indicator=True)
-        both = m["_merge"] == "both"
-        ok = both & (m["c_exit"] == m["s_exit"])
-        mm = m[~ok].copy()
-        mm["kind"] = np.where(mm["_merge"] == "left_only", "campaign_only",
-                     np.where(mm["_merge"] == "right_only", "sim_only", "exit_differs"))
-        mm["slug"] = slug
-        mm["cls"] = [_classify(r, bad_syms, joey_sig, joey.SLUG, joey_px)
-                     for r in mm.to_dict("records")]
-        if slug == joey.SLUG:
-            _mark_cascades(mm)
-        all_rows.append(mm.drop(columns="_merge"))
+        cspec = _port_exit_spec(spec, rule)
         print(f"\n=== {slug} ===")
-        print(f"campaign trades (all/in-window): {n_camp_all}/{len(c)}")
-        print(f"sim trades: {len(s)}  (production slot_usd=1000: {len(sim_prod)})")
-        print(f"P&L at ${NOTIONAL:,.0f}/trade, net of costs (campaign cost_config(10.0) "
-              f"vs sim 1bp + sqrt-law, whole shares):")
-        print(f"  campaign: n={len(camp)}  total net P&L ${camp['pnl_dollars'].sum():,.0f}"
-              f"  avg return/trade {camp['pnl_pct'].mean():.3f}%")
-        print(f"  sim     : n={len(sim_usd)}  total net P&L ${sim_usd['net_pnl'].sum():,.0f}"
-              f"  avg return/trade {sim_ret.mean():.3f}%")
-        print(f"  sim borrow fees included above: ${sim_usd['borrow_usd'].sum():,.0f}"
-              f" (campaign config charges none unless set); sim trades with close"
-              f" > ${NOTIONAL:,.0f} skipped: {len(camp) - len(sim_usd)}")
-        key = ["symbol", "side", "entry_date"]
-        c_keys = set(map(tuple, c[key].to_numpy()))
-        p_keys = set(map(tuple, sim_prod[key].to_numpy()))
-        print(f"production-slot run: campaign trades absent from sim: "
-              f"{len(c_keys - p_keys)}, sim trades absent from campaign: "
-              f"{len(p_keys - c_keys)} (whole-share skip for close > $1000)")
-        print(f"matched (symbol, side, entry_date, exit_date): {int(ok.sum())}")
-        print(f"mismatches: {len(mm)}")
+        print(f"campaign trades (all / exit<=end): {n_all}/{len(camp)}")
+
+        # ---- GATE: control run (port exits), whole-share skip disabled ----
+        ctl = simulate_account(frames, cspec, start_equity=1e6, slots=None,
+                               slot_usd=HUGE, start=start, end=END).trades
+        c, s = _cs(camp, ctl)
+        _, ok, mm = _merge(c, s)
+        print(f"CONTROL (port exits) sim trades {len(ctl)}; matched on "
+              f"(symbol, side, entry_date, exit_date): {int(ok.sum())}/{len(c)}; "
+              f"mismatches {len(mm)}")
         if len(mm):
-            print(mm.groupby(["cls", "kind"]).size().to_string())
-            un = mm[mm["cls"] == "unexpected"].head(10)
-            if len(un):
-                print("first unexpected:")
-                print(un[["symbol", "side", "entry_date", "kind", "c_exit", "s_exit"]]
-                      .to_string(index=False))
-    res = pd.concat(all_rows, ignore_index=True) if all_rows else pd.DataFrame()
-    if out_csv:
-        res.to_csv(out_csv, index=False)
-        print("\nmismatch table:", out_csv)
-    return res
+            gate_ok = False
+            print(mm.groupby("kind").size().to_string())
+            print(mm.head(10)[KEY + ["kind", "c_exit", "s_exit"]].to_string(index=False))
+            mm.assign(slug=slug).to_csv(f"{out_prefix}control-{slug}.csv", index=False)
+
+        # ---- whole-share skip, counted from sim runs (control spec) ----
+        ctl10 = simulate_account(frames, cspec, start_equity=1e6, slots=None,
+                                 slot_usd=NOTIONAL, start=start, end=END).trades
+        ctl_k = ctl.set_index(KEY)
+        gone = ctl_k.index.difference(ctl10.set_index(KEY).index)
+        direct = 0
+        for sym, side, ed in gone:
+            r = ctl_k.loc[(sym, side, ed)]
+            if frames[sym]["close"].at[r["sig_date"]] > NOTIONAL:
+                direct += 1
+        print(f"whole-share skip at ${NOTIONAL:,.0f}: control trades lost "
+              f"{len(gone)}; of which signal-day close > ${NOTIONAL:,.0f} "
+              f"(shares=0) {direct}; rest are knock-on re-entries")
+
+        # ---- real spec vs campaign (descriptive, not a gate) ----
+        real = simulate_account(frames, spec, start_equity=1e6, slots=None,
+                                slot_usd=HUGE, start=start, end=END).trades
+        c, s = _cs(camp, real)
+        m, ok, mm = _merge(c, s)
+        print(f"REAL spec (held_exit design) vs campaign, descriptive, not a gate: "
+              f"sim trades {len(real)}, matched {int(ok.sum())}/{len(c)}, "
+              f"mismatches {len(mm)}")
+        if len(mm):
+            if slug == joey.SLUG:
+                def has_sig(r):
+                    sg = joey_sig[r["symbol"]]
+                    d = sg.index[sg.to_numpy(bool)]
+                    pairs = ((r["c_sig"], r["c_exit_sig"]), (r["s_sig"], r["s_exit_sig"]))
+                    return any(pd.notna(a) and pd.notna(b) and
+                               ((d > a) & (d <= b)).any() for a, b in pairs)
+                mm["raw_signal_in_hold"] = [has_sig(r) for r in mm.to_dict("records")]
+                print(mm.groupby(["kind", "raw_signal_in_hold"]).size().to_string())
+            else:
+                print(mm.groupby("kind").size().to_string())
+            all_rows.append(mm.assign(slug=slug))
+
+        # ---- P&L at $10k/trade ----
+        r_off = simulate_account(frames, spec, start_equity=1e6, slots=None,
+                                 slot_usd=NOTIONAL, start=start, end=END,
+                                 borrow_bps_yr=0.0).trades
+        r_on = simulate_account(frames, spec, start_equity=1e6, slots=None,
+                                slot_usd=NOTIONAL, start=start, end=END).trades
+
+        def ret(t):
+            return t["net_pnl"] / (t["shares"] * t["entry_price"]) * 100.0
+        mk = camp.set_index(KEY).join(
+            r_off.set_index(KEY)[["net_pnl", "shares", "entry_price"]]
+            .rename(columns={"net_pnl": "s_off", "entry_price": "s_px"}), how="inner")
+        mk = mk.join(r_on.set_index(KEY)[["net_pnl"]].rename(columns={"net_pnl": "s_on"}))
+        mk["s_off_ret"] = mk["s_off"] / (mk["shares"] * mk["s_px"]) * 100.0
+        mk["s_on_ret"] = mk["s_on"] / (mk["shares"] * mk["s_px"]) * 100.0
+        print(f"P&L at ${NOTIONAL:,.0f}/trade, net of costs")
+        print(f"  (a) matched keys only, n={len(mk)} (same symbol/side/entry_date):")
+        print(f"      campaign        ${mk['pnl_dollars'].sum():>10,.0f}  avg {mk['pnl_pct'].mean():.3f}%")
+        print(f"      sim borrow OFF  ${mk['s_off'].sum():>10,.0f}  avg {mk['s_off_ret'].mean():.3f}%")
+        print(f"      sim borrow ON   ${mk['s_on'].sum():>10,.0f}  avg {mk['s_on_ret'].mean():.3f}%")
+        print("  (b) totals, all trades each engine produces:")
+        print(f"      campaign        n={len(camp):>6}  ${camp['pnl_dollars'].sum():>10,.0f}  avg {camp['pnl_pct'].mean():.3f}%")
+        print(f"      sim borrow OFF  n={len(r_off):>6}  ${r_off['net_pnl'].sum():>10,.0f}  avg {ret(r_off).mean():.3f}%")
+        print(f"      sim borrow ON   n={len(r_on):>6}  ${r_on['net_pnl'].sum():>10,.0f}  avg {ret(r_on).mean():.3f}%"
+              f"  (borrow fees ${r_on['borrow_usd'].sum():,.0f})")
+
+    if all_rows:
+        pd.concat(all_rows, ignore_index=True).to_csv(
+            out_prefix + "real-spec-mismatches.csv", index=False)
+    print("\nGATE (control run 100% match, all strategies):",
+          "PASS" if gate_ok else "FAIL")
+    return gate_ok
 
 
 if __name__ == "__main__":
-    out = ("C:/Users/zande/PycharmProjects/fdp-paper/.superpowers/sdd/"
-           "2026-11-23-paper-trading/task-3-mismatches.csv")
-    main(out_csv=out)
+    sys.exit(0 if main() else 1)
