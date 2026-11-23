@@ -36,9 +36,11 @@ def make_spec(exit_syms=None, exit_all=True):
     return StrategySpec("fake", _entries, held_exit)
 
 
-def run(frames, held=(), eq=5000.0, spec=None, short=lambda s: True):
+def run(frames, held=(), eq=5000.0, spec=None, short=lambda s: True,
+        recent=frozenset(), n_universe=None):
     return decide_orders(ACC5, spec or make_spec(), frames, list(held), TODAY, PREV,
-                         eq, short)
+                         eq, short, set(recent),
+                         len(frames) if n_universe is None else n_universe)
 
 
 def sig_back(df, back):
@@ -149,3 +151,55 @@ def test_accrued_borrow_fee():
     d0 = date(2026, 1, 1)
     got = accrued_borrow_fee([(1000.0, d0, None)], d0 + timedelta(days=73))
     assert got == pytest.approx(1000 * 0.027 * 73 / 365)
+
+
+def test_reentry_blocked_after_exit_fill():
+    f = {"X": frame(long=True), "Y": frame(long=True, volume=1)}
+    d = run(f, recent={"X"})
+    assert [o.symbol for o in d.orders] == ["Y"] and "reentry_blocked:X" in d.notes
+    assert [o.symbol for o in run(f).orders] == ["X", "Y"]
+
+
+def test_fetch_coverage_refuses():
+    f = {f"S{i}": frame(long=True) for i in range(8)}
+    d = run(f, n_universe=10)
+    assert d.status == "stale_data" and d.orders == []
+    assert "fetch_coverage:8/10" in d.notes
+    assert run(f, n_universe=8).status == "ok"
+    assert run({**f, "S8": frame()}, n_universe=10).status == "ok"  # 9/10 passes
+
+
+def test_held_symbol_not_a_candidate():
+    f = {"A": frame(long=True), "B": frame(long=True, volume=1)}
+    d = run(f, [Held("A", "long", 5, 50, sig_back(f["A"], 1))])
+    assert [o.symbol for o in d.orders] == ["B"]
+
+
+def test_unshortable_does_not_consume_slot():
+    f = {"A": frame(volume=5000, short=True), "B": frame(volume=10, short=True)}
+    held = [Held(f"X{i}", "long", 1, 50, None) for i in range(4)]  # free = 1
+    d = run(f, held, short=lambda s: s != "A")
+    assert [o.symbol for o in d.orders] == ["B"]
+
+
+def test_no_exit_for_stale_held_symbol():
+    f = {f"S{i}": frame() for i in range(19)}
+    f["OLD"] = frame(end=PREV - timedelta(days=7))
+    d = run(f, [Held("OLD", "long", 5, 50, sig_back(f["OLD"], 4))])
+    assert d.status == "ok" and "stale:OLD" in d.notes
+    assert not [o for o in d.orders if o.action == "exit"]
+
+
+def test_held_without_frame_noted():
+    f = {"A": frame()}
+    d = run(f, [Held("GONE", "long", 5, 50, PREV)])
+    assert "untracked:GONE" in d.notes and d.orders == []
+    # sig_date not in the frame
+    d = run(f, [Held("A", "long", 5, 50, date(2020, 1, 1))])
+    assert "untracked:A" in d.notes and d.orders == []
+
+
+def test_exactly_five_percent_stale_is_ok():
+    f = {f"S{i}": frame() for i in range(19)}
+    f["OLD"] = frame(end=PREV - timedelta(days=7))
+    assert run(f).status == "ok"

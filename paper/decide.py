@@ -90,7 +90,9 @@ def _last_date(df: pd.DataFrame) -> date | None:
 def decide_orders(account: AccountSpec, spec: StrategySpec,
                   frames: dict[str, pd.DataFrame], held: list[Held],
                   today: date, prev_trading_day: date, fee_adj_equity: float,
-                  shortable: Callable[[str], bool]) -> Decision:
+                  shortable: Callable[[str], bool],
+                  recently_exited: set[str],
+                  n_universe: int) -> Decision:
     dec = Decision()
 
     def cid(action, sym, sig):
@@ -106,7 +108,13 @@ def decide_orders(account: AccountSpec, spec: StrategySpec,
                 cid("stop_all", h.symbol, h.sig_date)))
         return dec
 
-    # 2. staleness
+    # 2a. fetch coverage: frames missing outright must not hide a bad fetch
+    if len(frames) < 0.9 * n_universe:
+        dec.status = "stale_data"
+        dec.notes.append(f"fetch_coverage:{len(frames)}/{n_universe}")
+        return dec
+
+    # 2b. staleness
     stale = {s for s, df in frames.items() if _last_date(df) != prev_trading_day}
     if frames and len(stale) / len(frames) > STALE_FRACTION:
         dec.status = "stale_data"
@@ -152,6 +160,9 @@ def decide_orders(account: AccountSpec, spec: StrategySpec,
         is_short = bool(ent["short"].iloc[-1])
         side = "long" if is_long else ("short" if is_short else None)
         if side is None:
+            continue
+        if sym in recently_exited:     # sim.py blocked_to: no re-entry off exit-fill bar
+            dec.notes.append(f"reentry_blocked:{sym}")
             continue
         px = float(df["close"].iloc[-1])
         if not math.isfinite(px) or px < PRICE_FLOOR:
