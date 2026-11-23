@@ -151,7 +151,7 @@ def test_fee_inputs_short_lots_open_close_and_partial(broker):
               status=OrderStatus.EXPIRED, filled_at=None),       # partial cover
         order("exit", "SSS", d(8), d(0), side="buy", qty=6),
         order("entry_long", "LLL", d(1), d(0), price=20.0),
-        order("exit", "LLL", d(3), d(0), side="sell"),            # long exit: no lot
+        order("exit", "LLL", d(3), d(0), side="sell"),            # long: no lot
         order("entry_short", "TTT", d(9), d(8), qty=20, filled_qty=5, price=40.0,
               status=OrderStatus.CANCELED, filled_at=None),       # partial short
     ]

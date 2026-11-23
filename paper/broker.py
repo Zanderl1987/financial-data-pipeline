@@ -126,9 +126,9 @@ class Broker:
 
     def fee_inputs(self) -> tuple[float, list[tuple[str, float, date, date | None]]]:
         """Lots are (symbol, notional, opened, closed_or_None). A short entry
-        opens a lot of its filled qty; a buy-to-cover (exit/stop_all) closes
-        open lots of that symbol first-in-first-out, splitting a lot when it
-        covers only part of it."""
+        opens a lot of its filled qty; an exit/stop_all fill closes open lots
+        of that symbol first-in-first-out, splitting a lot when it covers only
+        part of it."""
         equity = float(self._c.get_account().equity)
         lots: list[list] = []          # [symbol, qty, price, opened, closed]
         for o, p in self._filled(self._all_orders()):
@@ -136,7 +136,7 @@ class Broker:
             sym, fq = str(o.symbol), _qty(o.filled_qty)
             if p["action"] == "entry_short":
                 lots.append([sym, fq, float(o.filled_avg_price), fdate, None])
-            elif p["action"] in ("exit", "stop_all") and _val(o.side) == "buy":
+            elif p["action"] in ("exit", "stop_all"):
                 left = fq
                 for lot in list(lots):
                     if left <= 0:
