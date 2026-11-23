@@ -73,3 +73,5 @@ storage/tv_scripts/
 
 # Massive listings backfill checkpoints (local, regenerable)
 storage/state/
+
+.streamlit/secrets.toml

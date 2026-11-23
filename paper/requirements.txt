@@ -1,0 +1,6 @@
+streamlit
+alpaca-py
+pandas
+yfinance
+requests
+plotly
