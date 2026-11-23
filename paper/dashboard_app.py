@@ -15,7 +15,7 @@ import streamlit as st
 
 from paper import dashboard_data as dd
 from paper.accounts import ACCOUNTS, LOSS_LIMIT_USD
-from paper.broker import NY, Broker
+from paper.broker import NY, Broker, fill_date
 
 st.set_page_config(page_title="Paper trading", layout="centered")
 RANGES = dd.load_ranges()["accounts"]
@@ -86,7 +86,7 @@ def account_data(key: str, secret: str, acct_key: str, hist_start: date) -> dict
     for o, p in b.filled_orders(days=60):
         orders.append({"symbol": str(o.symbol),
                        "side": str(getattr(o.side, "value", o.side)).lower(),
-                       "date": o.filled_at.astimezone(NY).date(),
+                       "date": fill_date(o, p),
                        "price": float(o.filled_avg_price), "qty": float(o.filled_qty),
                        "action": p["action"]})
     positions = []

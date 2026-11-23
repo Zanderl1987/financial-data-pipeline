@@ -22,6 +22,23 @@ def _ny(dt: datetime) -> datetime:
     return dt.astimezone(NY)
 
 
+def _qty(x) -> float:
+    try:
+        return float(x or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fill_date(o, parsed: dict) -> date:
+    """NY date an order (partly) filled. Alpaca leaves filled_at empty on a
+    partially filled cls order that then expires or is canceled; a cls order
+    can only fill at the close of the day it was placed, which is the `today`
+    field of our client_order_id."""
+    if o.filled_at is not None:
+        return _ny(o.filled_at).date()
+    return parsed["today"]
+
+
 class Broker:
     def __init__(self, key: str, secret: str):
         from alpaca.trading.client import TradingClient
@@ -71,15 +88,18 @@ class Broker:
 
     @staticmethod
     def _filled(orders) -> list:
+        """(order, parsed id) for our orders with any filled quantity, whatever
+        the final status (filled, partially_filled, expired, canceled), oldest
+        fill first. Quantities and prices come from filled_qty/filled_avg_price."""
         out = []
         for o in orders:
-            if _val(o.status) != "filled" or o.filled_at is None:
+            if _qty(o.filled_qty) <= 0:
                 continue
             p = parse_client_order_id(str(o.client_order_id))
             if p is None:
                 continue
             out.append((o, p))
-        out.sort(key=lambda t: t[0].filled_at)
+        out.sort(key=lambda t: (fill_date(*t), t[0].filled_at or t[0].submitted_at))
         return out
 
     def orders_today(self, prefix: str) -> list[str]:
@@ -89,32 +109,54 @@ class Broker:
     def recently_exited(self, prev_trading_day: date) -> set[str]:
         out = set()
         for o, p in self._filled(self._all_orders(days=10)):
-            if p["action"] in ("exit", "stop_all") and \
-                    _ny(o.filled_at).date() == prev_trading_day:
+            if p["action"] in ("exit", "stop_all") and                     fill_date(o, p) == prev_trading_day:
                 out.add(str(o.symbol))
         return out
 
+    def stop_dates(self) -> list[date]:
+        """Dates of our stop_all orders, filled or not, oldest first. Any one
+        latches the account's loss-limit stop (spec 5)."""
+        out = []
+        for o in self._all_orders():
+            p = parse_client_order_id(str(o.client_order_id))
+            if p is not None and p["action"] == "stop_all":
+                out.append(p["today"])
+        return sorted(out)
+
     def fee_inputs(self) -> tuple[float, list[tuple[str, float, date, date | None]]]:
-        """Lots are (symbol, notional, opened, closed_or_None)."""
+        """Lots are (symbol, notional, opened, closed_or_None). A short entry
+        opens a lot of its filled qty; a buy-to-cover (exit/stop_all) closes
+        open lots of that symbol first-in-first-out, splitting a lot when it
+        covers only part of it."""
         equity = float(self._c.get_account().equity)
-        lots: list[list] = []
+        lots: list[list] = []          # [symbol, qty, price, opened, closed]
         for o, p in self._filled(self._all_orders()):
-            fdate = _ny(o.filled_at).date()
+            fdate = fill_date(o, p)
+            sym, fq = str(o.symbol), _qty(o.filled_qty)
             if p["action"] == "entry_short":
-                notional = float(o.filled_qty) * float(o.filled_avg_price)
-                lots.append([notional, fdate, None, str(o.symbol)])
-            elif p["action"] in ("exit", "stop_all"):
-                for lot in lots:
-                    if lot[3] == str(o.symbol) and lot[2] is None:
-                        lot[2] = fdate
+                lots.append([sym, fq, float(o.filled_avg_price), fdate, None])
+            elif p["action"] in ("exit", "stop_all") and _val(o.side) == "buy":
+                left = fq
+                for lot in list(lots):
+                    if left <= 0:
                         break
-        return equity, [(sym, n, a, b) for n, a, b, sym in lots]
+                    if lot[0] != sym or lot[4] is not None:
+                        continue
+                    take = min(left, lot[1])
+                    if take < lot[1]:      # split: closed part + still-open rest
+                        lots.insert(lots.index(lot),
+                                    [sym, take, lot[2], lot[3], fdate])
+                        lot[1] -= take
+                    else:
+                        lot[4] = fdate
+                    left -= take
+        return equity, [(s, q * px, a, b) for s, q, px, a, b in lots]
 
     def held(self) -> list[Held]:
         entries: dict[str, tuple] = {}
         for o, p in self._filled(self._all_orders()):
             if p["action"] in ("entry_long", "entry_short"):
-                entries[str(o.symbol)] = (p["sig_date"], _ny(o.filled_at).date())
+                entries[str(o.symbol)] = (p["sig_date"], fill_date(o, p))
         out = []
         for pos in self._c.get_all_positions():
             sym = str(pos.symbol)
@@ -128,7 +170,8 @@ class Broker:
         return [c.date for c in self._calendar(start, end)]
 
     def filled_orders(self, days: int = 60) -> list[tuple]:
-        """(order, parsed_client_order_id) for filled orders of ours."""
+        """(order, parsed_client_order_id) for our orders with any fill
+        (including partial fills); date them with fill_date()."""
         return self._filled(self._all_orders(days=days))
 
     def portfolio_history(self, start: date, end: date | None = None):
