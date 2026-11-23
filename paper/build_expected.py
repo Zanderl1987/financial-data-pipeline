@@ -23,7 +23,7 @@ from paper.expected import normal_band
 from paper.sim import simulate_account
 from paper.strategies import STRATEGIES
 
-START, END, HORIZON = "2010-01-01", "2026-09-11", 63
+START, END, HORIZON = "2010-01-01", "2026-08-07", 63
 _PKG_ROOT = Path(paper.__file__).resolve().parent.parent
 
 
