@@ -14,12 +14,16 @@ on:
         description: "Decide and log only; submit no orders"
         type: boolean
         default: true
+permissions:
+  contents: read
 concurrency:
   group: paper-trade
   cancel-in-progress: false
 jobs:
   trade:
     runs-on: ubuntu-latest
+    # a hung fetch must not hold the concurrency group past the next run
+    timeout-minutes: 30
     env:
       PAPER_LOG_REPO: ${{ secrets.PAPER_LOG_REPO }}
       PAPER_LOG_TOKEN: ${{ secrets.PAPER_LOG_TOKEN }}

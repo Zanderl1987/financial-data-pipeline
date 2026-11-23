@@ -306,3 +306,18 @@ def test_no_orders_needs_no_clock_recheck(monkeypatch):
                         lambda acct, *a, **k: Decision(orders=[], notes=[]))
     rc, log, _ = _run()
     assert rc == 0 and {r["status"] for r in log.records} == {"ok"}
+
+
+@pytest.mark.parametrize("wf", ["paper_trade.yml", "paper_data_gate.yml"])
+def test_workflows_read_only_token(wf):
+    import yaml
+    from pathlib import Path
+    y = yaml.safe_load(Path(f".github/workflows/{wf}").read_text())
+    assert y["permissions"] == {"contents": "read"}
+
+
+def test_trade_workflow_has_timeout():
+    import yaml
+    from pathlib import Path
+    y = yaml.safe_load(Path(".github/workflows/paper_trade.yml").read_text())
+    assert y["jobs"]["trade"]["timeout-minutes"] == 30

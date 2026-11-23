@@ -6,6 +6,8 @@ on:
     paths:
       - "paper/gate_signals.py"
       - ".github/workflows/paper_data_gate.yml"
+permissions:
+  contents: read
 jobs:
   gate:
     runs-on: ubuntu-latest
