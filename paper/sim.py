@@ -7,6 +7,15 @@ of j+1; a symbol cannot re-enter from a signal on or before its exit fill bar
 non-overlapping signal is taken, which is what the engine does.
 
 Each symbol uses its own bar index, so frames may have different dates.
+
+Deliberate differences from the engine (not bugs; expect them in a parity
+check on real frames):
+- A bad (non-finite or <= 0) exit-fill price keeps the position open and the
+  exit is searched again; the engine drops the trade and blocks the symbol.
+- An exit signal on a symbol's last bar (or whose fill bar is past `end`)
+  leaves the position open to `end`, holding its slot; the engine returns None.
+- A pending exit frees its slot only for entries filling on or after the
+  exit's fill date, so the account never holds more than `slots` positions.
 """
 from __future__ import annotations
 
@@ -102,7 +111,7 @@ def simulate_account(frames: dict[str, pd.DataFrame], spec: StrategySpec, *,
                 held[name] = p
 
         # (1) exits decided at the close of d, from entry_bar + 1 on
-        n_pending_exit = 0
+        exit_fills: list = []
         for name, p in held.items():
             s = syms[name]
             i = s.pos.get(d)
@@ -111,17 +120,19 @@ def simulate_account(frames: dict[str, pd.DataFrame], spec: StrategySpec, *,
                     s.exit_fn(i, p["sig_i"], p["entry_price"], p["side"]):
                 if i + 1 < s.n and s.dates[i + 1] <= t1:
                     p["pending_exit"] = i
+                    p["exit_fill"] = s.dates[i + 1]
                     fills.setdefault(s.dates[i + 1], []).append(("exit", name))
             if p["pending_exit"] is not None:
-                n_pending_exit += 1
+                exit_fills.append(p["exit_fill"])
 
-        # (2) free slots, counted after pending exits
+        # (2) free slots. A pending exit frees its slot only for entries that
+        # fill on or after the exit's own fill date (frames can have gaps).
         if slots is None:
-            free = math.inf
+            base = math.inf
         else:
-            free = slots - len(held) - len(pend_entry) + n_pending_exit
-        if free <= 0:
-            continue
+            base = slots - len(held) - len(pend_entry)
+            if base + len(exit_fills) <= 0:
+                continue
 
         # (3) candidates ranked by close*volume desc, symbol asc
         cands = []
@@ -142,9 +153,14 @@ def simulate_account(frames: dict[str, pd.DataFrame], spec: StrategySpec, *,
                 continue
             cands.append((-s.dv[i], name, i, side, shares))
         cands.sort(key=lambda x: (x[0], x[1]))
-        take = cands if free == math.inf else cands[: int(free)]
-        for _, name, i, side, shares in take:
+        taken = 0
+        for _, name, i, side, shares in cands:
             s = syms[name]
+            if slots is not None:
+                fd = s.dates[i + 1]
+                if base + sum(1 for f in exit_fills if f <= fd) - taken <= 0:
+                    continue
+            taken += 1
             pend_entry[name] = dict(symbol=name, side=side, sig_i=i, sig_date=d,
                                     shares=shares, pending_exit=None)
             fills.setdefault(s.dates[i + 1], []).append(("entry", name))

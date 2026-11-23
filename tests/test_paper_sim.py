@@ -144,3 +144,71 @@ def test_exit_never_evaluated_before_entry_bar_plus_one():
     assert t.entry_date == f.index[6]
     assert t.exit_sig_date == f.index[7]
     assert t.exit_date == f.index[8]
+
+
+def _held_counts(res, dates):
+    out = []
+    for d in dates:
+        n = int(((res.trades.entry_date <= d) & (res.trades.exit_date > d)).sum())
+        n += int((res.open_positions.entry_date <= d).sum())
+        out.append(n)
+    return out
+
+
+def test_gap_does_not_overallocate_slots():
+    full = pd.date_range("2020-01-01", periods=25, freq="B")
+    xi = full.drop([pd.Timestamp("2020-01-13"), pd.Timestamp("2020-01-14")])
+    x = _frame(n=len(xi))
+    x.index = xi
+    y = _frame(n=25)
+    # X signal 2020-01-06 (idx 3), exit signal 2020-01-10 (idx 7), fills 01-15.
+    # Y signals 2020-01-10 and would fill 01-13, before X's exit fills.
+    res = simulate_account(_frames(X=x, Y=y), _spec({"X": [3], "Y": [7]}, k=4),
+                           start_equity=5000, slots=1, **KW)
+    assert max(_held_counts(res, full)) <= 1
+    assert "X" in set(res.trades.symbol)
+
+
+def test_costs_use_entry_and_exit_bar_impact():
+    from evaluation.trades import _compute_adv_impact_arrays
+    import event_backtest as eb
+    rng = np.random.default_rng(7)
+    n = 160
+    close = 100.0 * np.exp(np.cumsum(0.015 * rng.standard_normal(n)))
+    vol = rng.uniform(2e5, 2e6, n)
+    f = _frame(n=n, close=close)
+    f["volume"] = vol
+    res = simulate_account(_frames(A=f), _spec({"A": [130]}, k=5),
+                           start_equity=5000, slots=5, **KW)
+    t = res.trades.iloc[0]
+    assert t.entry_date == f.index[131] and t.exit_date == f.index[136]
+    imp, _ = _compute_adv_impact_arrays(f["close"], f["volume"], 1000.0,
+                                        eb.ADV_SQRT_LAW_K, n)
+    assert imp[131] > 0 and imp[136] > 0 and imp[130] != imp[131]
+    c = 1e-4
+    want = (t.shares * t.entry_price * (c + imp[131])
+            + t.shares * t.exit_price * (c + imp[136]))
+    assert abs(t.cost_usd - want) < 1e-9
+
+
+def test_equity_after_close_includes_realized_net_pnl():
+    close = [100.0] * 6 + [110.0] * 34
+    f = _frame(close=close)
+    res = simulate_account(_frames(A=f), _spec({"A": [3]}, k=2),
+                           start_equity=5000, slots=5, **KW)
+    t = res.trades.iloc[0]
+    assert t.exit_price == 110.0 and t.net_pnl > 0
+    assert abs(res.equity.loc[t.exit_date] - (5000 + t.net_pnl)) < 1e-9
+    assert abs(res.equity.iloc[-1] - (5000 + t.net_pnl)) < 1e-9
+    assert res.equity.loc[f.index[4]] == 5000      # entry day, no move yet
+
+
+def test_equity_open_short_subtracts_accrued_borrow():
+    f = _frame(n=60, close=330.0, freq="D")
+    res = simulate_account(_frames(A=f), _spec(short_at={"A": [2]}, k=1000),
+                           start_equity=5000, slots=5, **KW)
+    ed = res.open_positions.iloc[0].entry_date
+    last = f.index[-1]
+    want = 5000 - 990 * 0.027 * (last - ed).days / 365
+    assert abs(res.equity.iloc[-1] - want) < 1e-9
+    assert res.equity.loc[ed] == 5000
