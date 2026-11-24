@@ -1,6 +1,8 @@
-streamlit
-alpaca-py
-pandas
-yfinance
-requests
-plotly
+# Streamlit Community Cloud dashboard (paper/dashboard_app.py). Pinned to the
+# versions verified 2026-11-24: fresh Python 3.11 venv, streamlit AppTest, no errors.
+streamlit==1.67.0
+alpaca-py==0.45.0
+pandas==3.1.1
+yfinance==1.8.0
+requests==2.34.2
+plotly==7.1.0
