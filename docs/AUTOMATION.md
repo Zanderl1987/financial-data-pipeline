@@ -346,6 +346,14 @@ gh workflow run paper-trade -f dry_run=true     # decide + log only
 gh run list --workflow paper-trade --limit 5    # recent runs
 ```
 
+**Pre-launch key check** (`paper_key_check.yml`, runs `paper/key_check.py`): with the real secrets, checks
+that each key is a working paper key, the balance is the planned $5,000 / $10,000, the account is empty,
+the six keys reach six different accounts, the daily history has no zero-equity points and its labels map
+to trading days, and the log token can write (to `checks/key_check.jsonl`, which the dashboard ignores).
+It also places one 1-share market-on-close SPY order on the first account and cancels it at once (never
+between 15:30 and 16:15 ET); if the log says `cancelled=NO`, cancel that order by hand in Alpaca. Rerun:
+`gh run rerun <run-id>` (or `gh workflow run paper-key-check` once merged). The log ends `KEY CHECK PASS`.
+
 ## Managing
 
 ```powershell

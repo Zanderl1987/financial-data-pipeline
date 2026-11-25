@@ -1,0 +1,44 @@
+# One-time pre-launch check of the six Alpaca paper keys (paper/key_check.py).
+# Places ONE 1-share market-on-close SPY order on the first account and cancels
+# it at once (never between 15:30 and 16:15 ET). Logs show yes/no results only.
+# workflow_dispatch works only once this file is on the default branch; before
+# the merge, rerun the push-triggered run: gh run rerun <run-id>
+name: paper-key-check
+on:
+  push:
+    branches: [paper-trading]
+    paths:
+      - paper/key_check.py
+      - .github/workflows/paper_key_check.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: paper-trade
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PAPER_LOG_REPO: ${{ secrets.PAPER_LOG_REPO }}
+      PAPER_LOG_TOKEN: ${{ secrets.PAPER_LOG_TOKEN }}
+      APCA_KEY_JOEY_5K: ${{ secrets.APCA_KEY_JOEY_5K }}
+      APCA_SECRET_JOEY_5K: ${{ secrets.APCA_SECRET_JOEY_5K }}
+      APCA_KEY_CAP_5K: ${{ secrets.APCA_KEY_CAP_5K }}
+      APCA_SECRET_CAP_5K: ${{ secrets.APCA_SECRET_CAP_5K }}
+      APCA_KEY_RSIBB_5K: ${{ secrets.APCA_KEY_RSIBB_5K }}
+      APCA_SECRET_RSIBB_5K: ${{ secrets.APCA_SECRET_RSIBB_5K }}
+      APCA_KEY_JOEY_10K: ${{ secrets.APCA_KEY_JOEY_10K }}
+      APCA_SECRET_JOEY_10K: ${{ secrets.APCA_SECRET_JOEY_10K }}
+      APCA_KEY_CAP_10K: ${{ secrets.APCA_KEY_CAP_10K }}
+      APCA_SECRET_CAP_10K: ${{ secrets.APCA_SECRET_CAP_10K }}
+      APCA_KEY_RSIBB_10K: ${{ secrets.APCA_KEY_RSIBB_10K }}
+      APCA_SECRET_RSIBB_10K: ${{ secrets.APCA_SECRET_RSIBB_10K }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r paper/requirements-job.txt
+      - run: python -m paper.key_check

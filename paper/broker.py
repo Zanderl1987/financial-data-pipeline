@@ -186,6 +186,21 @@ class Broker:
     def positions(self) -> list:
         return list(self._c.get_all_positions())
 
+    # ---- pre-launch key check (paper.key_check) ----------------------------
+    def account(self):
+        return self._c.get_account()
+
+    def open_orders(self) -> list:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        return list(self._c.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN)))
+
+    def get_order(self, order_id: str):
+        return self._c.get_order_by_id(order_id)
+
+    def cancel(self, order_id: str) -> None:
+        self._c.cancel_order_by_id(order_id)
+
     def shortable(self, symbol: str) -> bool:
         a = self._c.get_asset(symbol)
         return bool(a.shortable and a.easy_to_borrow)
